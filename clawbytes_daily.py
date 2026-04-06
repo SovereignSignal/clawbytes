@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 from urllib.parse import quote_plus, urlencode
 from urllib.request import Request, urlopen
 
-WORKSPACE = Path("/home/ubuntu-openclaw/.openclaw/workspace")
+WORKSPACE = Path(os.environ.get("WORKSPACE", "/home/ubuntu-openclaw/.openclaw/workspace"))
 MEMORY = WORKSPACE / "memory"
 CREDS = WORKSPACE / "CREDS.md"
 
@@ -606,6 +606,7 @@ def run_monitors() -> None:
         'bash scripts/claw-ecosystem-monitor.sh --mode check',
     ]
     for cmd in cmds:
+        # In container, WORKSPACE is /app; locally it's the workspace path
         p = run(f'cd {shlex.quote(str(WORKSPACE))} && {cmd}', timeout=300)
         if p.returncode != 0:
             print(p.stdout)
