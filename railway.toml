@@ -1,0 +1,33 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python clawbytes_daily.py --send"
+restartPolicyType = "ON_FAILURE"
+
+[[cron]]
+name = "daily-ship"
+schedule = "0 15 * * *"  # 8 AM PT = 15:00 UTC
+command = "python clawbytes_daily.py --category ship --send"
+
+[[cron]]
+name = "daily-watch"
+schedule = "0 19 * * *"  # 12 PM PT = 19:00 UTC
+command = "python clawbytes_daily.py --category watch --send"
+
+[[cron]]
+name = "daily-read"
+schedule = "0 22 * * *"  # 3 PM PT = 22:00 UTC
+command = "python clawbytes_daily.py --category read --send"
+
+[[cron]]
+name = "daily-community"
+schedule = "0 2 * * *"  # 7 PM PT (next day) = 02:00 UTC
+command = "python clawbytes_daily.py --category community --send"
+
+[env]
+TELEGRAM_BOT_TOKEN = { required = true }
+TELEGRAM_CHANNEL_ID = { required = true }
+BRAVE_API_KEY = { required = false }
+DATABASE_URL = { required = true }
