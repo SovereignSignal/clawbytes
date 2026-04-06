@@ -34,6 +34,9 @@ MODE="check"
 get_cred() {
     local section="$1"
     local key="$2"
+    if [[ ! -f "$CREDS_FILE" ]]; then
+        return
+    fi
     awk -v section="$section" -v key="$key" '
         $0 ~ /^## / { in_section = ($0 == "## " section) }
         in_section {
