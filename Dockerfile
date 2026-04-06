@@ -6,6 +6,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     curl \
+    jq \
+    bash \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python deps
@@ -15,8 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy app
 COPY . .
 
-# Create state directory
-RUN mkdir -p /app/state
+# Create state and memory directories
+RUN mkdir -p /app/state /app/memory
 
 # Default: run daily
 CMD ["python", "clawbytes_daily.py", "--send"]
