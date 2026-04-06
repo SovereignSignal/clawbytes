@@ -8,35 +8,49 @@ Claw ecosystem monitor for Telegram. Aggregates updates from OpenClaw, GitHub re
 - 🚨 **Watch** — Security advisories, critical updates
 - 📚 **Read** — Blog posts, articles, documentation updates  
 - 💬 **Community** — Hacker News mentions, GitHub discussions
+- 🗄️ **PostgreSQL** — Persistent state storage
 
-## Sources
+## Deploy to Railway
 
-- GitHub Releases (OpenClaw ecosystem repos)
-- Hacker News API
-- RSS feeds (Simon's blog, official docs)
-- GitHub API (advisories, trending)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/YOUR_TEMPLATE_ID)
 
-## Setup
+### Manual Setup
+
+1. **Create Railway project**
+2. **Add PostgreSQL** (Railway provides `DATABASE_URL`)
+3. **Set environment variables:**
+   - `TELEGRAM_BOT_TOKEN` — From @BotFather  
+   - `TELEGRAM_CHANNEL_ID` — Your channel ID (e.g., `-1003850321704`)
+   - `BRAVE_API_KEY` — Optional, for discovery features
+4. **Deploy**
+
+## Local Development
 
 ```bash
 # Clone
 git clone https://github.com/ClawBack1/clawbytes.git
 cd clawbytes
 
-# Install deps
-pip install -r requirements.txt
+# Setup
+python3 -m venv venv
+venv/bin/pip install -r requirements.txt
+
+# Create .env
+cp .env.example .env
+# Edit .env with your tokens
 
 # Run
-python3 clawbytes_daily.py
+python3 clawbytes_daily.py --send
 ```
 
-## Environment
+## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | Bot token |
-| `TELEGRAM_CHANNEL_ID` | Channel ID |
-| `GITHUB_TOKEN` | For higher rate limits |
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather | ✅ |
+| `TELEGRAM_CHANNEL_ID` | Telegram channel ID | ✅ |
+| `DATABASE_URL` | PostgreSQL connection string | ✅ (Railway auto-sets) |
+| `BRAVE_API_KEY` | For discovery features | ❌ |
 
 ## Scripts
 
@@ -47,12 +61,14 @@ python3 clawbytes_daily.py
 | `claw-digest-generator.py` | Digest formatter |
 | `claw-ecosystem-monitor.sh` | Source fetcher |
 
-## Cron
+## Cron Schedule
 
-Daily at 8 AM PT:
-```bash
-0 15 * * * cd /opt/clawbytes && python3 clawbytes_daily.py
-```
+| Category | Time PT | Time UTC |
+|----------|---------|----------|
+| Ship | 8:00 AM | 15:00 |
+| Watch | 12:00 PM | 19:00 |
+| Read | 3:00 PM | 22:00 |
+| Community | 7:00 PM | 02:00 (next day) |
 
 ## License
 
