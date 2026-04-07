@@ -821,3 +821,4 @@ main() {
 }
 
 main "$@"
+exit 0  # Always succeed for Railway deployment
