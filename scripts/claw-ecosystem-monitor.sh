@@ -133,7 +133,11 @@ EOF
 # Load JSON file
 load_json() {
     local file="$1"
-    cat "$file" 2>/dev/null || echo "{}"
+    if [[ -f "$file" ]]; then
+        cat "$file" 2>/dev/null || echo "{}"
+    else
+        echo "{}"
+    fi
 }
 
 # Save JSON to file
@@ -646,12 +650,17 @@ run_check() {
     echo "📅 $(date)" >&2
     echo "" >&2
     
+    # Initialize files first, then load state
+    echo "DEBUG: About to init_files" >&2
     init_files
+    echo "DEBUG: init_files complete" >&2
     
     local state
     state=$(load_json "$STATE_FILE")
+    echo "DEBUG: state loaded" >&2
 
     load_tokens
+    echo "DEBUG: tokens loaded" >&2
     
     echo "🔑 Tokens loaded: GitHub=${GITHUB_TOKEN:+yes}, Brave=${BRAVE_API_KEY:+yes}" >&2
     
