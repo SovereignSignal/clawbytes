@@ -7,10 +7,11 @@
 #   ./claw-ecosystem-monitor.sh --mode discover  # Hunt for new projects
 #   ./claw-ecosystem-monitor.sh --mode both      # Check + discover
 
-set -uo pipefail
-# Note: removed -e to avoid premature exit on minor errors
+set +e  # Don't exit on error
+set -o pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${BASH_SOURCE[0]:-$(pwd)}"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_DIR")" && pwd)"
 WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
 STATE_FILE="${WORKSPACE_DIR}/memory/claw-ecosystem-state.json"
 SOURCES_FILE="${WORKSPACE_DIR}/memory/claw-ecosystem-sources.json"
