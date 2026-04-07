@@ -7,7 +7,8 @@
 #   ./claw-ecosystem-monitor.sh --mode discover  # Hunt for new projects
 #   ./claw-ecosystem-monitor.sh --mode both      # Check + discover
 
-set -euo pipefail
+set -uo pipefail
+# Note: removed -e to avoid premature exit on minor errors
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
@@ -144,7 +145,11 @@ save_json() {
 
 # Get all repos from sources (curated + dynamic)
 get_all_repos() {
-    jq -r '(.curated + .dynamic) | .[].repo // empty' "$SOURCES_FILE" 2>/dev/null | sort -u
+    if [[ ! -f "$SOURCES_FILE" ]]; then
+        echo ""
+        return
+    fi
+    jq -r '(.curated + .dynamic) | .[].repo // empty' "$SOURCES_FILE" 2>/dev/null | sort -u || echo ""
 }
 
 # Check if repo already known
@@ -641,10 +646,14 @@ run_check() {
     echo "📅 $(date)" >&2
     echo "" >&2
     
+    init_files
+    
     local state
     state=$(load_json "$STATE_FILE")
 
     load_tokens
+    
+    echo "🔑 Tokens loaded: GitHub=${GITHUB_TOKEN:+yes}, Brave=${BRAVE_API_KEY:+yes}" >&2
     
     local repo_count
     repo_count=$(get_all_repos | wc -l || echo 0)
@@ -779,18 +788,18 @@ run_discover() {
 
 # Main
 main() {
-    init_files
-    
     case "$MODE" in
         check)
             run_check
             ;;
         discover)
+            init_files
             run_discover
             ;;
         both)
             run_check
             echo "" >&2
+            init_files
             run_discover
             ;;
         *)
