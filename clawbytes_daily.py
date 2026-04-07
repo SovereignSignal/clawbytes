@@ -92,6 +92,22 @@ def load_json(path: Path):
 
 
 def cred(section: str, key: str) -> str:
+    # First check environment variables
+    env_key = f"{section.upper().replace(' ', '_')}_{key.upper().replace(' ', '_')}"
+    env_val = os.environ.get(env_key)
+    if env_val:
+        return env_val
+    # Also check common env var names
+    common_keys = {
+        ('ClawBytes Channel', 'Bot Token'): 'TELEGRAM_BOT_TOKEN',
+        ('Telegram Bots', 'Bot Token'): 'TELEGRAM_BOT_TOKEN',
+        ('GitHub API', 'Token'): 'GITHUB_TOKEN',
+    }
+    if (section, key) in common_keys:
+        env_val = os.environ.get(common_keys[(section, key)])
+        if env_val:
+            return env_val
+    # Then check CREDS.md
     text = read_text(CREDS)
     pattern = rf"## {re.escape(section)}\n(?:.*\n)*?-\s*(?:\*\*)?{re.escape(key)}(?:\*\*)?:\s*([^\n]+)"
     m = re.search(pattern, text)
