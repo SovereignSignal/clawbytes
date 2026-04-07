@@ -491,10 +491,10 @@ fetch_github_releases() {
 check_clawhub_skills() {
     local state="$1"
     local seen_urls
-    seen_urls=$(echo "$state" | jq '.lastSeenSkills // []')
+    seen_urls=$(echo "$state" | jq '.lastSeenSkills // []' 2>/dev/null || echo '[]')
 
     local response
-    response=$(brave_search_json 'site:clawhub.ai (skill OR skills OR marketplace) openclaw' 10)
+    response=$(brave_search_json 'site:clawhub.ai (skill OR skills OR marketplace) openclaw' 10 2>/dev/null || echo '{"web":{"results":[]}}')
 
     echo "$response" | jq --argjson seen "$seen_urls" '
         [.web.results[]?
@@ -504,7 +504,7 @@ check_clawhub_skills() {
         ]
         | unique_by(.id)
         | map(. + {source: "clawhub-search"})
-    '
+    ' 2>/dev/null || echo '[]'
 }
 
 # Check all known repos for new releases
@@ -514,6 +514,12 @@ check_github_releases() {
     
     local repos
     repos=$(get_all_repos)
+    
+    # If no repos, return empty
+    if [[ -z "$repos" ]]; then
+        echo "[]"
+        return
+    fi
     
     while IFS= read -r repo; do
         [[ -z "$repo" ]] && continue
@@ -527,7 +533,7 @@ check_github_releases() {
             
             if [[ -n "$latest_tag" ]]; then
                 local seen_tag
-                seen_tag=$(echo "$state" | jq -r --arg repo "$repo" '.lastSeenReleases[$repo] // empty')
+                seen_tag=$(echo "$state" | jq -r --arg repo "$repo" '.lastSeenReleases[$repo] // empty' 2>/dev/null || echo "")
                 
                 if [[ "$latest_tag" != "$seen_tag" ]]; then
                     local release_info
@@ -566,7 +572,7 @@ check_hackernews() {
         hits=$(echo "$response" | jq '.hits // []')
         
         local seen_ids
-        seen_ids=$(echo "$state" | jq -r '.lastSeenHNStories | @json')
+        seen_ids=$(echo "$state" | jq '.lastSeenHNStories // []' 2>/dev/null || echo '[]')
         
         local stories
         stories=$(echo "$hits" | jq --argjson seen "$seen_ids" '
@@ -583,7 +589,7 @@ check_hackernews() {
             }]
         ')
         
-        new_stories=$(echo "$new_stories $stories" | jq -s 'add | unique_by(.id)')
+        new_stories=$(echo "$new_stories $stories" | jq -s 'add | unique_by(.id)' 2>/dev/null || echo '[]')
         
         sleep $HN_DELAY
     done
@@ -641,7 +647,7 @@ run_check() {
     load_tokens
     
     local repo_count
-    repo_count=$(get_all_repos | wc -l)
+    repo_count=$(get_all_repos | wc -l || echo 0)
     echo "📊 Monitoring $repo_count repositories" >&2
     echo "" >&2
     
