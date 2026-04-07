@@ -1,5 +1,8 @@
 FROM python:3.11-slim
 
+# Cache bust - force rebuild on 2026-04-07
+ARG CACHE_BUST=20260407
+
 WORKDIR /app
 
 # Install system deps
