@@ -6,28 +6,39 @@ dockerfilePath = "Dockerfile"
 startCommand = "python clawbytes_daily.py --send"
 restartPolicyType = "ON_FAILURE"
 
+# Collect from source monitors into backlog every 30 minutes
 [[cron]]
-name = "daily-ship"
-schedule = "0 15 * * *"  # 8 AM PT = 15:00 UTC
-command = "python clawbytes_daily.py --category ship --send"
+name = "collect"
+schedule = "*/30 * * * *"
+command = "python clawbytes_threads.py collect --run-monitors"
 
+# Ship lane: 9 AM PT (16:00 UTC)
 [[cron]]
-name = "daily-watch"
-schedule = "0 19 * * *"  # 12 PM PT = 19:00 UTC
-command = "python clawbytes_daily.py --category watch --send"
+name = "ship"
+schedule = "0 16 * * *"
+command = "python clawbytes_threads.py publish --category ship --if-ready --send"
 
+# Watch lane: 12 PM PT (19:00 UTC)
 [[cron]]
-name = "daily-read"
-schedule = "0 22 * * *"  # 3 PM PT = 22:00 UTC
-command = "python clawbytes_daily.py --category read --send"
+name = "watch"
+schedule = "0 19 * * *"
+command = "python clawbytes_threads.py publish --category watch --if-ready --send"
 
+# Read lane: 3 PM PT (22:00 UTC)
 [[cron]]
-name = "daily-community"
-schedule = "0 2 * * *"  # 7 PM PT (next day) = 02:00 UTC
-command = "python clawbytes_daily.py --category community --send"
+name = "read"
+schedule = "0 22 * * *"
+command = "python clawbytes_threads.py publish --category read --if-ready --send"
+
+# Community lane: 7 PM PT (02:00 UTC next day)
+[[cron]]
+name = "community"
+schedule = "0 2 * * *"
+command = "python clawbytes_threads.py publish --category community --if-ready --send"
 
 [env]
 TELEGRAM_BOT_TOKEN = { required = true }
 TELEGRAM_CHANNEL_ID = { required = true }
 BRAVE_API_KEY = { required = false }
 DATABASE_URL = { required = true }
+WORKSPACE = "/app"

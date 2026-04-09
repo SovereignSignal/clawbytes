@@ -18,7 +18,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import shlex
+import subprocess
+import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -26,7 +31,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-WORKSPACE = Path("/home/ubuntu-openclaw/.openclaw/workspace")
+WORKSPACE = Path(os.environ.get("WORKSPACE", "/home/ubuntu-openclaw/.openclaw/workspace"))
 MEMORY = WORKSPACE / "memory"
 CREDS = WORKSPACE / "CREDS.md"
 
@@ -491,6 +496,28 @@ def is_fresh(candidate: dict) -> bool:
     return bool(expires and expires > now_utc())
 
 
+def run_monitors() -> None:
+    """Run source monitors to refresh state files before collecting."""
+    cmds = [
+        'python3 scripts/claw-rss-monitor.py',
+        'python3 scripts/claw-reddit-monitor.py',
+        'python3 scripts/claw-moltbook-monitor.py',
+        'python3 scripts/claw-security-monitor.py --quiet',
+        'bash scripts/claw-ecosystem-monitor.sh --mode check',
+    ]
+    for cmd in cmds:
+        p = subprocess.run(
+            f'cd {shlex.quote(str(WORKSPACE))} && {cmd}',
+            shell=True,
+            text=True,
+            capture_output=True,
+            timeout=300
+        )
+        if p.returncode != 0:
+            print(f"Monitor returned non-zero: {cmd}", file=sys.stderr)
+            print(p.stderr, file=sys.stderr)
+
+
 def collect_candidates() -> Dict[str, List[dict]]:
     rss = load_json(MEMORY / "claw-rss-state.json", {}).get("foundItems", [])
     reddit = load_json(MEMORY / "claw-reddit-state.json", {}).get("foundItems", [])
@@ -888,7 +915,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="ClawBytes category thread system")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("collect")
+    sub.add_parser("collect").add_argument("--run-monitors", action="store_true", help="Run source monitors before collecting")
     sub.add_parser("status")
     p_auto = sub.add_parser("autopublish")
     p_auto.add_argument("--send", action="store_true")
@@ -908,6 +935,8 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.cmd == "collect":
+        if getattr(args, "run_monitors", False):
+            run_monitors()
         result = collect_into_backlog()
         print(json.dumps(result, indent=2))
         return 0
