@@ -291,7 +291,7 @@ def format_weekly_digest(items: dict, news: list) -> str:
                 lines.append(f"🔗 {url}")
             lines.append("")
     
-    # HN highlights
+    # HN notable items
     if items.get("newHNStories"):
         lines.append("🔶 **Top HN Discussions**")
         sorted_stories = sorted(
