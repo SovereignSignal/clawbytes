@@ -395,47 +395,7 @@ def main():
         print(f"Last check: {state.get('lastCheck', 'never')}")
         print(f"All clear: {state.get('allClear', True)}")
         print(f"Last alert: {state.get('lastAlertAt', 'never')}")
-        print(f"Total alerts tracked: {len(state.get('alerts', [    "icemint0828/nanobot",
-    "huggingface/smolagents",
-    "frdel/agent-zero",
-    "All-Hands-AI/OpenHands",
-    "kortix-ai/suna",
-    "google/adk-python",
-    "microsoft/autogen",
-    "mastra-inc/mastra",
-    "meta-llama/llama-stack",
-    "dust-tt/dust",
-    "agno-agi/agno",
-    "CopilotKit/CopilotKit",
-    "letta-ai/letta",
-    "block/goose",
-    "deepset-ai/haystack",
-    "VRSEN/agency-swarm",
-    "cline/cline",
-    "pydantic/pydantic-ai",
-    "vercel/ai",
-    "clawrun-sh/clawrun",
-    "agent0ai/agent-zero",
-    "OpenHands/OpenHands",
-    "openai/openai-agents-python",
-    "NVIDIA/NemoClaw",
-    "microsoft/agent-framework",
-    "salesforce/agentscript",
-    "mastra-ai/mastra",
-    "anthropics/claude-agent-sdk-python",
-    "ComposioHQ/agent-orchestrator",
-    "obra/superpowers",
-    "paperclipai/paperclip",
-    "microsoft/agent-governance-toolkit",
-    "aaif-goose/goose",
-    "FoundationAgents/MetaGPT",
-    "firecrawl/firecrawl",
-    "features/copilot",
-    "google-gemini/gemini-cli",
-    "bytedance/trae-agent",
-    "mistralai/mistral-vibe",
-    "sourcegraph/amp-examples-and-guides",
-]))}")
+        print(f"Total alerts tracked: {len(state.get('alerts', []))}")
         return
     
     alerts, status = check_security(verbose=not args.quiet)
