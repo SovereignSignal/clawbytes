@@ -18,8 +18,8 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
-# Workspace path - use env var or default
-WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
+# Workspace path
+WORKSPACE = Path(__file__).parent.parent
 MEMORY_DIR = WORKSPACE / "memory"
 STATE_FILE = MEMORY_DIR / "claw-moltbook-state.json"
 

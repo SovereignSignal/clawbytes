@@ -16,16 +16,40 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
-# Workspace path - use env var or default
-WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
+# Workspace path
+WORKSPACE = Path(__file__).parent.parent
 MEMORY_DIR = WORKSPACE / "memory"
 STATE_FILE = MEMORY_DIR / "claw-rss-state.json"
 
 # RSS feeds to monitor
 RSS_FEEDS = [
+    # AI/Agent blogs — feed Read lane
     {"name": "Simon Willison", "url": "https://simonwillison.net/atom/everything/", "tags": ["security", "technical"], "high_signal": True},
     {"name": "AI Maker Substack", "url": "https://aimaker.substack.com/feed", "tags": ["community"]},
     {"name": "AI Supremacy", "url": "https://ai-supremacy.com/feed", "tags": ["analysis"]},
+    {"name": "OpenAI Blog", "url": "https://openai.com/blog/rss.xml", "tags": ["official", "models"], "high_signal": True},
+    {"name": "Anthropic News", "url": "https://the-decoder.com/tag/anthropic/feed/", "tags": ["official", "models"], "high_signal": True},
+    {"name": "Google DeepMind Blog", "url": "https://blog.google/technology/ai/rss/", "tags": ["official", "models"], "high_signal": True},
+    {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml", "tags": ["open-source", "models"], "high_signal": True},
+    {"name": "Mistral News", "url": "https://the-decoder.com/tag/mistral/feed/", "tags": ["official", "models"], "high_signal": True},
+    {"name": "LangChain Blog", "url": "https://blog.langchain.dev/rss/", "tags": ["frameworks", "agents"]},
+    {"name": "Lilian Weng", "url": "https://lilianweng.github.io/index.xml", "tags": ["research", "technical"]},
+    {"name": "Interconnects", "url": "https://www.interconnects.ai/feed", "tags": ["analysis", "models"]},
+    {"name": "AI Snake Oil", "url": "https://aisnakeoil.substack.com/feed", "tags": ["analysis", "criticism"]},
+    {"name": "Latent Space", "url": "https://latent.space/feed", "tags": ["podcast", "analysis"]},
+    {"name": "The AI Edge", "url": "https://theaiedge.substack.com/feed", "tags": ["engineering", "agents"]},
+    # Research & papers
+    {"name": "ArXiv cs.AI", "url": "https://rss.arxiv.org/rss/cs.AI", "tags": ["research", "papers"], "high_signal": True},
+    {"name": "ArXiv cs.CL", "url": "https://rss.arxiv.org/rss/cs.CL", "tags": ["research", "papers"], "high_signal": True},
+    # AI/tech news
+    {"name": "TechCrunch AI", "url": "https://techcrunch.com/category/artificial-intelligence/feed/", "tags": ["news", "industry"]},
+    {"name": "The Verge AI", "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml", "tags": ["news", "industry"]},
+    {"name": "Reuters Tech", "url": "https://feeds.arstechnica.com/arstechnica/technology-lab", "tags": ["news", "industry"]},
+    {"name": "VentureBeat AI", "url": "https://venturebeat.com/category/ai/feed/", "tags": ["news", "industry"]},
+    {"name": "The Decoder", "url": "https://the-decoder.com/feed/", "tags": ["news", "models"], "high_signal": True},
+    {"name": "Ars Technica", "url": "https://feeds.arstechnica.com/arstechnica/technology-lab", "tags": ["news", "industry"]},
+    {"name": "ZDNet AI", "url": "https://www.zdnet.com/topic/artificial-intelligence/rss.xml", "tags": ["news", "industry"]},
+    {"name": "MIT Tech Review", "url": "https://www.technologyreview.com/feed/", "tags": ["news", "research"]},
     # GitHub release feeds for core repos
     {"name": "OpenClaw Releases", "url": "https://github.com/openclaw/openclaw/releases.atom", "tags": ["releases", "official"]},
     {"name": "Hermes Agent Releases", "url": "https://github.com/NousResearch/hermes-agent/releases.atom", "tags": ["releases", "ecosystem"]},
@@ -39,10 +63,33 @@ RSS_FEEDS = [
 
 # Keywords for relevance filtering (lowercase)
 RELEVANCE_KEYWORDS = [
+    # Core ecosystem
     "openclaw", "claw", "ai agent", "hermes agent", "nemoclaw", 
     "moltis", "ironclaw", "nanoclaw", "picoclaw", "openfang", "nanobot",
     "mcp", "personal ai", "coding agent", "claude code", "codex",
-    "agentic", "moltbook", "clawhub", "skill marketplace", "agent security"
+    "agentic", "moltbook", "clawhub", "skill marketplace", "agent security",
+    # Agent/LLM fundamentals
+    "llm agent", "agent framework", "tool use", "function calling",
+    "prompt engineering", "rag", "vector database", "embedding",
+    "safety alignment", "rlhf", "constitution", "guardrails",
+    "open weights", "open source model", "local llm", "self-hosted",
+    # Major model families & launches
+    "gpt-", "o1", "o3", "o4", "claude", "gemini", "llama", "mistral",
+    "deepseek", "codestral", "qwen", "gemma", "phi-",
+    "grok", "command r", "dbrx", "jamba",
+    # Major AI events & releases
+    "model release", "model launch", "model announcement",
+    "frontier model", "foundation model", "large language model",
+    "multimodal", "vision language", "code generation",
+    # AI industry & research
+    "ai regulation", "ai policy", "ai safety",
+    "chatgpt", "copilot", "perplexity",
+    "benchmark", "leaderboard", "eval",
+    "reasoning model", "chain of thought", "thinking model",
+    "fine-tune", "rlhf", "dpo", "distill",
+    # Infrastructure
+    "inference", "serving", "deployment", "quantization",
+    "on-device", "edge ai", "ai chip", "gpu shortage", "datacenter",
 ]
 
 def load_state():
@@ -190,7 +237,20 @@ def check_feeds(filter_relevant=True, verbose=True):
     new_items = []
     feed_status = {}
     
-    for feed in RSS_FEEDS:
+    # Merge dynamic feeds with hardcoded feeds
+    dynamic_path = MEMORY_DIR / "clawbytes-dynamic-feeds.json"
+    all_feeds = list(RSS_FEEDS)
+    if dynamic_path.exists():
+        try:
+            dynamic = json.loads(dynamic_path.read_text())
+            for feed in dynamic.get("rss_feeds", []):
+                # Skip if URL already in hardcoded feeds
+                if feed.get("url") not in {f["url"] for f in all_feeds}:
+                    all_feeds.append(feed)
+        except Exception:
+            pass
+    
+    for feed in all_feeds:
         name = feed["name"]
         url = feed["url"]
         tags = feed.get("tags", [])

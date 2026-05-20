@@ -20,10 +20,6 @@ import hashlib
 import json
 import os
 import re
-import shlex
-import subprocess
-import sys
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -31,7 +27,12 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-WORKSPACE = Path(os.environ.get("WORKSPACE", "/home/ubuntu-openclaw/.openclaw/workspace"))
+# Notion Claws signal integration (must import before WORKSPACE usage)
+import sys
+sys.path.insert(0, str(Path(__file__).parent))
+from claw_notion_signals import enrich_ship_with_notion, find_notion_signals, to_backlog_candidates
+
+WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 MEMORY = WORKSPACE / "memory"
 CREDS = WORKSPACE / "CREDS.md"
 
@@ -45,7 +46,7 @@ CATEGORY_META = {
     "ship": {
         "label": "Ship",
         "emoji": "⚙️",
-        "ttl_hours": 96,
+        "ttl_hours": 168,  # 7 days (was 96)
         "default_limit": 4,
         "intro": "Fresh releases and product movement worth scanning.",
         "windows": [9, 18],
@@ -55,27 +56,27 @@ CATEGORY_META = {
     "watch": {
         "label": "Watch",
         "emoji": "🚨",
-        "ttl_hours": 120,
+        "ttl_hours": 168,  # 7 days (was 120)
         "default_limit": 3,
         "intro": "Security, breakage, and risk signals worth watching closely.",
         "windows": [10, 19],
         "min_items": [1, 2],
-        "min_top_score": [55, 85],
+        "min_top_score": [25, 55],
     },
     "read": {
         "label": "Read",
         "emoji": "📚",
-        "ttl_hours": 96,
+        "ttl_hours": 168,  # 7 days (was 96)
         "default_limit": 3,
         "intro": "Context pieces worth the click, not just headline noise.",
         "windows": [12, 20],
         "min_items": [1, 2],
-        "min_top_score": [28, 38],
+        "min_top_score": [15, 30],
     },
     "community": {
         "label": "Community",
         "emoji": "💬",
-        "ttl_hours": 72,
+        "ttl_hours": 96,  # 4 days (was 72)
         "default_limit": 4,
         "intro": "What users and builders are actually talking about right now.",
         "windows": [11, 17],
@@ -95,7 +96,41 @@ REPO_PRIORITY = {
     "codex": 68,
 }
 
-ALLOWED_SUBREDDITS = {"openclaw", "selfhosted", "localllama", "homelab", "singularity"}
+def _load_dynamic_subreddits():
+    """Load dynamically discovered subreddits."""
+    dynamic_path = MEMORY / "clawbytes-dynamic-feeds.json"
+    extra = set()
+    if dynamic_path.exists():
+        try:
+            dynamic = json.loads(dynamic_path.read_text())
+            for sub in dynamic.get("subreddits", []):
+                extra.add(sub.get("name", "").lower())
+        except Exception:
+            pass
+    return extra
+
+
+ALLOWED_SUBREDDITS = {"openclaw", "selfhosted", "localllama", "machinelearning", "artificial", "homelab", "singularity"} | _load_dynamic_subreddits()
+
+# Reddit topics that belong in Read, not Community
+READ_REDDIT_TERMS = [
+    "how to", "tutorial", "guide", "workflow", "setup", "config",
+    "comparison", "vs", "benchmark", "review", "deep dive",
+    "architecture", "internals", "explained", "behind the",
+    "what i learned", "lessons", "experience report",
+]
+
+# Reddit topics that belong in Watch
+WATCH_REDDIT_TERMS = [
+    "broken", "bug", "error", "crash", "vulnerability", "security",
+    "exploit", "outage", "degraded", "regression", "broke",
+    "unsafe", "leak", "injection",
+]
+
+# LLM enrichment settings
+LLM_URL = os.environ.get("CLAWBYTES_LLM_URL", "https://llm.example.com/v1")
+LLM_MODEL = os.environ.get("CLAWBYTES_LLM_MODEL", "gemma4:31b-cloud")
+LLM_API_KEY = os.environ.get("CLAWBYTES_LLM_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
 
 SECURITY_TERMS = [
     "security", "advisory", "vulnerability", "cve", "sandbox", "unsafe",
@@ -126,13 +161,17 @@ def read_text(path: Path) -> str:
 
 def load_json(path: Path, default):
     if path.exists():
-        return json.loads(path.read_text())
+        text = path.read_text()
+        if text.strip():
+            return json.loads(text)
     return default
 
 
 def save_json(path: Path, data) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2))
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    tmp.replace(path)  # atomic rename
 
 
 def cred(section: str, key: str) -> str:
@@ -157,10 +196,12 @@ def trim(text: str, length: int = 120) -> str:
 
 
 def ensure_files() -> None:
-    save_json(BACKLOG_FILE, load_json(BACKLOG_FILE, {"items": []}))
-    save_json(
-        THREAD_STATE_FILE,
-        load_json(
+    # Only create files if they don't exist — avoid unnecessary round-trips
+    # that risk corrupting large JSON files on concurrent writes or crashes.
+    if not BACKLOG_FILE.exists() or BACKLOG_FILE.stat().st_size == 0:
+        save_json(BACKLOG_FILE, {"items": []})
+    if not THREAD_STATE_FILE.exists() or THREAD_STATE_FILE.stat().st_size == 0:
+        save_json(
             THREAD_STATE_FILE,
             {
                 "seenSourceKeys": [],
@@ -170,8 +211,7 @@ def ensure_files() -> None:
                 "lastPublishedAt": {},
                 "publishLog": [],
             },
-        ),
-    )
+        )
 
 
 def source_key(kind: str, raw_id: str, url: str) -> str:
@@ -248,6 +288,24 @@ def age_score(dt: Optional[datetime], max_hours: int) -> float:
     return max(0.0, max_hours - hours)
 
 
+def is_minor_release(title: str) -> bool:
+    """Check if a release is minor (alpha, patch, hotfix, etc)."""
+    low = title.lower()
+    # Alpha/preview releases
+    if any(x in low for x in ["alpha", "preview", "nightly", "canary", "dev", "experimental"]):
+        return True
+    # Patch versions (0.x.y where x stays same, or .z increments)
+    if re.search(r"v?0\.\d+\.\d+$", low) and not re.search(r"v?0\.0\.1", low):
+        return True
+    # Hotfix/patch keywords
+    if any(x in low for x in ["hotfix", "patch", "fix", "minor"]):
+        return True
+    # Date-based versioning (e.g. 20260413.04, 20260409.01) — treat .XX suffix as patch
+    if re.search(r"20\d{6}\.\d+", low):
+        return True
+    return False
+
+
 def classify_rss(item: dict) -> Optional[dict]:
     feed = item.get("feed", "")
     title = item.get("title", "")
@@ -258,11 +316,18 @@ def classify_rss(item: dict) -> Optional[dict]:
     low = f"{feed} {title}".lower()
 
     if "releases" in feed.lower():
-        if any(x in low for x in ["beta", "nightly", "staging"]):
+        if any(x in low for x in ["beta", "nightly", "staging", "alpha"]):
+            return None
+        # Skip chore/ci/internal release titles
+        if any(x in low for x in ["chore:", "ci:", "build:", "internal"]):
             return None
         repo = repo_name_from_feed(feed)
         display_title = normalize_release_title(repo, title)
-        score = REPO_PRIORITY.get(repo, 50) + age_score(dt, 96) / 8
+        base_score = REPO_PRIORITY.get(repo, 50)
+        # Penalize minor releases heavily
+        if is_minor_release(title):
+            base_score = max(20, base_score - 40)
+        score = base_score + age_score(dt, 96) / 8
         summary = "New release" if repo == "openclaw" else f"New {repo.title()} release"
         return {
             "primaryCategory": "ship",
@@ -282,7 +347,7 @@ def classify_rss(item: dict) -> Optional[dict]:
         categories = ["read"]
         if any(term in low for term in SECURITY_TERMS):
             categories = ["watch", "read"]
-        score = 28 + age_score(dt, 96) / 10 + (10 if item.get("high_signal") else 0)
+        score = 38 + age_score(dt, 96) / 10 + (15 if item.get("high_signal") else 5)
         summary = richer_read_summary(title, feed)
         primary = categories[0]
         return {
@@ -303,32 +368,54 @@ def classify_rss(item: dict) -> Optional[dict]:
 
 
 def title_topic(title: str) -> str:
+    """Return a short, specific topic tag for Reddit community items."""
     low = (title or "").lower()
     if any(x in low for x in ["security", "unsafe", "sandbox", "permission", "api keys"]):
-        return "security and safety risk"
-    if any(x in low for x in ["expensive", "token", "cost", "cheap", "spend"]):
-        return "cost pressure and pricing pain"
+        return "security concerns"
+    if any(x in low for x in ["thanks", "anthropic", "gratitude"]):
+        return "anthropic sentiment"
+    if any(x in low for x in ["free", "cheap", "expensive", "token", "cost", "spend", "budget", "pricing"]):
+        return "cost and access"
     if any(x in low for x in ["use case", "usefulness", "workflow", "real workflows"]):
-        return "real-world use cases and product fit"
-    if any(x in low for x in ["claude code", "codex", "gemma", "model"]):
-        return "model choice and competitive pressure"
-    return "user sentiment and operator pain points"
+        return "use case fit"
+    if any(x in low for x in ["best model", "which model", "model for", "claude code", "codex", "gemma"]):
+        return "model selection"
+    if "model" in low:
+        return "model discussion"
+    return "community signal"
 
 
 def richer_read_summary(title: str, feed: str) -> str:
     """Return very short summary (10 words max)."""
     low = f"{title} {feed}".lower()
     
+    # Feed-specific defaults
     if "simon willison" in low:
         return "Agent engineering insights"
-    if "grok" in low or "multi-agent" in low:
-        return "Multi-agent debate pattern"
-    if "research agent" in low or "what i learned" in low:
-        return "Research workflow lessons"
-    if "google workspace" in low:
-        return "External tool integration"
+    if "interconnects" in feed.lower():
+        return "Model analysis"
+    if "latent space" in feed.lower():
+        return "Industry analysis"
+    if "ai snake oil" in feed.lower() or "normaltech" in feed.lower():
+        return "Critical AI analysis"
+    if "langchain" in feed.lower():
+        return "Agent framework update"
+    if "huggingface" in feed.lower():
+        return "Open source research"
+    if "lilian weng" in feed.lower():
+        return "Research deep dive"
+    if "the ai edge" in feed.lower():
+        return "Agent engineering"
+    
+    # Topic-based
     if "security" in low or "supply chain" in low:
         return "Security risks"
+    if "reliability" in low or "safety" in low:
+        return "Reliability research"
+    if "codex" in low or "coding" in low:
+        return "Code agent analysis"
+    if "openclaw" in low or "claw" in low:
+        return "Ecosystem insight"
     return "Worth reading"
 
 
@@ -342,19 +429,39 @@ def classify_reddit(item: dict) -> Optional[dict]:
         return None
     raw_score = int(item.get("score", 0))
     raw_comments = int(item.get("comments", 0))
-    if subreddit == "openclaw":
-        if raw_score < 5 and raw_comments < 5:
-            return None
-    else:
-        if raw_score < 20 and raw_comments < 10:
-            return None
     dt = parse_dt(item.get("found_at", ""))
-    score = raw_score + min(raw_comments, 200) * 0.6 + age_score(dt, 72) / 10
-    categories = ["community"]
+    if subreddit == "openclaw":
+        # Allow more r/openclaw posts in, but penalize generic questions
+        if raw_score < 2 and raw_comments < 2:
+            return None
+        # Penalize low-signal generic question titles
+        title_low = title.lower()
+        generic_patterns = ["can ", "should i", "does ", "how do", "what ", "anyone ", "help"]
+        is_generic = any(p in title_low for p in generic_patterns)
+        if is_generic and raw_score < 10:
+            score = raw_score * 0.5 + min(raw_comments, 100) * 0.3 + age_score(dt, 72) / 20
+        else:
+            score = raw_score + min(raw_comments, 200) * 0.6 + age_score(dt, 72) / 10
+    else:
+        if raw_score < 10 and raw_comments < 5:
+            return None
+        score = raw_score + min(raw_comments, 200) * 0.6 + age_score(dt, 72) / 10
     low = title.lower()
-    if any(term in low for term in SECURITY_TERMS):
+
+    # Classify into the right lane based on content
+    categories = ["community"]
+    if any(term in low for term in SECURITY_TERMS) or any(term in low for term in WATCH_REDDIT_TERMS):
         categories = ["watch", "community"]
-    summary = f"High-engagement r/{item.get('subreddit', 'openclaw')} thread on {title_topic(title)} ({raw_score} upvotes / {raw_comments} comments)."
+    elif any(term in low for term in READ_REDDIT_TERMS):
+        # Substantive discussions → Read, not Community
+        categories = ["read", "community"]
+        # Boost Read scores for high-comment discussions
+        if raw_comments >= 30:
+            score += 15
+
+    # Shorter, more specific summary
+    topic = title_topic(title)
+    summary = f"{topic} ({raw_score}↑ / {raw_comments}💬)"
     primary = categories[0]
     return {
         "primaryCategory": primary,
@@ -419,6 +526,61 @@ def classify_security(item: dict) -> Optional[dict]:
         "sourceType": "security",
         "sourceName": item.get("repo", "security"),
         "sourceId": advisory_id or item.get("url"),
+        "url": url,
+        "title": title,
+    }
+
+
+def classify_hackernews(item: dict) -> Optional[dict]:
+    """Classify HN stories into lanes."""
+    url = item.get("url", "")
+    title = item.get("title", "")
+    if not url or not title:
+        return None
+    
+    raw_score = int(item.get("score", 0) or 0)
+    raw_comments = int(item.get("comments", 0) or 0)
+    if raw_score + raw_comments < 5:
+        return None
+    
+    dt = parse_dt(item.get("created_at", "") or item.get("found_at", ""))
+    category_hint = item.get("category_hint", "community")
+    
+    # Override hint based on title analysis
+    low = title.lower()
+    if any(t in low for t in ["security", "vulnerability", "exploit", "injection", "unsafe", "attack"]):
+        primary = "watch"
+        categories = ["watch", "community"]
+    elif any(t in low for t in ["architecture", "framework", "how ", "why ", "protocol", "deep dive"]):
+        primary = "read"
+        categories = ["read", "community"]
+    else:
+        primary = category_hint if category_hint in ("read", "watch") else "community"
+        categories = [primary, "community"]
+    
+    # HN scoring: points + comments bonus, with decay
+    score = raw_score * 0.8 + min(raw_comments, 100) * 0.5 + age_score(dt, 72) / 10
+    # Boost Watch items (security stories are high-value)
+    if primary == "watch":
+        score += 15
+    # Boost Read items from HN (often high-quality)
+    if primary == "read":
+        score += 10
+    
+    summary = f"HN discussion ({raw_score}pts / {raw_comments} comments)"
+    
+    return {
+        "primaryCategory": primary,
+        "categories": categories,
+        "score": round(score, 2),
+        "summary": summary,
+        "rawScore": raw_score,
+        "rawComments": raw_comments,
+        "expiresAt": (dt or now_utc()) + timedelta(hours=CATEGORY_META[primary]["ttl_hours"]),
+        "publishedAt": dt,
+        "sourceType": "hackernews",
+        "sourceName": "hackernews",
+        "sourceId": item.get("id", url),
         "url": url,
         "title": title,
     }
@@ -496,43 +658,36 @@ def is_fresh(candidate: dict) -> bool:
     return bool(expires and expires > now_utc())
 
 
-def run_monitors() -> None:
-    """Run source monitors to refresh state files before collecting."""
-    cmds = [
-        'python3 scripts/claw-rss-monitor.py',
-        'python3 scripts/claw-reddit-monitor.py',
-        'python3 scripts/claw-moltbook-monitor.py',
-        'python3 scripts/claw-security-monitor.py --quiet',
-        'bash scripts/claw-ecosystem-monitor.sh --mode check',
-    ]
-    for cmd in cmds:
-        p = subprocess.run(
-            f'cd {shlex.quote(str(WORKSPACE))} && {cmd}',
-            shell=True,
-            text=True,
-            capture_output=True,
-            timeout=300
-        )
-        if p.returncode != 0:
-            print(f"Monitor returned non-zero: {cmd}", file=sys.stderr)
-            print(p.stderr, file=sys.stderr)
-
-
 def collect_candidates() -> Dict[str, List[dict]]:
     rss = load_json(MEMORY / "claw-rss-state.json", {}).get("foundItems", [])
     reddit = load_json(MEMORY / "claw-reddit-state.json", {}).get("foundItems", [])
     security = load_json(MEMORY / "claw-security-state.json", {}).get("alerts", [])
     moltbook = load_json(MEMORY / "claw-moltbook-state.json", {}).get("foundItems", [])
+    hackernews = load_json(MEMORY / "claw-hn-state.json", {}).get("foundItems", [])
+    notion = load_json(MEMORY / "clawbytes-notion-signals.json", [])
     return {
         "rss": rss,
         "reddit": reddit,
         "security": security,
         "moltbook": moltbook,
+        "hackernews": hackernews,
+        "notion": notion,
     }
 
 
 def collect_into_backlog() -> dict:
     ensure_files()
+    
+    # Refresh Notion signals before collection
+    try:
+        notion_signals = find_notion_signals(hours_back=48)
+        notion_candidates = to_backlog_candidates(notion_signals)
+        if notion_candidates:
+            CACHE_FILE = MEMORY / "clawbytes-notion-signals.json"
+            CACHE_FILE.write_text(json.dumps(notion_candidates, indent=2, default=str))
+    except Exception:
+        pass  # Notion fetch is best-effort; don't block collection on failure
+    
     backlog = load_json(BACKLOG_FILE, {"items": []})
     state = load_json(THREAD_STATE_FILE, {})
 
@@ -601,6 +756,62 @@ def collect_into_backlog() -> dict:
             continue
         seen_source_keys.add(key)
         b = backlog_item(candidate)
+        if b["id"] not in existing_ids:
+            backlog["items"].append(b)
+            existing_ids.add(b["id"])
+            added.append(b)
+
+    for item in candidates["hackernews"]:
+        candidate = classify_hackernews(item)
+        if not candidate:
+            continue
+        if not is_fresh(candidate):
+            continue
+        key = source_key("hackernews", candidate["sourceId"], candidate["url"])
+        if key in seen_source_keys:
+            continue
+        seen_source_keys.add(key)
+        b = backlog_item(candidate)
+        if b["id"] not in existing_ids:
+            backlog["items"].append(b)
+            existing_ids.add(b["id"])
+            added.append(b)
+
+    # Notion signals from Claws page edits
+    for item in candidates["notion"]:
+        if not item.get("url"):
+            continue
+        dt = parse_dt(item.get("last_edit", "") or item.get("publishedAt", ""))
+        if not dt:
+            continue
+        # Notion signals expire quickly — fresh insight only
+        if (now_utc() - dt).total_seconds() > 172800:  # 48h
+            continue
+        key = source_key("notion", item.get("sourceId", ""), item.get("url", ""))
+        if key in seen_source_keys:
+            continue
+        seen_source_keys.add(key)
+        
+        # Convert notion signal to backlog item
+        b = {
+            "id": backlog_id(item["url"], item.get("title", "Notion signal")),
+            "url": item["url"],
+            "title": item.get("title", ""),
+            "summary": trim(item.get("summary", "")[:140], 140),
+            "sourceType": "notion",
+            "sourceName": item.get("sourceName", "Notion Claws"),
+            "sourceId": item.get("sourceId", ""),
+            "primaryCategory": item.get("primaryCategory", "ship"),
+            "categories": item.get("categories", ["ship"]),
+            "score": round(item.get("score", 80), 2),
+            "publishedAt": dt.isoformat() if dt else None,
+            "discoveredAt": now_utc().isoformat(),
+            "expiresAt": (dt + timedelta(hours=72)).isoformat() if dt else (now_utc() + timedelta(hours=72)).isoformat(),
+            "status": "queued",
+            "postedCategories": [],
+            "notion_page_id": item.get("notion_page_id"),
+            "notion_insights": item.get("notion_insights", {}),
+        }
         if b["id"] not in existing_ids:
             backlog["items"].append(b)
             existing_ids.add(b["id"])
@@ -679,6 +890,284 @@ def bundle_for_category(category: str, limit: Optional[int] = None) -> List[dict
     return picked
 
 
+def fetch_release_body(url: str) -> str:
+    """Fetch GitHub release body text from the API."""
+    # Convert GitHub release URL to API URL
+    # https://github.com/owner/repo/releases/tag/v1.0 -> https://api.github.com/repos/owner/repo/releases/tags/v1.0
+    m = re.match(r"https://github\.com/([^/]+)/([^/]+)/releases/tag/(.+)", url)
+    if not m:
+        return ""
+    owner, repo, tag = m.group(1), m.group(2), m.group(3)
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}"
+    try:
+        req = Request(api_url, headers={"User-Agent": "ClawBytes/1.0"})
+        with urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        body = (data.get("body") or "").strip()
+        # Truncate to 300 chars for LLM context
+        if len(body) > 300:
+            body = body[:297] + "..."
+        return body
+    except Exception:
+        return ""
+
+
+def fetch_article_snippet(url: str) -> str:
+    """Fetch first ~500 chars of text from an article URL for LLM grounding."""
+    try:
+        req = Request(url, headers={"User-Agent": "ClawBytes/1.0", "Accept": "text/html"})
+        with urlopen(req, timeout=8) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+        # Strip HTML tags
+        import re as _re
+        text = _re.sub(r'<script[^>]*>.*?</script>', '', html, flags=_re.DOTALL)
+        text = _re.sub(r'<style[^>]*>.*?</style>', '', text, flags=_re.DOTALL)
+        text = _re.sub(r'<[^>]+>', ' ', text)
+        text = _re.sub(r'\s+', ' ', text).strip()
+        # Take first 500 chars
+        if len(text) > 500:
+            text = text[:497] + "..."
+        return text
+    except Exception:
+        return ""
+
+
+BANNED_VERBS = [
+    "explores", "explored", "exploring",
+    "reveals", "revealed", "revealing",
+    "highlights", "highlighted", "highlighting",
+    "dives into", "dove into", "diving into",
+    "breaks down", "broke down", "breaking down",
+    "unpacks", "unpacked", "unpacking",
+    "delves into", "delved into", "delving into",
+    "examines", "examined", "examining",
+    "offers", "offered", "offering",
+    "showcases", "showcased", "showcasing",
+    "demonstrates", "demonstrated", "demonstrating",
+    "rages on", "raging on",
+    "sparks debate", "sparking debate",
+    "heating up", "heated up",
+    "gaining traction", "gaining steam",
+    "worth watching", "worth noting",
+    "notable", "notably",
+]
+
+
+def strip_banned_verbs(text: str) -> str:
+    """Replace banned soft verbs with stronger alternatives or remove."""
+    low = text.lower()
+    # Map banned verbs to replacements
+    replacements = {
+        "explores": "maps",
+        "explored": "mapped",
+        "exploring": "mapping",
+        "reveals": "finds",
+        "revealed": "found",
+        "revealing": "finding",
+        "highlights": "flags",
+        "highlighted": "flagged",
+        "highlighting": "flagging",
+        "dives into": "tackles",
+        "breaks down": "cuts through",
+        "unpacks": "traces",
+        "unpacked": "traced",
+        "unpacking": "tracing",
+        "delves into": "traces",
+        "delving into": "tracing",
+        "examines": "audits",
+        "examined": "audited",
+        "examining": "auditing",
+        "showcases": "ships",
+        "showcased": "shipped",
+        "showcasing": "shipping",
+        "demonstrates": "shows",
+        "demonstrated": "showed",
+        "demonstrating": "showing",
+        "offering": "delivering",
+        "rages on": "continues",
+        "raging on": "continuing",
+        "sparks debate": "triggers pushback",
+        "sparking debate": "triggering pushback",
+        "heating up": "escalating",
+        "heated up": "escalated",
+        "gaining traction": "spreading",
+        "gaining steam": "spreading",
+        "worth watching": "on the radar",
+        "worth noting": "noted",
+        "notable": "real",
+        "notably": "clearly",
+    }
+    result = text
+    for verb, replacement in replacements.items():
+        # Case-insensitive replace preserving first char case
+        import re as _re
+        pattern = _re.compile(r'\b' + _re.escape(verb) + r'\b', _re.IGNORECASE)
+        match = pattern.search(result)
+        if match:
+            matched = match.group()
+            # Preserve capitalization
+            if matched[0].isupper():
+                fixed = replacement[0].upper() + replacement[1:]
+            else:
+                fixed = replacement
+            result = pattern.sub(fixed, result, count=1)
+    return result
+
+
+def llm_summarize(items: List[dict], category: str) -> Optional[str]:
+    """Use LLM to generate 'why it matters' summaries for a bundle of items."""
+    if not LLM_API_KEY:
+        return None
+    if not items:
+        return None
+
+    # Build the prompt
+    meta = CATEGORY_META[category]
+    prompt = f"""You write @clawbytes on Telegram — covering the AI agent ecosystem. Short, sharp, opinionated. No corporate filler.
+
+Write a {meta['label']} lane post with {len(items)} items.
+
+FORMAT (strict HTML):
+{meta['emoji']} <b>{meta['label']}</b> — N items
+
+[emoji] <a href="URL">ACTUAL TITLE</a> — 1 punchy sentence on why this matters
+
+Rules:
+- Use <b> for bold, <a href="URL">title text</a> for links — use the ACTUAL model/project name as link text, never "Link" or "thread"
+- Ship: what changed, why operators care. Use the release notes if provided — don't invent features.
+- Watch: the risk, what to check, what breaks
+- Read: describe WHAT the piece IS (paper, framework, deep-dive, critique) and its core claim — but only if the source data states it. Never invent numbers, percentages, or specific findings. "A paper proposing formal metrics for agent reliability" beats "Defines 3 key metrics for agent failure rates" if you don't actually know there are 3.
+- Community: the sentiment, the discovery, the real user signal. If multiple threads cover the same topic, MERGE them into one bullet (e.g. "3 threads on cost and access (58↑ total)") instead of listing each separately. NEVER repeat the raw summary text — write fresh, specific descriptions.
+- MAX 150 chars per item summary. No filler. No "notable" or "worth watching." No "offering insights" or "highlights." No soft verbs: "breaks down", "unpacks", "dives into", "rages on", "sparks debate" are all banned.
+- Do NOT parrot the raw summary text provided in the item data. Write original descriptions based on the actual title and topic.
+- If release notes are missing or say nothing: just state what the project IS and what version dropped. 1 sentence max. Never speculate with "might," "could," or "should." Example: "IronClaw 0.1.0 — First skills release from the NEAR AI safety team." 
+- Use 📦 for ship, 🚨 for watch, 📚 for read, 💬 for community
+- For HN items: reference the community signal (e.g. "171 points on HN") when it adds weight
+- NEVER fabricate statistics, metrics, or specific findings. If unsure, describe the piece's ambition, not its results.
+
+Items:"""
+
+    for i, item in enumerate(items):
+        title = display_title(item)
+        url = item.get("url", "")
+        raw_summary = item.get("summary", "")
+        source = item.get("sourceType", "")
+        # Add HN engagement data to help LLM contextualize
+        if source == "hackernews":
+            pts = item.get("rawScore", 0)
+            comments = item.get("rawComments", 0)
+            raw_summary = f"{pts}pts / {comments} comments on HN"
+        # For Read items from RSS, fetch article snippet for grounding
+        article_snippet = ""
+        if category == "read" and source == "rss" and url:
+            article_snippet = fetch_article_snippet(url)
+        # For ship items, try to fetch release body
+        release_body = ""
+        if category == "ship" and "github.com" in url:
+            release_body = fetch_release_body(url)
+        item_line = f"\n{i+1}. {title} | {url} | {raw_summary} | source: {source}"
+        if release_body:
+            item_line += f" | RELEASE NOTES: {release_body}"
+        if article_snippet:
+            item_line += f" | ARTICLE SNIPPET: {article_snippet}"
+        prompt += item_line
+
+    prompt += "\n\nWrite the post now:"
+
+    try:
+        data = json.dumps({
+            "model": LLM_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 1200,
+            "temperature": 0.4,
+        }).encode()
+
+        req = Request(
+            f"{LLM_URL}/chat/completions",
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {LLM_API_KEY}",
+            },
+        )
+        with urlopen(req, timeout=45) as resp:
+            result = json.loads(resp.read().decode())
+        content = result["choices"][0]["message"]["content"].strip()
+        # Strip banned soft verbs
+        content = strip_banned_verbs(content)
+        # Basic sanity check
+        if len(content) < 50 or "I cannot" in content:
+            return None
+        return content
+    except Exception as e:
+        return None
+
+
+def compress_ship_bundle(items: List[dict]) -> List[dict]:
+    """Bundle minor releases from the same repo into one entry."""
+    from collections import Counter
+    repo_counts = Counter()
+    for item in items:
+        repo = repo_name_from_feed(item.get("sourceName", ""))
+        repo_counts[repo] += 1
+    
+    # If a repo has 2+ items, bundle the extras into one
+    bundled = []
+    repo_items = {}
+    for item in items:
+        repo = repo_name_from_feed(item.get("sourceName", ""))
+        repo_items.setdefault(repo, []).append(item)
+    
+    for repo, repo_list in repo_items.items():
+        if len(repo_list) >= 2:
+            # Keep the highest-scored item, bundle the rest
+            repo_list.sort(key=lambda x: -(x.get("score") or 0))
+            bundled.append(repo_list[0])
+            if len(repo_list) > 1:
+                rest_count = len(repo_list) - 1
+                group = dict(repo_list[0])
+                group["title"] = f"{display_repo_name(repo)}: {rest_count} more releases"
+                group["summary"] = f"{rest_count} additional {display_repo_name(repo)} releases this cycle"
+                group["url"] = repo_list[1]["url"]  # Link to the next one
+                bundled.append(group)
+        else:
+            bundled.extend(repo_list)
+    
+    return bundled[:CATEGORY_META["ship"]["default_limit"]]
+
+
+def compress_community_bundle(items: List[dict]) -> List[dict]:
+    """Merge Reddit threads on the same topic into a single entry."""
+    from collections import defaultdict
+    topic_groups = defaultdict(list)
+    non_reddit = []
+
+    for item in items:
+        if item.get("sourceType") != "reddit":
+            non_reddit.append(item)
+            continue
+        topic = title_topic(item.get("title", ""))
+        topic_groups[topic].append(item)
+
+    merged = []
+    for topic, group in topic_groups.items():
+        if len(group) == 1:
+            merged.append(group[0])
+        else:
+            # Merge: keep highest-scoring item as lead, note others exist
+            group.sort(key=lambda x: -(x.get("score") or 0))
+            lead = dict(group[0])
+            rest_count = len(group) - 1
+            total_ups = sum(i.get("rawScore", 0) for i in group)
+            total_comments = sum(i.get("rawComments", 0) for i in group)
+            lead["summary"] = f"{rest_count+1} threads on {topic} ({total_ups}\u2191 / {total_comments}\U0001f4ac)"
+            merged.append(lead)
+
+    # Re-sort by score
+    merged.sort(key=lambda x: -(x.get("score") or 0))
+    return non_reddit + merged
+
+
 def compress_watch_bundle(items: List[dict]) -> List[dict]:
     advisories = [i for i in items if i.get("sourceType") == "security"]
     non_advisories = [i for i in items if i.get("sourceType") != "security"]
@@ -718,11 +1207,17 @@ def source_badge(item: dict) -> str:
         return "discussion"
     if source_type == "moltbook":
         return "community"
+    if source_type == "hackernews":
+        return "discussion"
     return source_type or "source"
 
 
 def display_title(item: dict) -> str:
     if item.get("primaryCategory") == "ship":
+        # Notion items: clean up the "— Notion update" suffix
+        if item.get("sourceType") == "notion":
+            title = item.get("title", "")
+            return title.replace(" — Notion update", "").strip()
         repo = repo_name_from_feed(item.get("sourceName", ""))
         return normalize_release_title(repo, item.get("title", ""))
     return item.get("title", "")
@@ -785,16 +1280,30 @@ def lane_ready(category: str, state: Optional[dict] = None, dt_local: Optional[d
     }
 
 
-def format_category_bundle(category: str, limit: Optional[int] = None) -> str:
-    """Format category bundle in ultra-short, scannable style."""
+def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: bool = True) -> str:
+    """Format category bundle with optional LLM enrichment."""
     meta = CATEGORY_META[category]
     bundle = [hydrate_item(item) for item in bundle_for_category(category, limit)]
+    
     if category == "watch":
         bundle = compress_watch_bundle(bundle)
+    elif category == "ship":
+        # Enrich with Notion editorial content before bundling
+        bundle = enrich_ship_with_notion(bundle)
+        bundle = compress_ship_bundle(bundle)
+    elif category == "community":
+        bundle = compress_community_bundle(bundle)
     
     if not bundle:
         return f"{meta['emoji']} <b>{meta['label']}</b> — Nothing new"
     
+    # Try LLM enrichment first
+    if use_llm and LLM_API_KEY:
+        llm_result = llm_summarize(bundle, category)
+        if llm_result:
+            return llm_result
+    
+    # Fallback: static template format
     lines = [f"{meta['emoji']} <b>{meta['label']}</b> — {len(bundle)} item{'s' if len(bundle) > 1 else ''}"]
     lines.append("")
     
@@ -804,10 +1313,12 @@ def format_category_bundle(category: str, limit: Optional[int] = None) -> str:
         
         # Short summary: first sentence, max 80 chars
         summary = (item.get('summary') or '').split('.')[0][:80].strip()
+        # Strip "Notion update:" prefix for cleaner display
+        summary = re.sub(r'^Notion update:\s*', '', summary, flags=re.IGNORECASE)
         if summary:
             summary = f" — {summary}"
         
-        # Format: 📦 Title — summary [link]
+        # Format: emoji Title — summary [link]
         emoji = "📦" if category == "ship" else "🚨" if category == "watch" else "📚" if category == "read" else "💬"
         lines.append(f"{emoji} <a href=\"{url}\">{html_escape(title)}</a>{html_escape(summary)}")
     
@@ -915,7 +1426,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="ClawBytes category thread system")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("collect").add_argument("--run-monitors", action="store_true", help="Run source monitors before collecting")
+    sub.add_parser("collect")
     sub.add_parser("status")
     p_auto = sub.add_parser("autopublish")
     p_auto.add_argument("--send", action="store_true")
@@ -935,8 +1446,6 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.cmd == "collect":
-        if getattr(args, "run_monitors", False):
-            run_monitors()
         result = collect_into_backlog()
         print(json.dumps(result, indent=2))
         return 0

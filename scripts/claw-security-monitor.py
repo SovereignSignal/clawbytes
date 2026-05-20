@@ -18,8 +18,8 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from urllib.parse import quote_plus
 
-# Workspace path - use env var or default
-WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
+# Workspace path
+WORKSPACE = Path(__file__).parent.parent
 MEMORY_DIR = WORKSPACE / "memory"
 STATE_FILE = MEMORY_DIR / "claw-security-state.json"
 CREDS_FILE = WORKSPACE / "CREDS.md"
@@ -39,6 +39,7 @@ SECURITY_QUERIES = [
 
 # GitHub repos to check for security advisories
 WATCHED_REPOS = [
+    # Claw ecosystem
     "openclaw/openclaw",
     "RightNow-AI/openfang",
     "sipeed/picoclaw",
@@ -46,8 +47,28 @@ WATCHED_REPOS = [
     "nearai/ironclaw",
     "moltis-org/moltis",
     "NousResearch/hermes-agent",
+    # Adjacent AI agent ecosystem
     "anthropic/claude-code",
     "openai/codex",
+    "langchain-ai/langchain",
+    "langchain-ai/langgraph",
+    "pytorch/pytorch",
+    "huggingface/transformers",
+    "modelcontextprotocol/servers",
+    # High-value agent/automation repos (from 2026 top list)
+    "Significant-Gravitas/AutoGPT",
+    "geekan/MetaGPT",
+    "crewAIInc/crewAI",
+    "langflow-ai/langflow",
+    "langgenius/dify",
+    "browser-use/browser-use",
+    "mem0ai/mem0",
+    "composiohq/composio",
+    # Model/inference
+    "vllm-project/vllm",
+    "ollama/ollama",
+    "deepseek-ai/DeepSeek-V3",
+    "QwenLM/Qwen",
 ]
 
 # Security keywords to flag
@@ -374,7 +395,47 @@ def main():
         print(f"Last check: {state.get('lastCheck', 'never')}")
         print(f"All clear: {state.get('allClear', True)}")
         print(f"Last alert: {state.get('lastAlertAt', 'never')}")
-        print(f"Total alerts tracked: {len(state.get('alerts', []))}")
+        print(f"Total alerts tracked: {len(state.get('alerts', [    "icemint0828/nanobot",
+    "huggingface/smolagents",
+    "frdel/agent-zero",
+    "All-Hands-AI/OpenHands",
+    "kortix-ai/suna",
+    "google/adk-python",
+    "microsoft/autogen",
+    "mastra-inc/mastra",
+    "meta-llama/llama-stack",
+    "dust-tt/dust",
+    "agno-agi/agno",
+    "CopilotKit/CopilotKit",
+    "letta-ai/letta",
+    "block/goose",
+    "deepset-ai/haystack",
+    "VRSEN/agency-swarm",
+    "cline/cline",
+    "pydantic/pydantic-ai",
+    "vercel/ai",
+    "clawrun-sh/clawrun",
+    "agent0ai/agent-zero",
+    "OpenHands/OpenHands",
+    "openai/openai-agents-python",
+    "NVIDIA/NemoClaw",
+    "microsoft/agent-framework",
+    "salesforce/agentscript",
+    "mastra-ai/mastra",
+    "anthropics/claude-agent-sdk-python",
+    "ComposioHQ/agent-orchestrator",
+    "obra/superpowers",
+    "paperclipai/paperclip",
+    "microsoft/agent-governance-toolkit",
+    "aaif-goose/goose",
+    "FoundationAgents/MetaGPT",
+    "firecrawl/firecrawl",
+    "features/copilot",
+    "google-gemini/gemini-cli",
+    "bytedance/trae-agent",
+    "mistralai/mistral-vibe",
+    "sourcegraph/amp-examples-and-guides",
+]))}")
         return
     
     alerts, status = check_security(verbose=not args.quiet)

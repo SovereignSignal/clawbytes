@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 from urllib.parse import quote_plus, urlencode
 from urllib.request import Request, urlopen
 
-WORKSPACE = Path(os.environ.get("WORKSPACE", "/home/ubuntu-openclaw/.openclaw/workspace"))
+WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 MEMORY = WORKSPACE / "memory"
 CREDS = WORKSPACE / "CREDS.md"
 
@@ -92,22 +92,6 @@ def load_json(path: Path):
 
 
 def cred(section: str, key: str) -> str:
-    # First check environment variables
-    env_key = f"{section.upper().replace(' ', '_')}_{key.upper().replace(' ', '_')}"
-    env_val = os.environ.get(env_key)
-    if env_val:
-        return env_val
-    # Also check common env var names
-    common_keys = {
-        ('ClawBytes Channel', 'Bot Token'): 'TELEGRAM_BOT_TOKEN',
-        ('Telegram Bots', 'Bot Token'): 'TELEGRAM_BOT_TOKEN',
-        ('GitHub API', 'Token'): 'GITHUB_TOKEN',
-    }
-    if (section, key) in common_keys:
-        env_val = os.environ.get(common_keys[(section, key)])
-        if env_val:
-            return env_val
-    # Then check CREDS.md
     text = read_text(CREDS)
     pattern = rf"## {re.escape(section)}\n(?:.*\n)*?-\s*(?:\*\*)?{re.escape(key)}(?:\*\*)?:\s*([^\n]+)"
     m = re.search(pattern, text)
@@ -622,13 +606,11 @@ def run_monitors() -> None:
         'bash scripts/claw-ecosystem-monitor.sh --mode check',
     ]
     for cmd in cmds:
-        # In container, WORKSPACE is /app; locally it's the workspace path
         p = run(f'cd {shlex.quote(str(WORKSPACE))} && {cmd}', timeout=300)
         if p.returncode != 0:
-            print(f"⚠️ Monitor returned non-zero: {cmd}")
             print(p.stdout)
             print(p.stderr, file=sys.stderr)
-            # Don't raise - allow other monitors to run
+            raise RuntimeError(f'monitor failed: {cmd}')
 
 
 def main() -> int:
