@@ -7,11 +7,9 @@
 #   ./claw-ecosystem-monitor.sh --mode discover  # Hunt for new projects
 #   ./claw-ecosystem-monitor.sh --mode both      # Check + discover
 
-set +e  # Don't exit on error
-set -o pipefail
+set -euo pipefail
 
-SCRIPT_DIR="${BASH_SOURCE[0]:-$(pwd)}"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_DIR")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
 STATE_FILE="${WORKSPACE_DIR}/memory/claw-ecosystem-state.json"
 SOURCES_FILE="${WORKSPACE_DIR}/memory/claw-ecosystem-sources.json"
@@ -23,9 +21,9 @@ GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 BRAVE_API_KEY="${BRAVE_API_KEY:-}"
 
 # Rate limiting - be nice to APIs
-GITHUB_DELAY=2  # seconds between GitHub requests
-HN_DELAY=1
-BRAVE_DELAY=1
+GITHUB_DELAY=0.2  # seconds between GitHub requests (0.5s = 7200/hr, well within 5000/hr auth'd limit)
+HN_DELAY=0.5
+BRAVE_DELAY=0.5
 
 # Star thresholds for discovery
 MIN_STARS_NEW=50      # Min stars for repos <7 days old
@@ -36,9 +34,6 @@ MODE="check"
 get_cred() {
     local section="$1"
     local key="$2"
-    if [[ ! -f "$CREDS_FILE" ]]; then
-        return
-    fi
     awk -v section="$section" -v key="$key" '
         $0 ~ /^## / { in_section = ($0 == "## " section) }
         in_section {
@@ -54,16 +49,16 @@ get_cred() {
 }
 
 load_tokens() {
-    [[ -z "$GITHUB_TOKEN" ]] && GITHUB_TOKEN="$(get_cred "GitHub API" "Token")"
-    [[ -z "$BRAVE_API_KEY" ]] && BRAVE_API_KEY="$(get_cred "Brave Search API" "API Key")"
+    if [[ -z "$GITHUB_TOKEN" ]]; then GITHUB_TOKEN="$(get_cred "GitHub API" "Token")"; fi
+    if [[ -z "$BRAVE_API_KEY" ]]; then BRAVE_API_KEY="$(get_cred "Brave Search API" "API Key")"; fi
 }
 
 github_api() {
     local url="$1"
     if [[ -n "$GITHUB_TOKEN" ]]; then
-        curl -sf -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$url"
+        curl -sf --max-time 15 -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$url"
     else
-        curl -sf "$url"
+        curl -sf --max-time 15 "$url"
     fi
 }
 
@@ -75,7 +70,7 @@ brave_search_json() {
         return
     fi
 
-    curl -sf --get "https://api.search.brave.com/res/v1/web/search" \
+    curl -sf --max-time 15 --get "https://api.search.brave.com/res/v1/web/search" \
         --data-urlencode "q=${query}" \
         --data-urlencode "count=${count}" \
         --data-urlencode "freshness=pw" \
@@ -134,11 +129,7 @@ EOF
 # Load JSON file
 load_json() {
     local file="$1"
-    if [[ -f "$file" ]]; then
-        cat "$file" 2>/dev/null || echo "{}"
-    else
-        echo "{}"
-    fi
+    cat "$file" 2>/dev/null || echo "{}"
 }
 
 # Save JSON to file
@@ -150,11 +141,7 @@ save_json() {
 
 # Get all repos from sources (curated + dynamic)
 get_all_repos() {
-    if [[ ! -f "$SOURCES_FILE" ]]; then
-        echo ""
-        return
-    fi
-    jq -r '(.curated + .dynamic) | .[].repo // empty' "$SOURCES_FILE" 2>/dev/null | sort -u || echo ""
+    jq -r '(.curated + .dynamic) | .[].repo // empty' "$SOURCES_FILE" 2>/dev/null | sort -u
 }
 
 # Check if repo already known
@@ -316,7 +303,7 @@ discover_awesome_lists() {
     
     for list_url in "${lists[@]}"; do
         local content
-        content=$(curl -sf "$list_url" 2>/dev/null) || continue
+        content=$(curl -sf --max-time 30 "$list_url" 2>/dev/null) || continue
         
         # Extract GitHub URLs
         local urls
@@ -373,7 +360,7 @@ discover_hackernews() {
     for query in "${queries[@]}"; do
         local url="https://hn.algolia.com/api/v1/search?query=${query}&tags=story&hitsPerPage=5"
         local response
-        response=$(curl -sf "$url" 2>/dev/null) || continue
+        response=$(curl -sf --max-time 30 "$url" 2>/dev/null) || continue
         
         # Look for GitHub links in story URLs or comments
         local hits
@@ -449,7 +436,7 @@ discover_brave() {
         
         local url="https://api.search.brave.com/res/v1/web/search?q=${encoded_query}&count=5"
         local response
-        response=$(curl -sf -H "Accept: application/json" -H "X-Subscription-Token: ${api_key}" "$url" 2>/dev/null) || continue
+        response=$(curl -sf --max-time 30 -H "Accept: application/json" -H "X-Subscription-Token: ${api_key}" "$url" 2>/dev/null) || continue
         
         # Extract GitHub URLs from results
         local results
@@ -501,10 +488,10 @@ fetch_github_releases() {
 check_clawhub_skills() {
     local state="$1"
     local seen_urls
-    seen_urls=$(echo "$state" | jq '.lastSeenSkills // []' 2>/dev/null || echo '[]')
+    seen_urls=$(echo "$state" | jq '.lastSeenSkills // []')
 
     local response
-    response=$(brave_search_json 'site:clawhub.ai (skill OR skills OR marketplace) openclaw' 10 2>/dev/null || echo '{"web":{"results":[]}}')
+    response=$(brave_search_json 'site:clawhub.ai (skill OR skills OR marketplace) openclaw' 10)
 
     echo "$response" | jq --argjson seen "$seen_urls" '
         [.web.results[]?
@@ -514,55 +501,103 @@ check_clawhub_skills() {
         ]
         | unique_by(.id)
         | map(. + {source: "clawhub-search"})
-    ' 2>/dev/null || echo '[]'
+    '
 }
 
-# Check all known repos for new releases
+# Check all known repos for new releases (parallelized with progress)
 check_github_releases() {
     local state="$1"
     local new_releases="[]"
+    local batch_count=0
+    local start_time
+    start_time=$(date +%s)
+    local max_duration=50  # hard cap at 50s
     
     local repos
     repos=$(get_all_repos)
+    local total_repos
+    total_repos=$(echo "$repos" | grep -c '^' || echo 0)
     
-    # If no repos, return empty
-    if [[ -z "$repos" ]]; then
-        echo "[]"
-        return
-    fi
+    echo "   Checking $total_repos repos..." >&2
+    
+    # Use temp dir for parallel workers
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    local worker_count=0
+    local max_workers=8
     
     while IFS= read -r repo; do
         [[ -z "$repo" ]] && continue
         
-        local releases
-        releases=$(fetch_github_releases "$repo")
-        
-        if [[ "$releases" != "[]" && "$releases" != "" ]]; then
-            local latest_tag
-            latest_tag=$(echo "$releases" | jq -r '.[0].tag_name // empty' 2>/dev/null || echo "")
-            
-            if [[ -n "$latest_tag" ]]; then
-                local seen_tag
-                seen_tag=$(echo "$state" | jq -r --arg repo "$repo" '.lastSeenReleases[$repo] // empty' 2>/dev/null || echo "")
-                
-                if [[ "$latest_tag" != "$seen_tag" ]]; then
-                    local release_info
-                    release_info=$(echo "$releases" | jq --arg repo "$repo" '.[0] | {
-                        repo: $repo,
-                        tag: .tag_name,
-                        name: .name,
-                        url: .html_url,
-                        published: .published_at,
-                        body: (.body | if . then .[0:500] else "" end)
-                    }')
-                    new_releases=$(echo "$new_releases" | jq --argjson item "$release_info" '. + [$item]')
-                fi
-            fi
+        # Timeout guard - script-wide + per-loop
+        local now
+        now=$(date +%s)
+        if (( now - start_time > max_duration )); then
+            echo "   ⚠️ Approaching timeout, skipping remaining repos" >&2
+            break
+        fi
+        # Global script timeout
+        if (( now - script_start > SCRIPT_MAX_DURATION )); then
+            echo "   ⏱️ Global timeout reached, skipping remaining repos" >&2
+            break
         fi
         
-        sleep $GITHUB_DELAY
+        # Throttle workers
+        while [[ $(jobs -p | wc -l) -ge $max_workers ]]; do
+            sleep 0.1
+        done
+        
+        # Background worker per repo
+        (
+            local releases
+            releases=$(fetch_github_releases "$repo")
+            
+            if [[ "$releases" != "[]" && "$releases" != "" ]]; then
+                local latest_tag
+                latest_tag=$(echo "$releases" | jq -r '.[0].tag_name // empty' 2>/dev/null || echo "")
+                
+                if [[ -n "$latest_tag" ]]; then
+                    local seen_tag
+                    seen_tag=$(echo "$state" | jq -r --arg repo "$repo" '.lastSeenReleases[$repo] // empty')
+                    
+                    if [[ "$latest_tag" != "$seen_tag" ]]; then
+                        echo "$releases" | jq --arg repo "$repo" '.[0] | {
+                            repo: $repo,
+                            tag: .tag_name,
+                            name: .name,
+                            url: .html_url,
+                            published: .published_at,
+                            body: (.body | if . then .[0:500] else "" end)
+                        }' > "$tmpdir/${repo//\//_}.json"
+                    fi
+                fi
+            fi
+        ) &
+        
+        ((worker_count++))
+        # Progress output every 10 repos
+        if (( worker_count % 10 == 0 )); then
+            echo "   ... $worker_count/$total_repos" >&2
+        fi
+        
+        sleep 0.05  # Reduced from 0.2s since we're parallel
     done <<< "$repos"
     
+    # Wait for all workers
+    wait
+    
+    # Collect results
+    for f in "$tmpdir"/*.json; do
+        [[ -f "$f" ]] || continue
+        local item
+        item=$(cat "$f")
+        new_releases=$(echo "$new_releases" | jq --argjson item "$item" '. + [$item]')
+        ((batch_count++))
+    done
+    
+    rm -rf "$tmpdir"
+    
+    echo "   Found $batch_count new release(s)" >&2
     echo "$new_releases"
 }
 
@@ -576,13 +611,13 @@ check_hackernews() {
     for query in "${queries[@]}"; do
         local url="https://hn.algolia.com/api/v1/search?query=${query}&tags=story&hitsPerPage=5"
         local response
-        response=$(curl -sf "$url" 2>/dev/null || echo '{"hits":[]}')
+        response=$(curl -sf --max-time 30 "$url" 2>/dev/null || echo '{"hits":[]}')
         
         local hits
         hits=$(echo "$response" | jq '.hits // []')
         
         local seen_ids
-        seen_ids=$(echo "$state" | jq '.lastSeenHNStories // []' 2>/dev/null || echo '[]')
+        seen_ids=$(echo "$state" | jq -r '.lastSeenHNStories | @json')
         
         local stories
         stories=$(echo "$hits" | jq --argjson seen "$seen_ids" '
@@ -599,7 +634,7 @@ check_hackernews() {
             }]
         ')
         
-        new_stories=$(echo "$new_stories $stories" | jq -s 'add | unique_by(.id)' 2>/dev/null || echo '[]')
+        new_stories=$(echo "$new_stories $stories" | jq -s 'add | unique_by(.id)')
         
         sleep $HN_DELAY
     done
@@ -651,22 +686,13 @@ run_check() {
     echo "📅 $(date)" >&2
     echo "" >&2
     
-    # Initialize files first, then load state
-    echo "DEBUG: About to init_files" >&2
-    init_files
-    echo "DEBUG: init_files complete" >&2
-    
     local state
     state=$(load_json "$STATE_FILE")
-    echo "DEBUG: state loaded" >&2
 
     load_tokens
-    echo "DEBUG: tokens loaded" >&2
-    
-    echo "🔑 Tokens loaded: GitHub=${GITHUB_TOKEN:+yes}, Brave=${BRAVE_API_KEY:+yes}" >&2
     
     local repo_count
-    repo_count=$(get_all_repos | wc -l || echo 0)
+    repo_count=$(get_all_repos | wc -l)
     echo "📊 Monitoring $repo_count repositories" >&2
     echo "" >&2
     
@@ -684,6 +710,13 @@ run_check() {
     hn_count=$(echo "$new_hn" | jq 'length')
     echo "   Found $hn_count new story/stories" >&2
 
+    echo "📄 Checking HuggingFace Papers..." >&2
+    local new_hf
+    new_hf=$(python3 "${SCRIPT_DIR}/claw-hf-papers.py" --quiet 2>/dev/null || echo "[]")
+    local hf_count
+    hf_count=$(echo "$new_hf" | jq 'length' 2>/dev/null || echo 0)
+    echo "   Found $hf_count new paper(s)" >&2
+
     echo "🛍️ Checking ClawHub..." >&2
     local new_skills
     new_skills=$(check_clawhub_skills "$state")
@@ -699,17 +732,20 @@ run_check() {
         --argjson releases "$new_releases" \
         --argjson hn "$new_hn" \
         --argjson skills "$new_skills" \
+        --argjson hf "$new_hf" \
         '{
             timestamp: $ts,
             mode: $mode,
             newReleases: $releases,
             newHNStories: $hn,
             newSkills: $skills,
+            newHFPapers: $hf,
             summary: {
                 releaseCount: ($releases | length),
                 hnCount: ($hn | length),
                 skillCount: ($skills | length),
-                hasNews: ((($releases | length) + ($hn | length) + ($skills | length)) > 0)
+                hfCount: ($hf | length),
+                hasNews: ((($releases | length) + ($hn | length) + ($skills | length) + ($hf | length)) > 0)
             }
         }'
     )
@@ -796,20 +832,33 @@ run_discover() {
     echo "$output"
 }
 
-# Main
+# Main with global timeout
+cleanup_workers() {
+    # Kill any background jobs on exit
+    jobs -p | xargs -r kill 2>/dev/null || true
+}
+
+trap cleanup_workers EXIT
+
 main() {
+    init_files
+    
+    # Set a hard timeout for the entire script
+    # The cron job times out at 60s, we want to finish well before that
+    local script_start
+    script_start=$(date +%s)
+    local SCRIPT_MAX_DURATION=300  # 5 min budget; cron timeout is 600s
+    
     case "$MODE" in
         check)
             run_check
             ;;
         discover)
-            init_files
             run_discover
             ;;
         both)
             run_check
             echo "" >&2
-            init_files
             run_discover
             ;;
         *)
@@ -818,7 +867,10 @@ main() {
             exit 1
             ;;
     esac
+    
+    local script_end
+    script_end=$(date +%s)
+    echo "⏱️ Total time: $((script_end - script_start))s" >&2
 }
 
 main "$@"
-exit 0  # Always succeed for Railway deployment

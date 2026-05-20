@@ -98,6 +98,76 @@ def release_priority(repo: str) -> int:
     return order.get(repo, 99)
 
 
+def github_api(url: str) -> dict:
+    """Simple GitHub API call."""
+    req = urllib.request.Request(url, headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "ClawBack-Ecosystem/1.0"
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode())
+    except Exception:
+        return {}
+
+
+def fetch_recent_commits(repo: str, days: int = 7) -> list:
+    """Fetch commits from the last N days for a repo."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    url = f"https://api.github.com/repos/{repo}/commits?since={since}&per_page=10"
+    data = github_api(url)
+    if not isinstance(data, list):
+        return []
+    commits = []
+    for c in data:
+        commit = c.get("commit", {})
+        commits.append({
+            "sha": c.get("sha", "")[:7],
+            "message": (commit.get("message", "") or "").split("\n")[0],
+            "author": commit.get("author", {}).get("name", ""),
+            "date": commit.get("author", {}).get("date", "")
+        })
+    return commits
+
+
+def get_ecosystem_activity(sources: dict, days: int = 7, max_repos: int = 15) -> list:
+    """Get repos with recent commit activity, grouped by category."""
+    curated = sources.get("curated", [])
+    active = []
+    for project in curated:
+        repo = project.get("repo")
+        if not repo or not project.get("exists", True):
+            continue
+        commits = fetch_recent_commits(repo, days)
+        if len(commits) >= 2:
+            active.append({
+                "repo": repo,
+                "name": project.get("name", repo.split("/")[-1]),
+                "description": project.get("description", ""),
+                "stars": project.get("stars", 0),
+                "category": project.get("notion_category", "Ecosystem"),
+                "commits": commits,
+                "commit_count": len(commits),
+                "url": project.get("url", f"https://github.com/{repo}")
+            })
+    # Sort by commit count desc, then stars desc
+    active.sort(key=lambda x: (-x["commit_count"], -x.get("stars", 0)))
+    return active[:max_repos]
+
+
+def notion_category_emoji(category: str) -> str:
+    emojis = {
+        "Core": "👑",
+        "Tiny Claws": "🐾",
+        "Self Hosted": "🏠",
+        "Enterprise Big Tech": "🏢",
+        "Enterprise Startups": "🚀",
+        "Infrastructure": "⚙️",
+        "Ecosystem": "🌿"
+    }
+    return emojis.get(category, "📦")
+
+
 def summarize_security(security_state: dict):
     alerts = security_state.get("alerts", [])[-10:]
     if not alerts:
@@ -179,6 +249,7 @@ def search_ecosystem_news(api_key: str):
 
 def format_daily_digest(items: dict, news: list, security_state: dict) -> str:
     """Format a stronger daily digest message for Telegram."""
+    sources = load_sources()
     lines = []
     lines.append(f"🦀 **ClawBytes Daily — {datetime.now().strftime('%B %d, %Y')}**")
     lines.append("")
@@ -187,11 +258,16 @@ def format_daily_digest(items: dict, news: list, security_state: dict) -> str:
     hn_items = sorted(items.get("newHNStories", []), key=lambda x: x.get("points", 0), reverse=True)
     skills = items.get("newSkills", [])
     security = summarize_security(security_state)
+    
+    # Recent commit activity (last 1 day for daily)
+    active_repos = get_ecosystem_activity(sources, days=1, max_repos=8)
 
     if security["items"]:
         lead = trim(security["items"][0].get("title", "Security issue detected"), 140)
     elif releases:
         lead = trim(f"{releases[0].get('repo','').split('/')[-1]} shipped {releases[0].get('tag','a new release')}", 140)
+    elif active_repos:
+        lead = trim(f"{active_repos[0]['name']} ({active_repos[0]['commit_count']} commits) — active dev continues", 140)
     elif hn_items:
         lead = trim(hn_items[0].get("title", "Community chatter picked up"), 140)
     elif skills:
@@ -203,6 +279,7 @@ def format_daily_digest(items: dict, news: list, security_state: dict) -> str:
     lines.append(f"📅 {datetime.now().strftime('%B %d, %Y')}")
     lines.append("")
     
+    # Releases
     if releases:
         lines.append("📦 **Releases**")
         for release in releases[:4]:
@@ -215,6 +292,19 @@ def format_daily_digest(items: dict, news: list, security_state: dict) -> str:
                 lines.append(f"  {body}")
             if url:
                 lines.append(f"  🔗 {url}")
+        lines.append("")
+    
+    # Active development (commits in last 24h)
+    if active_repos:
+        lines.append("🔨 **Active Development (24h)**")
+        for r in active_repos[:5]:
+            name = r["name"]
+            commits = r["commit_count"]
+            url = r["url"]
+            latest = trim(r["commits"][0]["message"], 60) if r["commits"] else ""
+            lines.append(f"• **[{name}]({url})** — {commits} commits")
+            if latest:
+                lines.append(f"  `→ {latest}`")
         lines.append("")
 
     if skills:
@@ -248,7 +338,7 @@ def format_daily_digest(items: dict, news: list, security_state: dict) -> str:
         lines.append(f"  • {trim(alert.get('title', ''), 95)}")
     lines.append("")
 
-    if not any([releases, hn_items, skills, news, security["items"]]):
+    if not any([releases, hn_items, skills, news, security["items"], active_repos]):
         lines.append("_Quiet day — no meaningful ecosystem movement detected._")
         lines.append("")
 
@@ -260,6 +350,7 @@ def format_daily_digest(items: dict, news: list, security_state: dict) -> str:
 
 def format_weekly_digest(items: dict, news: list) -> str:
     """Format a weekly digest with full ecosystem coverage."""
+    sources = load_sources()
     lines = []
     lines.append("🦀 **Claw Ecosystem Weekly Digest**")
     lines.append(f"📅 Week of {datetime.now().strftime('%B %d, %Y')}")
@@ -278,20 +369,46 @@ def format_weekly_digest(items: dict, news: list) -> str:
     
     # Releases (detailed)
     if items.get("newReleases"):
-        lines.append("📦 **Releases**")
+        lines.append("🚢 **What Shipped — Releases**")
         for release in items["newReleases"]:
             repo = release.get("repo", "")
             tag = release.get("tag", "")
             url = release.get("url", "")
-            body = release.get("body", "")[:200]
-            lines.append(f"**{repo}** - {tag}")
+            body = trim(release.get("body", "") or release.get("name", ""), 120)
+            repo_name = repo.split("/")[-1]
+            lines.append(f"📦 **[{repo_name}]({url})** {tag}")
             if body:
-                lines.append(f"_{body}..._")
-            if url:
-                lines.append(f"🔗 {url}")
+                lines.append(f"  _{body}_")
             lines.append("")
     
-    # HN notable items
+    # Recent commit activity across ecosystem
+    active_repos = get_ecosystem_activity(sources, days=7, max_repos=12)
+    if active_repos:
+        lines.append("🔨 **What Shipped — Active Development**")
+        # Group by category
+        by_category = {}
+        for repo in active_repos:
+            cat = repo.get("category", "Ecosystem")
+            by_category.setdefault(cat, []).append(repo)
+        
+        for cat, repos in sorted(by_category.items()):
+            emoji = notion_category_emoji(cat)
+            lines.append(f"\n{emoji} **{cat}**")
+            for repo in repos[:3]:
+                name = repo.get("name", repo["repo"].split("/")[-1])
+                desc = trim(repo.get("description", ""), 90)
+                commits = repo.get("commit_count", 0)
+                url = repo.get("url", "")
+                latest = repo.get("commits", [{}])[0].get("message", "")
+                latest = trim(latest, 70)
+                lines.append(f"• **[{name}]({url})** — {commits} commits")
+                if desc:
+                    lines.append(f"  _{desc}_")
+                if latest:
+                    lines.append(f"  `→ {latest}`")
+            lines.append("")
+    
+    # HN highlights
     if items.get("newHNStories"):
         lines.append("🔶 **Top HN Discussions**")
         sorted_stories = sorted(
@@ -453,6 +570,151 @@ def format_ecosystem_summary() -> str:
     return "\n".join(lines)
 
 
+def create_weekly_notion_page(items: dict, news: list) -> str | None:
+    """Create a rich Notion page for the weekly digest under the Claws page."""
+    from datetime import timedelta
+    NOTION_PAGE_ID = "337000c0-d590-805d-af74-f27d19215184"
+    NOTION_KEY = os.environ.get("NOTION_API_KEY", "")
+    HEADERS = {
+        "Authorization": f"Bearer {NOTION_KEY}",
+        "Notion-Version": "2022-06-28",
+        "Content-Type": "application/json",
+    }
+    
+    week_start = datetime.now() - timedelta(days=datetime.now().weekday())
+    week_str = week_start.strftime("%b %d")
+    page_title = f"ClawBytes Weekly — Week of {week_str}"
+    
+    sources = load_sources()
+    releases = sorted(items.get("newReleases", []), key=lambda x: release_priority(x.get("repo", "")))
+    hn_items = sorted(items.get("newHNStories", []), key=lambda x: x.get("points", 0), reverse=True)
+    active_repos = get_ecosystem_activity(sources, days=7, max_repos=20)
+    security = summarize_security(load_security_state())
+    
+    children = []
+    
+    # Summary
+    release_count = len(releases)
+    hn_count = len(hn_items)
+    active_count = len(active_repos)
+    children.append({"object": "block", "type": "callout",
+                     "callout": {"icon": {"type": "emoji", "emoji": "📊"},
+                                 "rich_text": [{"type": "text", "text": {"content": f"This week: {release_count} releases, {hn_count} HN discussions, {active_count} repos with active development"}}]}})
+    children.append({"object": "block", "type": "divider", "divider": {}})
+    
+    # Releases
+    if releases:
+        children.append({"object": "block", "type": "heading_2",
+                         "heading_2": {"rich_text": [{"type": "text", "text": {"content": "🚢 Releases"}}]}})
+        for rel in releases:
+            name = rel.get("repo", "").split("/")[-1]
+            tag = rel.get("tag", "")
+            url = rel.get("url", "")
+            body = trim(rel.get("body", "") or rel.get("name", ""), 140)
+            text = f"{name} {tag}"
+            if body:
+                text += f"\n{body}"
+            children.append({"object": "block", "type": "bulleted_list_item",
+                             "bulleted_list_item": {"rich_text": [
+                                 {"type": "text", "text": {"content": text, "link": {"url": url} if url else None}}
+                             ]}})
+        children.append({"object": "block", "type": "divider", "divider": {}})
+    
+    # Active Development by category
+    if active_repos:
+        children.append({"object": "block", "type": "heading_2",
+                         "heading_2": {"rich_text": [{"type": "text", "text": {"content": "🔨 Active Development"}}]}})
+        by_category = {}
+        for r in active_repos:
+            cat = r.get("category", "Ecosystem")
+            by_category.setdefault(cat, []).append(r)
+        
+        for cat, repos in sorted(by_category.items()):
+            emoji = notion_category_emoji(cat)
+            children.append({"object": "block", "type": "heading_3",
+                             "heading_3": {"rich_text": [{"type": "text", "text": {"content": f"{emoji} {cat}"}}]}})
+            for repo in repos[:4]:
+                name = repo.get("name", repo["repo"].split("/")[-1])
+                url = repo.get("url", "")
+                commits = repo.get("commit_count", 0)
+                latest = trim(repo.get("commits", [{}])[0].get("message", ""), 80)
+                text = f"{name} — {commits} commits"
+                if latest:
+                    text += f"\n→ {latest}"
+                children.append({"object": "block", "type": "bulleted_list_item",
+                                 "bulleted_list_item": {"rich_text": [
+                                     {"type": "text", "text": {"content": text, "link": {"url": url} if url else None}}
+                                 ]}})
+        children.append({"object": "block", "type": "divider", "divider": {}})
+    
+    # HN Discussions
+    if hn_items:
+        children.append({"object": "block", "type": "heading_2",
+                         "heading_2": {"rich_text": [{"type": "text", "text": {"content": "🔶 HN Discussions"}}]}})
+        for story in hn_items[:5]:
+            title = story.get("title", "")
+            points = story.get("points", 0)
+            hn_url = story.get("hn_url", "")
+            text = f"{title} ({points} pts)"
+            children.append({"object": "block", "type": "bulleted_list_item",
+                             "bulleted_list_item": {"rich_text": [
+                                 {"type": "text", "text": {"content": text, "link": {"url": hn_url} if hn_url else None}}
+                             ]}})
+        children.append({"object": "block", "type": "divider", "divider": {}})
+    
+    # Security
+    children.append({"object": "block", "type": "heading_2",
+                     "heading_2": {"rich_text": [{"type": "text", "text": {"content": "⚠️ Security"}}]}})
+    if security["items"]:
+        for alert in security["items"][:3]:
+            children.append({"object": "block", "type": "bulleted_list_item",
+                             "bulleted_list_item": {"rich_text": [
+                                 {"type": "text", "text": {"content": trim(alert.get("title", ""), 120)}}
+                             ]}})
+    else:
+        children.append({"object": "block", "type": "paragraph",
+                         "paragraph": {"rich_text": [{"type": "text", "text": {"content": "✅ All clear this week."}}]}})
+    children.append({"object": "block", "type": "divider", "divider": {}})
+    
+    # Web News
+    if news:
+        children.append({"object": "block", "type": "heading_2",
+                         "heading_2": {"rich_text": [{"type": "text", "text": {"content": "📰 Around the Web"}}]}})
+        for article in news[:5]:
+            title = article.get("title", "")
+            url = article.get("url", "")
+            children.append({"object": "block", "type": "bulleted_list_item",
+                             "bulleted_list_item": {"rich_text": [
+                                 {"type": "text", "text": {"content": title, "link": {"url": url} if url else None}}
+                             ]}})
+    
+    # Footer
+    children.append({"object": "block", "type": "paragraph",
+                     "paragraph": {"rich_text": [{"type": "text", "text": {"content": f"\n—\nGenerated by ClawBack 🦀 | {datetime.now().strftime('%Y-%m-%d')}"}}]}})
+    
+    # Create page via Notion API
+    try:
+        import ssl
+        url = "https://api.notion.com/v1/pages"
+        data = {
+            "parent": {"page_id": NOTION_PAGE_ID},
+            "properties": {
+                "title": {"title": [{"type": "text", "text": {"content": page_title}}]}
+            },
+            "children": children
+        }
+        req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=HEADERS, method="POST")
+        ctx = ssl.create_default_context()
+        with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+            result = json.loads(resp.read())
+            page_id = result.get("id")
+            print(f"✅ Created Notion page: {page_title} ({page_id})", file=sys.stderr)
+            return page_id
+    except Exception as e:
+        print(f"❌ Failed to create Notion page: {e}", file=sys.stderr)
+        return None
+
+
 def send_to_telegram(message: str, channel_id: str, bot_token: str) -> bool:
     """Send a message to a Telegram channel."""
     if not channel_id or not bot_token:
@@ -491,6 +753,7 @@ def main():
     parser = argparse.ArgumentParser(description="Generate Claw Ecosystem digests")
     parser.add_argument("--mode", choices=["daily", "weekly", "discover", "summary"], required=True,
                         help="Digest mode: daily, weekly, discover (new projects), or summary")
+    parser.add_argument("--notion", action="store_true", help="Also create a Notion page for weekly digest")
     parser.add_argument("--channel-id", help="Telegram channel ID")
     parser.add_argument("--bot-token", help="Telegram bot token")
     parser.add_argument("--send", action="store_true", help="Actually send to Telegram")
@@ -520,6 +783,13 @@ def main():
     else:
         print(f"Unknown mode: {args.mode}", file=sys.stderr)
         sys.exit(1)
+    
+    if args.mode == "weekly" and args.notion:
+        items = load_new_items()
+        news = search_ecosystem_news(brave_key)
+        notion_page_id = create_weekly_notion_page(items, news)
+        if notion_page_id:
+            print(f"\n🔗 Notion page: https://sovs.notion.site/{notion_page_id.replace('-', '')}")
     
     # Output the message
     print(message)

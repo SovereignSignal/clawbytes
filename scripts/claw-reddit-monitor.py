@@ -15,9 +15,8 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
-# Workspace path - use env var or default
-import os
-WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
+# Workspace path
+WORKSPACE = Path(__file__).parent.parent
 MEMORY_DIR = WORKSPACE / "memory"
 STATE_FILE = MEMORY_DIR / "claw-reddit-state.json"
 
@@ -30,12 +29,22 @@ SUBREDDITS = [
     },
     {
         "name": "selfhosted",
-        "url": "https://www.reddit.com/r/selfhosted/search.json?q=openclaw&sort=new&limit=10",
+        "url": "https://www.reddit.com/r/selfhosted/search.json?q=openclaw+OR+ai+agent+OR+llm+agent&sort=new&limit=10",
         "type": "search"
     },
     {
         "name": "LocalLLaMA",
-        "url": "https://www.reddit.com/r/LocalLLaMA/search.json?q=openclaw+OR+claw+agent&sort=new&limit=10",
+        "url": "https://www.reddit.com/r/LocalLLaMA/search.json?q=openclaw+OR+claw+agent+OR+ai+agent+workspace+OR+coding+agent&sort=new&limit=10",
+        "type": "search"
+    },
+    {
+        "name": "MachineLearning",
+        "url": "https://www.reddit.com/r/MachineLearning/search.json?q=openclaw+OR+llm+agent+OR+tool+use+OR+function+calling&sort=new&limit=10",
+        "type": "search"
+    },
+    {
+        "name": "artificial",
+        "url": "https://www.reddit.com/r/artificial/search.json?q=ai+agent+OR+llm+framework+OR+coding+assistant&sort=new&limit=5",
         "type": "search"
     },
     {
@@ -45,14 +54,22 @@ SUBREDDITS = [
     },
     {
         "name": "singularity",
-        "url": "https://www.reddit.com/r/singularity/search.json?q=openclaw&sort=new&limit=5",
+        "url": "https://www.reddit.com/r/singularity/search.json?q=openclaw+OR+ai+agent+framework&sort=new&limit=5",
         "type": "search"
-    }
+    },
 ]
 
-# Quality thresholds
-MIN_SCORE = 50
-MIN_COMMENTS = 20
+# Quality thresholds (lowered for broader coverage)
+MIN_SCORE = 30
+MIN_COMMENTS = 15
+
+# r/openclaw-specific: filter out low-signal generic questions
+OPENCLAW_FLAIR_BLACKLIST = {"help", "question", "bug"}
+OPENCLAW_TITLE_BLACKLIST_PATTERNS = [
+    r"^(can|should|does|is|how|what|where|when|why|do you|anyone|has anyone)",
+    r"(sell|selling|price|cost|worth|buy)",
+    r"(credit card|payment|billing|subscription)",
+]
 
 def load_state():
     """Load state from file or return default."""
@@ -118,10 +135,30 @@ def parse_posts(data, subreddit_name):
     
     return posts
 
+import re
+
+# r/openclaw-specific: filter out low-signal generic questions
+OPENCLAW_FLAIR_BLACKLIST = {"help", "question", "bug"}
+OPENCLAW_TITLE_BLACKLIST_PATTERNS = [
+    r"^(can|should|does|is|how|what|where|when|why|do you|anyone|has anyone)",
+    r"(sell|selling|price|cost|worth|buy)",
+    r"(credit card|payment|billing|subscription)",
+]
+
 def passes_quality_filter(post, subreddit_type):
     """Check if post passes quality thresholds."""
-    # r/openclaw posts are always interesting
+    # r/openclaw posts: filter low-signal generic questions
     if post["subreddit"].lower() == "openclaw":
+        title = post.get("title", "").lower()
+        flair = (post.get("link_flair_text") or post.get("flair") or "").lower()
+        # Blacklist certain flairs
+        if flair in OPENCLAW_FLAIR_BLACKLIST:
+            return False
+        # Blacklist generic question titles (unless high engagement)
+        if post["score"] < 10 and post["num_comments"] < 5:
+            for pattern in OPENCLAW_TITLE_BLACKLIST_PATTERNS:
+                if re.search(pattern, title, re.IGNORECASE):
+                    return False
         return True
     
     # For search results, require quality thresholds
@@ -137,7 +174,24 @@ def check_subreddits(verbose=True):
     sub_status = {}
     seen_posts = set(state.get("seenPosts", []))
     
-    for sub in SUBREDDITS:
+    # Merge dynamic subreddits with hardcoded ones
+    dynamic_path = MEMORY_DIR / "clawbytes-dynamic-feeds.json"
+    all_subs = list(SUBREDDITS)
+    if dynamic_path.exists():
+        try:
+            dynamic = json.loads(dynamic_path.read_text())
+            for sub in dynamic.get("subreddits", []):
+                if sub.get("name", "").lower() not in {s["name"].lower() for s in all_subs}:
+                    # Dynamic subs default to "search" type with a broader query
+                    if "url" not in sub:
+                        name = sub["name"]
+                        sub["url"] = f"https://www.reddit.com/r/{name}/hot.json?limit=10"
+                        sub["type"] = "hot"
+                    all_subs.append(sub)
+        except Exception:
+            pass
+    
+    for sub in all_subs:
         name = sub["name"]
         url = sub["url"]
         sub_type = sub["type"]
