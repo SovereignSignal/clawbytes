@@ -92,6 +92,23 @@ def load_json(path: Path):
 
 
 def cred(section: str, key: str) -> str:
+    # Env vars take precedence over CREDS.md so Railway deploys work without
+    # a CREDS.md file. Generic SECTION_KEY form first, then a small explicit map
+    # for the well-known cases that don't match the generic form.
+    env_key = f"{section.upper().replace(' ', '_')}_{key.upper().replace(' ', '_')}"
+    env_val = os.environ.get(env_key)
+    if env_val:
+        return env_val
+    common_keys = {
+        ('ClawBytes Channel', 'Bot Token'): 'TELEGRAM_BOT_TOKEN',
+        ('Telegram Bots', 'Bot Token'): 'TELEGRAM_BOT_TOKEN',
+        ('GitHub API', 'Token'): 'GITHUB_TOKEN',
+    }
+    env_name = common_keys.get((section, key))
+    if env_name:
+        env_val = os.environ.get(env_name)
+        if env_val:
+            return env_val
     text = read_text(CREDS)
     pattern = rf"## {re.escape(section)}\n(?:.*\n)*?-\s*(?:\*\*)?{re.escape(key)}(?:\*\*)?:\s*([^\n]+)"
     m = re.search(pattern, text)
