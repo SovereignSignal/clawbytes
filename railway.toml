@@ -1,44 +1,26 @@
+# ClawBytes Railway config.
+#
+# All services in the claw-bytes project build from this Dockerfile.
+# Per-service `startCommand` and `cronSchedule` are configured at the
+# service level (Railway dashboard or GraphQL), not in this file —
+# different cron services (collect, publish-ship, publish-watch,
+# publish-read, publish-community, supervisor) all share this image
+# but each runs a different command on its own schedule.
+#
+# The [[cron]] blocks that used to live here were silently ignored by
+# Railway (the top-level [[cron]] array is not a recognized schema).
+# See docs/superpowers/specs/2026-05-20-clawbytes-architecture-design.md
+# for the full deployment model.
+
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
-[deploy]
-startCommand = "python clawbytes_daily.py --send"
-restartPolicyType = "ON_FAILURE"
-
-# Collect from source monitors into backlog every 30 minutes
-[[cron]]
-name = "collect"
-schedule = "*/30 * * * *"
-command = "python clawbytes_threads.py collect --run-monitors"
-
-# Ship lane: 9 AM PT (16:00 UTC)
-[[cron]]
-name = "ship"
-schedule = "0 16 * * *"
-command = "python clawbytes_threads.py publish --category ship --if-ready --send"
-
-# Watch lane: 12 PM PT (19:00 UTC)
-[[cron]]
-name = "watch"
-schedule = "0 19 * * *"
-command = "python clawbytes_threads.py publish --category watch --if-ready --send"
-
-# Read lane: 3 PM PT (22:00 UTC)
-[[cron]]
-name = "read"
-schedule = "0 22 * * *"
-command = "python clawbytes_threads.py publish --category read --if-ready --send"
-
-# Community lane: 7 PM PT (02:00 UTC next day)
-[[cron]]
-name = "community"
-schedule = "0 2 * * *"
-command = "python clawbytes_threads.py publish --category community --if-ready --send"
-
 [env]
 TELEGRAM_BOT_TOKEN = { required = true }
 TELEGRAM_CHANNEL_ID = { required = true }
+CLAUDE_CREDENTIALS = { required = true }
+GITHUB_TOKEN = { required = false }
 BRAVE_API_KEY = { required = false }
-DATABASE_URL = { required = true }
+DATABASE_URL = { required = false }
 WORKSPACE = "/app"
