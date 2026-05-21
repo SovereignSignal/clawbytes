@@ -1,0 +1,10 @@
+[Unit]
+Description=Send Claw Consulting weekly content summary to Slack
+
+[Service]
+Type=oneshot
+User=ddaadmin
+Group=ddaadmin
+WorkingDirectory=/opt/claw/content-engine
+ExecStart=/opt/claw/bin/send-slack-summary.sh
+
