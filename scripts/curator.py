@@ -145,6 +145,10 @@ def curate(bundle: dict, *, timeout: int = 180, dry_run: bool = False) -> dict:
         )
     except ClaudeCodeError as e:
         log_degraded(lane, e.kind, str(e))
+        # Emit stderr to our own stderr so Railway logs capture it for diagnosis
+        print(f"[curator] ClaudeCodeError kind={e.kind} msg={e}", file=sys.stderr)
+        if e.stderr:
+            print(f"[curator] claude stderr (first 2000 chars):\n{e.stderr[:2000]}", file=sys.stderr)
         return fallback_bundle(bundle, f"claude error: {e}", e.kind)
 
     try:
