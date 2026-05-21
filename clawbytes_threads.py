@@ -1463,6 +1463,105 @@ def autopublish(send: bool = False) -> List[dict]:
     return results
 
 
+def curator_input_bundle(category: str, limit: Optional[int] = None) -> dict:
+    """Build the JSON object the curator (scripts/curator.py) expects on stdin."""
+    meta = CATEGORY_META[category]
+    raw_items = [hydrate_item(item) for item in bundle_for_category(category, limit)]
+
+    # Apply the same compression the deterministic path uses
+    if category == "watch":
+        raw_items = compress_watch_bundle(raw_items)
+    elif category == "ship":
+        raw_items = enrich_ship_with_notion(raw_items)
+        raw_items = compress_ship_bundle(raw_items)
+    elif category == "community":
+        raw_items = compress_community_bundle(raw_items)
+
+    items = []
+    for item in raw_items:
+        items.append({
+            "id": item.get("id"),
+            "title": display_title(item),
+            "url": item.get("url"),
+            "blurb": (item.get("summary") or "").strip(),
+            "source": item.get("sourceType"),
+            "source_name": item.get("sourceName"),
+            "score": item.get("score"),
+            "published_at": item.get("publishedAt"),
+        })
+
+    return {
+        "lane": category,
+        "lane_label": meta["label"],
+        "lane_emoji": meta["emoji"],
+        "lead_signal": "",
+        "take": "",
+        "items": items,
+    }
+
+
+def run_curator_subprocess(bundle: dict, timeout: int = 90) -> Optional[dict]:
+    """Shell out to scripts/curator.py with bundle on stdin. Return parsed JSON or None on failure."""
+    curator_script = Path(__file__).parent / "scripts" / "curator.py"
+    if not curator_script.exists():
+        print(f"curator script missing: {curator_script}", file=sys.stderr)
+        return None
+    try:
+        proc = subprocess.run(
+            ["python3", str(curator_script), "--timeout", str(timeout - 10)],
+            input=json.dumps(bundle),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"curator subprocess exceeded {timeout}s budget", file=sys.stderr)
+        return None
+    except FileNotFoundError:
+        print("python3 not found when invoking curator", file=sys.stderr)
+        return None
+
+    if proc.returncode != 0:
+        print(f"curator subprocess exited {proc.returncode}: {proc.stderr[:500]}", file=sys.stderr)
+        return None
+
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as e:
+        print(f"curator subprocess returned non-JSON: {e}; stdout={proc.stdout[:300]!r}", file=sys.stderr)
+        return None
+
+
+def format_curated_html(curated: dict, category: str) -> str:
+    """Format the curator's approved bundle as the Telegram HTML message."""
+    meta = CATEGORY_META[category]
+    lines = [f"{meta['emoji']} <b>{meta['label']}</b>"]
+
+    lead = (curated.get("lead_signal") or "").strip()
+    if lead:
+        lines.append("")
+        lines.append(f"<b>Lead:</b> {html_escape(lead)}")
+
+    items = curated.get("items") or []
+    if items:
+        lines.append("")
+        for item in items:
+            title = item.get("title") or ""
+            url = item.get("url") or ""
+            blurb = (item.get("blurb") or "").strip()
+            line = f"• <a href=\"{url}\">{html_escape(title)}</a>"
+            if blurb:
+                line += f"\n  {html_escape(blurb)}"
+            lines.append(line)
+
+    take = (curated.get("take") or "").strip()
+    if take:
+        lines.append("")
+        lines.append(f"<i>{html_escape(take)}</i>")
+
+    return "\n".join(lines)
+
+
 def main() -> int:
     ensure_files()
 
@@ -1479,6 +1578,8 @@ def main() -> int:
     p_prev.add_argument("--category", choices=list(CATEGORY_META.keys()), required=True)
     p_prev.add_argument("--limit", type=int)
     p_prev.add_argument("--collect-first", action="store_true")
+    p_prev.add_argument("--use-curator", action="store_true", help="Run Claude curator on the bundle and print the result")
+    p_prev.add_argument("--curator-timeout", type=int, default=90, help="Curator subprocess timeout in seconds")
 
     p_pub = sub.add_parser("publish")
     p_pub.add_argument("--category", choices=list(CATEGORY_META.keys()), required=True)
@@ -1486,6 +1587,8 @@ def main() -> int:
     p_pub.add_argument("--collect-first", action="store_true")
     p_pub.add_argument("--send", action="store_true")
     p_pub.add_argument("--if-ready", action="store_true")
+    p_pub.add_argument("--use-curator", action="store_true", help="Run Claude curator on the bundle before sending")
+    p_pub.add_argument("--curator-timeout", type=int, default=90, help="Curator subprocess timeout in seconds")
 
     args = parser.parse_args()
 
@@ -1509,6 +1612,21 @@ def main() -> int:
         collect_into_backlog()
 
     if args.cmd == "preview":
+        if getattr(args, "use_curator", False):
+            input_bundle = curator_input_bundle(args.category, args.limit)
+            curated = run_curator_subprocess(input_bundle, timeout=args.curator_timeout)
+            if curated is None:
+                print(format_category_bundle(args.category, args.limit))
+                print("\n(curator failed; printed deterministic bundle)", file=sys.stderr)
+                return 0
+            if not curated.get("_curator", {}).get("approved", True):
+                print("(curator declined to approve — would skip publish)", file=sys.stderr)
+                print(json.dumps(curated.get("_curator"), indent=2), file=sys.stderr)
+                return 0
+            print(format_curated_html(curated, args.category))
+            print("\n--- curator metadata ---", file=sys.stderr)
+            print(json.dumps(curated.get("_curator", {}), indent=2), file=sys.stderr)
+            return 0
         print(format_category_bundle(args.category, args.limit))
         return 0
 
@@ -1518,6 +1636,36 @@ def main() -> int:
             if not ready["ready"]:
                 print(json.dumps({"category": args.category, **ready}, indent=2))
                 return 0
+
+        if getattr(args, "use_curator", False):
+            input_bundle = curator_input_bundle(args.category, args.limit)
+            curated = run_curator_subprocess(input_bundle, timeout=args.curator_timeout)
+            if curated is None:
+                # Fall back to deterministic path (channel reliability > editorial purity)
+                print("(curator failed; falling back to deterministic bundle)", file=sys.stderr)
+                message = format_category_bundle(args.category, args.limit)
+                print(message)
+                bundle = bundle_for_category(args.category, args.limit)
+                if args.send and bundle:
+                    send_telegram(message)
+                    mark_posted(args.category, args.limit)
+                return 0
+            meta = curated.get("_curator", {})
+            if not meta.get("approved", True):
+                # Curator explicitly skipped
+                print("(curator declined to approve — skipping publish)", file=sys.stderr)
+                print(json.dumps(meta, indent=2), file=sys.stderr)
+                return 0
+            message = format_curated_html(curated, args.category)
+            print(message)
+            print("\n--- curator metadata ---", file=sys.stderr)
+            print(json.dumps(meta, indent=2), file=sys.stderr)
+            kept_items = curated.get("items") or []
+            if args.send and kept_items:
+                send_telegram(message)
+                mark_posted(args.category, args.limit)
+            return 0
+
         message = format_category_bundle(args.category, args.limit)
         print(message)
         bundle = bundle_for_category(args.category, args.limit)
