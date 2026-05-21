@@ -452,7 +452,15 @@ def main() -> int:
         print(format_dm(report))
         print(f"\nfull log: {report.get('log_path')}")
 
-    return 0 if report.get("code_health", {}).get("ok") and report.get("claude_auth", {}).get("ok") else 1
+    # Always exit 0 on a normal run. The supervisor's job is to REPORT issues,
+    # not to crash on them. Issues surface via the daily DM + supervisor-log/
+    # commit + GitHub issues. A non-zero exit code triggers Railway's
+    # "deployment crashed" panic notification, which is noise for "supervisor
+    # ran and reported that something else is broken".
+    #
+    # Reserve non-zero exits for cases where the supervisor itself failed
+    # uncaught (which would be a Python exception above this point, not here).
+    return 0
 
 
 if __name__ == "__main__":
