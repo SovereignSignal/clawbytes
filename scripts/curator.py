@@ -116,7 +116,7 @@ def persist_discovered_references(refs: list) -> None:
     DISCOVERED_REFS_FILE.write_text(json.dumps(existing, indent=2))
 
 
-def curate(bundle: dict, *, timeout: int = 60, dry_run: bool = False) -> dict:
+def curate(bundle: dict, *, timeout: int = 180, dry_run: bool = False) -> dict:
     """Run the curator pass on a single bundle. Always returns a usable bundle."""
     lane = bundle.get("lane", "unknown")
 
@@ -135,7 +135,12 @@ def curate(bundle: dict, *, timeout: int = 60, dry_run: bool = False) -> dict:
         result = call_claude(
             user_prompt,
             system_prompt=system_prompt,
-            allowed_tools=[],  # curator is pure JSON-in/JSON-out, no tool use needed
+            # Curator has research powers: WebSearch to find what shipped today
+            # in the agent ecosystem, WebFetch to pull primary sources, Read to
+            # consult EDITORIAL_SCOPE.md and the repo's own docs.
+            # When the input bundle is weak, the curator is expected to actively
+            # find better signal rather than skip the publish.
+            allowed_tools=["WebSearch", "WebFetch", "Read"],
             timeout=timeout,
         )
     except ClaudeCodeError as e:
@@ -169,7 +174,7 @@ def curate(bundle: dict, *, timeout: int = 60, dry_run: bool = False) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="ClawBytes curator (stdin=bundle JSON, stdout=curated bundle JSON)")
-    parser.add_argument("--timeout", type=int, default=60, help="Claude Code subprocess timeout in seconds")
+    parser.add_argument("--timeout", type=int, default=180, help="Claude Code subprocess timeout in seconds")
     parser.add_argument("--dry-run", action="store_true", help="Pass bundle through unchanged with fallback marker (no Claude call)")
     args = parser.parse_args()
 

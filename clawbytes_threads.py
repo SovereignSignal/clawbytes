@@ -1463,12 +1463,54 @@ def autopublish(send: bool = False) -> List[dict]:
     return results
 
 
+def _fetch_item_context(item: dict) -> dict:
+    """Fetch real source content for a single bundle item.
+
+    Curator output is only as good as its input. Without this, curator gets just
+    titles and writes generic prose. With this, curator sees release notes /
+    article excerpts / Notion signals and can extract a real operator-relevant
+    signal — or drop the item if there isn't one.
+    """
+    url = item.get("url") or ""
+    context = {"fetched": {}}
+
+    # GitHub releases — pull the release body via API
+    if "github.com" in url and "/releases/tag/" in url:
+        body = fetch_release_body(url)
+        if body:
+            context["fetched"]["release_notes"] = body
+            context["fetched"]["release_notes_source"] = "github_api"
+
+    # Other URLs — try article snippet (gracefully skips paywalls, JS-heavy sites, etc.)
+    elif url.startswith("http"):
+        snippet = fetch_article_snippet(url)
+        if snippet:
+            context["fetched"]["page_excerpt"] = snippet[:1200]
+            context["fetched"]["page_excerpt_source"] = "page_text"
+
+    # Notion editorial enrichment, if the item came through enrich_ship_with_notion
+    notion_signal = item.get("notion_signal") or item.get("notionSignal")
+    if notion_signal:
+        context["fetched"]["notion_editorial"] = notion_signal
+
+    # Existing summary/blurb (the deterministic stub) so curator can compare
+    existing_summary = (item.get("summary") or "").strip()
+    if existing_summary:
+        context["existing_blurb"] = existing_summary
+
+    return context
+
+
 def curator_input_bundle(category: str, limit: Optional[int] = None) -> dict:
-    """Build the JSON object the curator (scripts/curator.py) expects on stdin."""
+    """Build the JSON object the curator (scripts/curator.py) expects on stdin.
+
+    Pre-fetches real source content for each item so the curator has substantive
+    material to work with, not just titles. Without this enrichment, the curator
+    can only paraphrase headlines.
+    """
     meta = CATEGORY_META[category]
     raw_items = [hydrate_item(item) for item in bundle_for_category(category, limit)]
 
-    # Apply the same compression the deterministic path uses
     if category == "watch":
         raw_items = compress_watch_bundle(raw_items)
     elif category == "ship":
@@ -1479,23 +1521,22 @@ def curator_input_bundle(category: str, limit: Optional[int] = None) -> dict:
 
     items = []
     for item in raw_items:
-        items.append({
+        slim = {
             "id": item.get("id"),
             "title": display_title(item),
             "url": item.get("url"),
-            "blurb": (item.get("summary") or "").strip(),
             "source": item.get("sourceType"),
             "source_name": item.get("sourceName"),
             "score": item.get("score"),
             "published_at": item.get("publishedAt"),
-        })
+        }
+        slim.update(_fetch_item_context(item))
+        items.append(slim)
 
     return {
         "lane": category,
         "lane_label": meta["label"],
         "lane_emoji": meta["emoji"],
-        "lead_signal": "",
-        "take": "",
         "items": items,
     }
 
