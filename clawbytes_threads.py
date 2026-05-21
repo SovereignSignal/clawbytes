@@ -1541,7 +1541,7 @@ def curator_input_bundle(category: str, limit: Optional[int] = None) -> dict:
     }
 
 
-def run_curator_subprocess(bundle: dict, timeout: int = 90) -> Optional[dict]:
+def run_curator_subprocess(bundle: dict, timeout: int = 300) -> Optional[dict]:
     """Shell out to scripts/curator.py with bundle on stdin. Return parsed JSON or None on failure."""
     curator_script = Path(__file__).parent / "scripts" / "curator.py"
     if not curator_script.exists():
@@ -1626,7 +1626,7 @@ def main() -> int:
     p_prev.add_argument("--limit", type=int)
     p_prev.add_argument("--collect-first", action="store_true")
     p_prev.add_argument("--use-curator", action="store_true", help="Run Claude curator on the bundle and print the result")
-    p_prev.add_argument("--curator-timeout", type=int, default=90, help="Curator subprocess timeout in seconds")
+    p_prev.add_argument("--curator-timeout", type=int, default=300, help="Curator subprocess timeout in seconds")
 
     p_pub = sub.add_parser("publish")
     p_pub.add_argument("--category", choices=list(CATEGORY_META.keys()), required=True)
@@ -1635,7 +1635,7 @@ def main() -> int:
     p_pub.add_argument("--send", action="store_true")
     p_pub.add_argument("--if-ready", action="store_true")
     p_pub.add_argument("--use-curator", action="store_true", help="Run Claude curator on the bundle before sending")
-    p_pub.add_argument("--curator-timeout", type=int, default=90, help="Curator subprocess timeout in seconds")
+    p_pub.add_argument("--curator-timeout", type=int, default=300, help="Curator subprocess timeout in seconds")
 
     args = parser.parse_args()
 
