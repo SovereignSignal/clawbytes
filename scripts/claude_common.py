@@ -21,6 +21,33 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCOPE_FILE = REPO_ROOT / "EDITORIAL_SCOPE.md"
 
 
+def _materialize_credentials() -> None:
+    """Write CLAUDE_CREDENTIALS env var into ~/.claude/.credentials.json if missing.
+
+    Railway ignores Docker ENTRYPOINT and runs startCommand directly, so our
+    container entrypoint.sh never gets to set up the credentials file.
+    Instead, do it on first import of claude_common — runs in every cron
+    service that uses Claude Code (curator, supervisor) before any
+    `claude -p` subprocess fires.
+    """
+    creds_dir = Path(os.path.expanduser("~/.claude"))
+    creds_file = creds_dir / ".credentials.json"
+    if creds_file.exists():
+        return
+    raw = os.environ.get("CLAUDE_CREDENTIALS")
+    if not raw:
+        return
+    try:
+        creds_dir.mkdir(parents=True, exist_ok=True)
+        creds_file.write_text(raw)
+        os.chmod(creds_file, 0o600)
+    except OSError as e:
+        print(f"[claude_common] WARNING: failed to write credentials file: {e}", file=sys.stderr)
+
+
+_materialize_credentials()
+
+
 class ClaudeCodeError(Exception):
     """Raised when Claude Code subprocess fails in a way the caller should handle."""
 
