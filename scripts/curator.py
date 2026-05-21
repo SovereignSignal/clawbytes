@@ -155,6 +155,21 @@ def curate(bundle: dict, *, timeout: int = 180, dry_run: bool = False) -> dict:
         curated = parse_json_from_text(result.text)
     except (json.JSONDecodeError, ValueError) as e:
         log_degraded(lane, "bad_json", f"curator returned non-JSON: {result.text[:300]!r}")
+        # Dump start/middle/end of the offending text so we can see what Claude actually wrote.
+        # Many bad_json errors are unescaped quotes in a blurb or a trailing comma.
+        print(f"[curator] BAD JSON parse error: {e}", file=sys.stderr)
+        print(f"[curator] text length: {len(result.text)}", file=sys.stderr)
+        print(f"[curator] text[:400]: {result.text[:400]!r}", file=sys.stderr)
+        # Print 200 chars around the error position
+        msg = str(e)
+        import re
+        m = re.search(r'char (\d+)', msg)
+        if m:
+            pos = int(m.group(1))
+            lo = max(0, pos - 200)
+            hi = min(len(result.text), pos + 200)
+            print(f"[curator] text[{lo}:{hi}] (error at char {pos}): {result.text[lo:hi]!r}", file=sys.stderr)
+        print(f"[curator] text[-400:]: {result.text[-400:]!r}", file=sys.stderr)
         return fallback_bundle(bundle, f"curator returned non-JSON: {e}", "bad_json")
 
     # Enrich curator metadata with telemetry
