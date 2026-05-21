@@ -5,6 +5,10 @@
 **Supersedes:** Implicit "producer-VM sync" operational model
 **Next step:** Implementation plan via writing-plans skill (after spec review)
 
+**Revisions:**
+- v1 (initial): used Anthropic API directly
+- v2 (current): switched to Claude Code headless mode to route through Sov's existing subscription quota; auth via mounted Railway secret. See §3.5.
+
 ---
 
 ## 1. Context
@@ -104,7 +108,9 @@ The bottom two layers are existing code (`scripts/claw-*-monitor.py`, `clawbytes
   - `scripts/curator.py` — called inline per publish, returns approved bundle JSON within a 60s budget
   - `scripts/supervisor.py` — called daily, audits and grows the system
 
-Both wrap the Anthropic SDK and share a `scripts/claude_common.py` module for client setup, scope-constitution loading, and JSON I/O contracts.
+Both invoke **Claude Code in headless mode** (`claude -p` with `--output-format json`) via `subprocess.run`, not the Anthropic API directly. This routes all Claude usage through Sov's existing Claude Code subscription quota rather than incurring separate API billing. See §3.5 for the invocation pattern and §10 for the credentials-mount mechanism.
+
+A shared `scripts/claude_common.py` module handles the subprocess wrapping, scope-constitution loading, prompt assembly, and JSON output parsing.
 
 ---
 
@@ -155,8 +161,8 @@ Curator returns to stdout: a single JSON object with the same shape as the input
       {"source_type": "blog", "url": "https://example.com/feed", "rationale": "cited 3× by tracked sources this week"}
     ],
     "anchor_check": "in-scope",
-    "model": "claude-sonnet-4-6",  // default; CLAUDE_MODEL env var overrides
-    "tokens_used": {"input": 8472, "output": 1183},
+    "model": "claude-sonnet-4-6",  // whatever Claude Code reported back; CLAUDE_MODEL env var passes --model
+    "tokens_used": {"input": 8472, "output": 1183},  // from Claude Code --output-format json
     "duration_ms": 24831
   }
 }
@@ -166,17 +172,56 @@ If `_curator.approved` is `false`, publisher skips the publish and logs the rati
 
 The publisher is also responsible for **persisting** the curator's `_curator.discovered_references` array: each entry gets appended to `memory/discovered_references.json` (a flat append-only list) so the supervisor can drain it on its next run (§5.2 vector #3).
 
-### Fallback (Anthropic API failure / timeout)
+### Fallback (Claude Code failure, auth expiration, timeout)
 
-If curator subprocess exits non-zero, times out at 60s, or returns malformed JSON: **publisher posts the original deterministic bundle as-is**. The fallback event is logged to `memory/degraded_publishes.json` for supervisor to inspect.
+If the `claude -p` subprocess exits non-zero, times out at 60s, returns malformed JSON, or signals auth failure (e.g., 401-equivalent from Claude Code), **publisher posts the original deterministic bundle as-is**. The fallback event is logged to `memory/degraded_publishes.json` with a `reason` field (`timeout` / `non_zero_exit` / `bad_json` / `auth_expired` / `quota_exhausted`).
 
-This is a fail-open design. Channel reliability outranks editorial purity. Supervisor reports if fallbacks happen >1×/24h ("curator may be misconfigured" / "Anthropic API may be degraded").
+This is a fail-open design. Channel reliability outranks editorial purity.
 
-### Cost shape
+Supervisor reports if fallbacks happen >1×/24h. The `auth_expired` reason is **critical** and triggers an immediate Telegram DM to Sov — only Sov can re-auth Claude Code locally and refresh the mounted credentials (see §3.5 and §7).
 
-- 4 publish cycles × ~10K input tokens + ~1K output tokens per call
-- Per Anthropic pricing (Sonnet 4.6): order of cents per day
-- Hard ceiling: `--max-cost-per-day` env var, supervisor refuses to invoke curator after ceiling hit (deterministic posts continue)
+### 3.5 Claude Code invocation pattern
+
+Curator and supervisor both use this pattern. Implementation lives in `scripts/claude_common.py`.
+
+```python
+# scripts/claude_common.py (sketch)
+import subprocess, json, os
+
+def call_claude(prompt: str, *, allowed_tools: list[str] = None, timeout: int = 60) -> dict:
+    cmd = ["claude", "-p", prompt, "--output-format", "json"]
+    if allowed_tools is not None:
+        cmd += ["--allowed-tools", ",".join(allowed_tools)]
+    if os.environ.get("CLAUDE_MODEL"):
+        cmd += ["--model", os.environ["CLAUDE_MODEL"]]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    if result.returncode != 0:
+        raise ClaudeCodeError(f"exit {result.returncode}: {result.stderr[:500]}")
+    return json.loads(result.stdout)
+```
+
+**Why headless Claude Code instead of the Anthropic API:**
+
+- **Uses Sov's existing subscription quota** — no separate API billing
+- **Tool use comes free** — supervisor can read files, run shell commands, grep code without writing tool-handling glue
+- **System prompt and context management are handled by Claude Code** — `claude_common.py` stays small
+
+**Authentication:**
+
+- Claude Code reads credentials from `~/.claude/.credentials.json` (OAuth access token + refresh token)
+- Sov authenticates once locally (`claude login`), then exports the file contents into a Railway secret variable `CLAUDE_CREDENTIALS`
+- Container entrypoint writes `$CLAUDE_CREDENTIALS` to `~/.claude/.credentials.json` before invoking any cron command
+- Access tokens refresh automatically using the refresh token; the refresh token has a months-long TTL
+- When the refresh token eventually expires, the container's `claude -p` calls start failing with auth errors → supervisor detects this and DMs Sov → Sov re-auths locally and updates the Railway secret
+
+**Quota considerations:**
+
+- Curator: 4 publish cycles × ~10K input tokens + ~1K output tokens = ~44K tokens/day
+- Supervisor: ~1 call/day × ~50K tokens (heavier — reads more code/state) = ~50K tokens/day
+- Total: ~95K tokens/day = ~3M tokens/month
+- This sits comfortably within the Max plan's quota under typical usage but should be monitored. If quota tightens, the curator drops to a smaller model first; if still tight, deterministic-only mode is the natural backstop.
+
+**Anthropic ToS note:** Using a personal subscription to run a background service in a container is in a gray area of Anthropic's terms — they're written assuming interactive personal use. If this becomes a problem, the migration path is to switch `claude_common.py` to use the Anthropic API directly (drop-in change to `call_claude()`), accepting per-token billing.
 
 ---
 
@@ -216,6 +261,15 @@ For each monitor's state JSON:
 - `foundItems` / `alerts` / etc. non-suspiciously-empty (≥1 item in last 14 days unless source is genuinely quiet)
 - `lastCheck` not stale beyond expected cadence
 
+#### 4.4b Claude Code auth health
+
+Supervisor runs a tiny `claude -p "ok"` smoke test at the start of every cycle. If it fails with an auth-related error, supervisor:
+1. Logs the failure to `supervisor-log/`
+2. Sends a **critical Telegram DM** to Sov: "Claude Code auth expired in container — re-auth locally and update `CLAUDE_CREDENTIALS` Railway secret"
+3. Continues the run with Claude-dependent steps skipped (compile-check and cron health audit still run; sourcing growth is paused for the day)
+
+Until Sov rotates the credentials, the publish lanes will fall back to deterministic mode (channel stays alive, just no curation).
+
 #### 4.5 Regression diagnosis & remediation
 
 When supervisor finds a code-side problem:
@@ -245,10 +299,10 @@ See §7.
 ### Inputs
 
 - Read access to all repo files, all state files, Postgres growth metrics
-- Read access to Railway GraphQL API (cron health audit)
-- Read access to GitHub API (open PRs/issues, query recent activity)
-- Anthropic API access (for the Claude calls)
-- Scope constitution + supervisor system prompt
+- Read access to Railway GraphQL API (cron health audit) — via `RAILWAY_TOKEN` secret
+- Read/write access to GitHub API (open PRs/issues, commit to repo, query activity) — via `GITHUB_TOKEN` with `repo` scope
+- Claude Code installed in the container with valid mounted credentials (see §3.5) — the supervisor inherits the same auth setup as the curator
+- Scope constitution + supervisor system prompt (`docs/supervisor-prompt.md`)
 
 ### Outputs
 
@@ -426,7 +480,9 @@ A concrete Wednesday, end to end.
 | Source monitor crash (one feed) | Existing "Monitor returned non-zero" log → supervisor's cron audit | PR or issue opened with diagnosis |
 | Collect cron doesn't fire | Supervisor's cron health audit (next day) | Critical DM if collect skipped >2h |
 | Curator returns malformed JSON | Publisher's JSON parse → fallback to deterministic | Logged as degraded publish; supervisor opens issue if pattern |
-| Anthropic API outage | Curator timeout → fallback to deterministic | Channel stays alive; supervisor DMs Sov if happens 2+ times in 24h |
+| Claude Code subprocess timeout / crash | Curator subprocess error → fallback to deterministic | Channel stays alive; supervisor DMs Sov if happens 2+ times in 24h |
+| Claude Code auth token expired | `claude -p` returns auth error → fallback to deterministic + supervisor 4.4b smoke test catches it | **Critical DM to Sov** — only Sov can rotate the `CLAUDE_CREDENTIALS` Railway secret |
+| Subscription quota exhausted | `claude -p` returns quota-related error → fallback to deterministic | Supervisor DMs Sov; deterministic publishing continues |
 | Telegram returns 401 (token revoked / bot removed) | Publisher's send fails | **Critical DM to Sov** — channel is silent |
 | Postgres down | Falls through to JSON-file state (already primary) | Growth metrics gap, no functional impact on publishing |
 | Supervisor itself crashes | No daily DM arrives | **Absence-of-heartbeat IS the alert** — Sov notices when the daily all-clear stops |
@@ -497,10 +553,13 @@ The daily supervisor DM IS the production-monitoring signal. If a DM doesn't arr
 **Phase 1 — scaffolding (no behavior change yet)**
 
 - Write `EDITORIAL_SCOPE.md`, `docs/curator-prompt.md`, `docs/supervisor-prompt.md`
+- Write `scripts/claude_common.py` (subprocess wrapper around `claude -p --output-format json`)
 - Write `scripts/curator.py` skeleton with `--dry-run` flag (returns bundle unchanged, logs would-be decisions)
 - Write `scripts/supervisor.py` skeleton with `--dry-run` flag
-- Add Anthropic SDK to `requirements.txt`
-- Wire `ANTHROPIC_API_KEY` env var in Railway
+- Update `Dockerfile`: add Node + `npm install -g @anthropic-ai/claude-code`
+- Update entrypoint script: write `$CLAUDE_CREDENTIALS` env var into `~/.claude/.credentials.json` before exec'ing the cron command
+- Sov authenticates Claude Code locally (`claude login`), copies `~/.claude/.credentials.json` contents into a new Railway secret `CLAUDE_CREDENTIALS`
+- Optional: set `CLAUDE_MODEL` Railway variable (defaults to whatever Claude Code uses if unset)
 
 **Phase 2 — Railway cron services**
 
@@ -538,6 +597,8 @@ The daily supervisor DM IS the production-monitoring signal. If a DM doesn't arr
 
 ## 11. Open questions / future work
 
+- **Anthropic ToS gray area**: using a personal Claude subscription to run a background container service is not what the subscription is designed for. If Anthropic flags this, the migration path is to swap `scripts/claude_common.py` to call the Anthropic API directly (one-file change), accepting per-token billing. Worth re-reading Anthropic's ToS before going live and possibly contacting them if in doubt.
+- **Credentials rotation cadence**: the OAuth refresh token in Claude Code has an undocumented but months-long TTL. First rotation will be a learning event — supervisor's auth-health check (§4.4b) is the early-warning system.
 - **Curator prompt versioning**: when Sov edits the curator system prompt mid-week, do we tag posts with the prompt version that produced them? (Probably yes, in `_curator.prompt_version`.)
 - **Multi-channel publishing**: the email digest path (`claws_digest.py`) is currently parallel and undocumented. Does it use the same curator/supervisor pipeline? (Out of scope for this design; addressable in a follow-up.)
 - **Engagement signals**: if Telegram exposes view counts / forwards, could feed back into source-quality scoring. Future enhancement.
