@@ -1580,15 +1580,18 @@ def run_curator_subprocess(bundle: dict, timeout: int = 300) -> Optional[dict]:
 
 
 def format_curated_html(curated: dict, category: str) -> str:
-    """Format the curator's approved bundle as the Telegram HTML message."""
+    """Single-message HTML rendering (kept for preview mode and backward compat).
+
+    The publish path uses format_curated_messages() + send_telegram_message_list()
+    instead, which produces one Telegram message per item — significantly more
+    readable in the channel.
+    """
     meta = CATEGORY_META[category]
     lines = [f"{meta['emoji']} <b>{meta['label']}</b>"]
-
     lead = (curated.get("lead_signal") or "").strip()
     if lead:
         lines.append("")
         lines.append(f"<b>Lead:</b> {html_escape(lead)}")
-
     items = curated.get("items") or []
     if items:
         lines.append("")
@@ -1600,13 +1603,64 @@ def format_curated_html(curated: dict, category: str) -> str:
             if blurb:
                 line += f"\n  {html_escape(blurb)}"
             lines.append(line)
-
     take = (curated.get("take") or "").strip()
     if take:
         lines.append("")
         lines.append(f"<i>{html_escape(take)}</i>")
-
     return "\n".join(lines)
+
+
+def format_curated_messages(curated: dict, category: str) -> List[str]:
+    """Render the curated bundle as a LIST of Telegram messages — one per item.
+
+    Each message is self-contained, focused on a single item. The lead signal
+    (if present) attaches to the first item's message for context. The take,
+    if present, becomes its own short closing message.
+    """
+    meta = CATEGORY_META[category]
+    items = curated.get("items") or []
+    if not items:
+        return []
+
+    messages: List[str] = []
+    lead = (curated.get("lead_signal") or "").strip()
+
+    for idx, item in enumerate(items):
+        title = item.get("title") or ""
+        url = item.get("url") or ""
+        blurb = (item.get("blurb") or "").strip()
+
+        lines = [f"{meta['emoji']} <b>{meta['label']}</b>"]
+
+        # Lead signal only on the first item, if present
+        if idx == 0 and lead:
+            lines.append("")
+            lines.append(f"<i>{html_escape(lead)}</i>")
+
+        lines.append("")
+        lines.append(f"<a href=\"{url}\">{html_escape(title)}</a>")
+        if blurb:
+            lines.append(html_escape(blurb))
+
+        messages.append("\n".join(lines))
+
+    take = (curated.get("take") or "").strip()
+    if take:
+        messages.append(f"{meta['emoji']} <i>{html_escape(take)}</i>")
+
+    return messages
+
+
+def send_telegram_message_list(messages: List[str], pace_seconds: float = 1.5) -> int:
+    """Send a list of messages to the channel, pacing for readable order."""
+    import time as _time
+    sent = 0
+    for i, msg in enumerate(messages):
+        send_telegram(msg)
+        sent += 1
+        if i < len(messages) - 1:
+            _time.sleep(pace_seconds)
+    return sent
 
 
 def main() -> int:
@@ -1703,13 +1757,16 @@ def main() -> int:
                 print("(curator declined to approve — skipping publish)", file=sys.stderr)
                 print(json.dumps(meta, indent=2), file=sys.stderr)
                 return 0
-            message = format_curated_html(curated, args.category)
-            print(message)
+            # Render as a list of per-item messages (one Telegram message per item)
+            messages = format_curated_messages(curated, args.category)
+            # Also print the single-message form to stdout for log readability
+            print(format_curated_html(curated, args.category))
+            print(f"\n--- {len(messages)} message(s) will be sent ---", file=sys.stderr)
             print("\n--- curator metadata ---", file=sys.stderr)
             print(json.dumps(meta, indent=2), file=sys.stderr)
-            kept_items = curated.get("items") or []
-            if args.send and kept_items:
-                send_telegram(message)
+            if args.send and messages:
+                sent = send_telegram_message_list(messages)
+                print(f"[publish] sent {sent} message(s) to Telegram", file=sys.stderr)
                 mark_posted(args.category, args.limit)
             return 0
 
