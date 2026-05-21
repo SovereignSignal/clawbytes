@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly Claw Consulting content packet timer
+
+[Timer]
+OnCalendar=Mon *-*-* 08:15:00 America/Los_Angeles
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
