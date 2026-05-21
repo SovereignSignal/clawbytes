@@ -1562,8 +1562,14 @@ def run_curator_subprocess(bundle: dict, timeout: int = 90) -> Optional[dict]:
         print("python3 not found when invoking curator", file=sys.stderr)
         return None
 
+    # Always propagate curator stderr so Railway logs capture diagnostics even
+    # when curator gracefully falls back (exit 0).
+    if proc.stderr:
+        sys.stderr.write(proc.stderr)
+        sys.stderr.flush()
+
     if proc.returncode != 0:
-        print(f"curator subprocess exited {proc.returncode}: {proc.stderr[:500]}", file=sys.stderr)
+        print(f"curator subprocess exited {proc.returncode}", file=sys.stderr)
         return None
 
     try:
