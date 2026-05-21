@@ -1,0 +1,10 @@
+[Unit]
+Description=Generate Claw Consulting weekly content packet
+
+[Service]
+Type=oneshot
+User=ddaadmin
+Group=ddaadmin
+WorkingDirectory=/opt/claw/content-engine
+ExecStart=/opt/claw/bin/generate-weekly.sh
+
