@@ -34,6 +34,60 @@ git config --global user.name "${GIT_AUTHOR_NAME:-ClawBytes Supervisor}" 2>/dev/
 git config --global --add safe.directory /app 2>/dev/null || \
     echo "[entrypoint] WARNING: could not configure git safe.directory" >&2
 
+# --- Legacy Railway code compatibility shim ---
+# Some Railway services may still boot an older clawbytes_threads.py from the
+# connected branch. Patch only those old signatures at container start so the
+# runtime honors shared memory, avoids Notion, and runs the same monitor set.
+python3 - <<'PY' || echo "[entrypoint] WARNING: compatibility shim failed" >&2
+from pathlib import Path
+
+path = Path("clawbytes_threads.py")
+if not path.exists():
+    raise SystemExit(0)
+
+text = path.read_text()
+original = text
+
+text = text.replace(
+    'WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))\n'
+    'MEMORY = WORKSPACE / "memory"\n',
+    'WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).resolve().parent)))\n'
+    'MEMORY = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))\n',
+)
+text = text.replace(
+    'CHANNEL_ID = "-100REDACTED"\n',
+    'CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "-100REDACTED")\n',
+)
+text = text.replace(
+    '# Notion Claws signal integration (must import before WORKSPACE usage).\n'
+    '# claw_notion_signals lives in scripts/, so both dirs go on sys.path.\n'
+    'sys.path.insert(0, str(Path(__file__).parent / "scripts"))\n'
+    'sys.path.insert(0, str(Path(__file__).parent))\n'
+    'from claw_notion_signals import enrich_ship_with_notion, find_notion_signals, to_backlog_candidates\n\n',
+    'def enrich_ship_with_notion(item: dict) -> dict:\n'
+    '    return item\n\n'
+    'def find_notion_signals(*args, **kwargs) -> list:\n'
+    '    return []\n\n'
+    'def to_backlog_candidates(*args, **kwargs) -> list:\n'
+    '    return []\n\n',
+)
+text = text.replace(
+    "        'python3 scripts/claw-reddit-monitor.py',\n"
+    "        'python3 scripts/claw-moltbook-monitor.py',\n",
+    "        'python3 scripts/claw-reddit-monitor.py',\n"
+    "        'python3 scripts/claw-hn-monitor.py --quiet',\n"
+    "        'python3 scripts/claw-moltbook-monitor.py',\n",
+)
+text = text.replace(
+    '    notion = load_json(MEMORY / "clawbytes-notion-signals.json", [])\n',
+    '    notion = []\n',
+)
+
+if text != original:
+    path.write_text(text)
+    print("[entrypoint] patched legacy clawbytes_threads.py runtime")
+PY
+
 # --- Legacy Railway cron isolation fallback ---
 # Railway cron services do not share local JSON state across containers. If a
 # publish job starts in a fresh container, collect inside that same container so
