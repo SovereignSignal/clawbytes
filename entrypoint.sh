@@ -27,9 +27,12 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
 fi
 
 # --- Git identity (supervisor commits as Supervisor) ---
-git config --global user.email "${GIT_AUTHOR_EMAIL:-supervisor@clawbytes}"
-git config --global user.name "${GIT_AUTHOR_NAME:-ClawBytes Supervisor}"
-git config --global --add safe.directory /app
+git config --global user.email "${GIT_AUTHOR_EMAIL:-supervisor@clawbytes}" 2>/dev/null || \
+    echo "[entrypoint] WARNING: could not configure git user.email" >&2
+git config --global user.name "${GIT_AUTHOR_NAME:-ClawBytes Supervisor}" 2>/dev/null || \
+    echo "[entrypoint] WARNING: could not configure git user.name" >&2
+git config --global --add safe.directory /app 2>/dev/null || \
+    echo "[entrypoint] WARNING: could not configure git safe.directory" >&2
 
 # --- Legacy Railway cron isolation fallback ---
 # Railway cron services do not share local JSON state across containers. If a
