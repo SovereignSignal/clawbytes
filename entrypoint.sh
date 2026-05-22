@@ -31,5 +31,18 @@ git config --global user.email "${GIT_AUTHOR_EMAIL:-supervisor@clawbytes}"
 git config --global user.name "${GIT_AUTHOR_NAME:-ClawBytes Supervisor}"
 git config --global --add safe.directory /app
 
+# --- Legacy Railway cron isolation fallback ---
+# Railway cron services do not share local JSON state across containers. If a
+# publish job starts in a fresh container, collect inside that same container so
+# the publish command has a current backlog to evaluate.
+if [[ "${CLAWBYTES_ENTRYPOINT_REFRESH_BEFORE_PUBLISH:-1}" != "0" ]]; then
+    command_text="$*"
+    if [[ "$command_text" == *"clawbytes_threads.py publish"* ]]; then
+        echo "[entrypoint] refreshing ClawBytes sources before publish command" >&2
+        python3 clawbytes_threads.py collect --run-monitors --summary || \
+            echo "[entrypoint] WARNING: publish-time source refresh failed; continuing to publish command" >&2
+    fi
+fi
+
 # --- Exec the command ---
 exec "$@"
