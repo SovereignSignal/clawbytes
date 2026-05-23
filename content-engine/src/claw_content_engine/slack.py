@@ -24,6 +24,18 @@ def send_slack_summary(summary_path: Path, webhook_url: str | None = None) -> tu
     return False, "Set SLACK_WEBHOOK_URL, or SLACK_BOT_TOKEN plus SLACK_CHANNEL_ID/SLACK_USER_ID"
 
 
+def send_text(text: str, *, channel_id: str = "", user_id: str = "") -> tuple[bool, str]:
+    webhook = os.environ.get("SLACK_WEBHOOK_URL", "")
+    if webhook and not channel_id and not user_id:
+        return _send_webhook(webhook, text)
+    bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+    target_channel = channel_id or os.environ.get("SLACK_CHANNEL_ID", "")
+    target_user = user_id or os.environ.get("SLACK_USER_ID", "")
+    if not bot_token or not (target_channel or target_user):
+        return False, "Set SLACK_BOT_TOKEN plus SLACK_CHANNEL_ID/SLACK_USER_ID"
+    return _send_bot_message(bot_token, text, channel_id=target_channel, user_id=target_user)
+
+
 def _send_webhook(webhook: str, text: str) -> tuple[bool, str]:
     payload = {"text": text[:39000]}
     req = urllib.request.Request(
