@@ -9,6 +9,7 @@ if [ -f /opt/claw/env/content-engine.env ]; then
 fi
 
 cd /opt/claw/content-engine
+export WORKSPACE=/opt/claw/clawbytes
 export PYTHONPATH=/opt/claw/content-engine/src
 export PYTHONUTF8=1
 export PYTHONIOENCODING=utf-8
