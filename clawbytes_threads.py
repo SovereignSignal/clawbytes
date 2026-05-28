@@ -30,20 +30,14 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-# Notion Claws signal integration (must import before WORKSPACE usage).
-# claw_notion_signals lives in scripts/, so both dirs go on sys.path.
-sys.path.insert(0, str(Path(__file__).parent / "scripts"))
-sys.path.insert(0, str(Path(__file__).parent))
-from claw_notion_signals import enrich_ship_with_notion, find_notion_signals, to_backlog_candidates
-
-WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
-MEMORY = WORKSPACE / "memory"
+WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).resolve().parent)))
+MEMORY = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 CREDS = WORKSPACE / "CREDS.md"
 
 BACKLOG_FILE = MEMORY / "clawbytes-backlog.json"
 THREAD_STATE_FILE = MEMORY / "clawbytes-thread-state.json"
 
-CHANNEL_ID = "-1003850321704"
+CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "-1003850321704")
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 CATEGORY_META = {
@@ -684,6 +678,7 @@ def run_monitors() -> None:
     cmds = [
         'python3 scripts/claw-rss-monitor.py',
         'python3 scripts/claw-reddit-monitor.py',
+        'python3 scripts/claw-hn-monitor.py --quiet',
         'python3 scripts/claw-moltbook-monitor.py',
         'python3 scripts/claw-security-monitor.py --quiet',
         'bash scripts/claw-ecosystem-monitor.sh --mode check',
@@ -707,30 +702,18 @@ def collect_candidates() -> Dict[str, List[dict]]:
     security = load_json(MEMORY / "claw-security-state.json", {}).get("alerts", [])
     moltbook = load_json(MEMORY / "claw-moltbook-state.json", {}).get("foundItems", [])
     hackernews = load_json(MEMORY / "claw-hn-state.json", {}).get("foundItems", [])
-    notion = load_json(MEMORY / "clawbytes-notion-signals.json", [])
     return {
         "rss": rss,
         "reddit": reddit,
         "security": security,
         "moltbook": moltbook,
         "hackernews": hackernews,
-        "notion": notion,
     }
 
 
 def collect_into_backlog() -> dict:
     ensure_files()
-    
-    # Refresh Notion signals before collection
-    try:
-        notion_signals = find_notion_signals(hours_back=48)
-        notion_candidates = to_backlog_candidates(notion_signals)
-        if notion_candidates:
-            CACHE_FILE = MEMORY / "clawbytes-notion-signals.json"
-            CACHE_FILE.write_text(json.dumps(notion_candidates, indent=2, default=str))
-    except Exception:
-        pass  # Notion fetch is best-effort; don't block collection on failure
-    
+
     backlog = load_json(BACKLOG_FILE, {"items": []})
     state = load_json(THREAD_STATE_FILE, {})
 
@@ -820,48 +803,12 @@ def collect_into_backlog() -> dict:
             existing_ids.add(b["id"])
             added.append(b)
 
-    # Notion signals from Claws page edits
-    for item in candidates["notion"]:
-        if not item.get("url"):
-            continue
-        dt = parse_dt(item.get("last_edit", "") or item.get("publishedAt", ""))
-        if not dt:
-            continue
-        # Notion signals expire quickly — fresh insight only
-        if (now_utc() - dt).total_seconds() > 172800:  # 48h
-            continue
-        key = source_key("notion", item.get("sourceId", ""), item.get("url", ""))
-        if key in seen_source_keys:
-            continue
-        seen_source_keys.add(key)
-        
-        # Convert notion signal to backlog item
-        b = {
-            "id": backlog_id(item["url"], item.get("title", "Notion signal")),
-            "url": item["url"],
-            "title": item.get("title", ""),
-            "summary": trim(item.get("summary", "")[:140], 140),
-            "sourceType": "notion",
-            "sourceName": item.get("sourceName", "Notion Claws"),
-            "sourceId": item.get("sourceId", ""),
-            "primaryCategory": item.get("primaryCategory", "ship"),
-            "categories": item.get("categories", ["ship"]),
-            "score": round(item.get("score", 80), 2),
-            "publishedAt": dt.isoformat() if dt else None,
-            "discoveredAt": now_utc().isoformat(),
-            "expiresAt": (dt + timedelta(hours=72)).isoformat() if dt else (now_utc() + timedelta(hours=72)).isoformat(),
-            "status": "queued",
-            "postedCategories": [],
-            "notion_page_id": item.get("notion_page_id"),
-            "notion_insights": item.get("notion_insights", {}),
-        }
-        if b["id"] not in existing_ids:
-            backlog["items"].append(b)
-            existing_ids.add(b["id"])
-            added.append(b)
-
     now = now_utc()
     for item in backlog["items"]:
+        if item.get("status") == "queued" and item.get("sourceType") == "notion":
+            item["status"] = "retired"
+            item["retiredReason"] = "notion_removed_from_production_runtime"
+            continue
         if item.get("status") == "queued":
             expires = parse_dt(item.get("expiresAt", ""))
             if expires and expires < now:
@@ -894,6 +841,8 @@ def queue_for_category(category: str) -> List[dict]:
     out = []
     for item in backlog.get("items", []):
         if item.get("status") != "queued":
+            continue
+        if item.get("sourceType") == "notion":
             continue
         if category not in item.get("categories", []):
             continue
@@ -1257,10 +1206,6 @@ def source_badge(item: dict) -> str:
 
 def display_title(item: dict) -> str:
     if item.get("primaryCategory") == "ship":
-        # Notion items: clean up the "— Notion update" suffix
-        if item.get("sourceType") == "notion":
-            title = item.get("title", "")
-            return title.replace(" — Notion update", "").strip()
         repo = repo_name_from_feed(item.get("sourceName", ""))
         return normalize_release_title(repo, item.get("title", ""))
     return item.get("title", "")
@@ -1331,8 +1276,6 @@ def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: 
     if category == "watch":
         bundle = compress_watch_bundle(bundle)
     elif category == "ship":
-        # Enrich with Notion editorial content before bundling
-        bundle = enrich_ship_with_notion(bundle)
         bundle = compress_ship_bundle(bundle)
     elif category == "community":
         bundle = compress_community_bundle(bundle)
@@ -1356,8 +1299,6 @@ def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: 
         
         # Short summary: first sentence, max 80 chars
         summary = (item.get('summary') or '').split('.')[0][:80].strip()
-        # Strip "Notion update:" prefix for cleaner display
-        summary = re.sub(r'^Notion update:\s*', '', summary, flags=re.IGNORECASE)
         if summary:
             summary = f" — {summary}"
         
@@ -1395,21 +1336,23 @@ def send_telegram(message: str) -> None:
         json.loads(response.read().decode("utf-8"))
 
 
-def mark_posted(category: str, limit: Optional[int] = None) -> List[dict]:
+def mark_posted(category: str, limit: Optional[int] = None, posted_items: Optional[List[dict]] = None) -> List[dict]:
     backlog = load_json(BACKLOG_FILE, {"items": []})
     state = load_json(THREAD_STATE_FILE, {})
-    bundle = bundle_for_category(category, limit)
-    posted_ids = {item["id"] for item in bundle}
+    bundle = posted_items if posted_items is not None else bundle_for_category(category, limit)
+    posted_ids = {item.get("id") for item in bundle if item.get("id")}
+    posted_urls_to_mark = {item.get("url") for item in bundle if item.get("url")}
     posted_urls = set(state.get("postedUrls", []))
     posted_backlog_ids = set(state.get("postedBacklogIds", []))
 
     for item in backlog.get("items", []):
-        if item.get("id") in posted_ids:
+        if item.get("id") in posted_ids or item.get("url") in posted_urls_to_mark:
             item["status"] = "posted"
             item["postedCategories"] = sorted(set(item.get("postedCategories", []) + [category]))
             posted_urls.add(item["url"])
             posted_backlog_ids.add(item["id"])
 
+    posted_urls.update(posted_urls_to_mark)
     state["postedUrls"] = list(posted_urls)[-5000:]
     state["postedBacklogIds"] = list(posted_backlog_ids)[-5000:]
     published_at = now_utc().isoformat()
@@ -1468,7 +1411,7 @@ def _fetch_item_context(item: dict) -> dict:
 
     Curator output is only as good as its input. Without this, curator gets just
     titles and writes generic prose. With this, curator sees release notes /
-    article excerpts / Notion signals and can extract a real operator-relevant
+    article excerpts and can extract a real operator-relevant
     signal — or drop the item if there isn't one.
     """
     url = item.get("url") or ""
@@ -1487,11 +1430,6 @@ def _fetch_item_context(item: dict) -> dict:
         if snippet:
             context["fetched"]["page_excerpt"] = snippet[:1200]
             context["fetched"]["page_excerpt_source"] = "page_text"
-
-    # Notion editorial enrichment, if the item came through enrich_ship_with_notion
-    notion_signal = item.get("notion_signal") or item.get("notionSignal")
-    if notion_signal:
-        context["fetched"]["notion_editorial"] = notion_signal
 
     # Existing summary/blurb (the deterministic stub) so curator can compare
     existing_summary = (item.get("summary") or "").strip()
@@ -1514,7 +1452,6 @@ def curator_input_bundle(category: str, limit: Optional[int] = None) -> dict:
     if category == "watch":
         raw_items = compress_watch_bundle(raw_items)
     elif category == "ship":
-        raw_items = enrich_ship_with_notion(raw_items)
         raw_items = compress_ship_bundle(raw_items)
     elif category == "community":
         raw_items = compress_community_bundle(raw_items)
@@ -1628,7 +1565,7 @@ def format_curated_messages(curated: dict, category: str) -> List[str]:
     for idx, item in enumerate(items):
         title = item.get("title") or ""
         url = item.get("url") or ""
-        blurb = (item.get("blurb") or "").strip()
+        blurb = (item.get("blurb") or item.get("existing_blurb") or "").strip()
 
         lines = [f"{meta['emoji']} <b>{meta['label']}</b>"]
 
@@ -1671,6 +1608,7 @@ def main() -> int:
 
     p_collect = sub.add_parser("collect")
     p_collect.add_argument("--run-monitors", action="store_true", help="Run source monitors before collecting")
+    p_collect.add_argument("--summary", action="store_true", help="Print compact counts without the full item payload")
     sub.add_parser("status")
     p_auto = sub.add_parser("autopublish")
     p_auto.add_argument("--send", action="store_true")
@@ -1697,7 +1635,10 @@ def main() -> int:
         if getattr(args, "run_monitors", False):
             run_monitors()
         result = collect_into_backlog()
-        print(json.dumps(result, indent=2))
+        if getattr(args, "summary", False):
+            print(json.dumps({"added": result["added"], "counts": result["counts"]}, indent=2))
+        else:
+            print(json.dumps(result, indent=2))
         return 0
 
     if args.cmd == "status":
@@ -1719,6 +1660,12 @@ def main() -> int:
             if curated is None:
                 print(format_category_bundle(args.category, args.limit))
                 print("\n(curator failed; printed deterministic bundle)", file=sys.stderr)
+                return 0
+            meta = curated.get("_curator", {})
+            if meta.get("fallback"):
+                print(format_category_bundle(args.category, args.limit))
+                print("\n(curator fell back; printed deterministic bundle)", file=sys.stderr)
+                print(json.dumps(meta, indent=2), file=sys.stderr)
                 return 0
             if not curated.get("_curator", {}).get("approved", True):
                 print("(curator declined to approve — would skip publish)", file=sys.stderr)
@@ -1752,6 +1699,16 @@ def main() -> int:
                     mark_posted(args.category, args.limit)
                 return 0
             meta = curated.get("_curator", {})
+            if meta.get("fallback"):
+                print("(curator fell back; using deterministic bundle)", file=sys.stderr)
+                print(json.dumps(meta, indent=2), file=sys.stderr)
+                message = format_category_bundle(args.category, args.limit)
+                print(message)
+                bundle = bundle_for_category(args.category, args.limit)
+                if args.send and bundle:
+                    send_telegram(message)
+                    mark_posted(args.category, args.limit)
+                return 0
             if not meta.get("approved", True):
                 # Curator explicitly skipped
                 print("(curator declined to approve — skipping publish)", file=sys.stderr)
@@ -1767,7 +1724,7 @@ def main() -> int:
             if args.send and messages:
                 sent = send_telegram_message_list(messages)
                 print(f"[publish] sent {sent} message(s) to Telegram", file=sys.stderr)
-                mark_posted(args.category, args.limit)
+                mark_posted(args.category, args.limit, curated.get("items") or [])
             return 0
 
         message = format_category_bundle(args.category, args.limit)
