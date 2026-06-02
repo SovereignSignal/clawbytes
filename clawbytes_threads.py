@@ -1019,6 +1019,7 @@ def llm_summarize(items: List[dict], category: str) -> Optional[str]:
 
     # Build the prompt
     meta = CATEGORY_META[category]
+    item_emoji = {"ship": "📦", "watch": "🚨", "read": "📚", "community": "💬"}.get(category, meta["emoji"])
     prompt = f"""You write @clawbytes on Telegram — covering the AI agent ecosystem. Short, sharp, opinionated. No corporate filler.
 
 Write a {meta['label']} lane post with {len(items)} items.
@@ -1026,7 +1027,7 @@ Write a {meta['label']} lane post with {len(items)} items.
 FORMAT (strict HTML):
 {meta['emoji']} <b>{meta['label']}</b> — N items
 
-[emoji] <a href="URL">ACTUAL TITLE</a> — 1 punchy sentence on why this matters
+{item_emoji} <a href="URL">ACTUAL TITLE</a> — 1 punchy sentence on why this matters
 
 Rules:
 - Use <b> for bold, <a href="URL">title text</a> for links — use the ACTUAL model/project name as link text, never "Link" or "thread"
@@ -1037,7 +1038,7 @@ Rules:
 - MAX 150 chars per item summary. No filler. No "notable" or "worth watching." No "offering insights" or "highlights." No soft verbs: "breaks down", "unpacks", "dives into", "rages on", "sparks debate" are all banned.
 - Do NOT parrot the raw summary text provided in the item data. Write original descriptions based on the actual title and topic.
 - If release notes are missing or say nothing: just state what the project IS and what version dropped. 1 sentence max. Never speculate with "might," "could," or "should." Example: "IronClaw 0.1.0 — First skills release from the NEAR AI safety team." 
-- Use 📦 for ship, 🚨 for watch, 📚 for read, 💬 for community
+- Start EVERY item with {item_emoji} (this lane\u2019s emoji) and use the SAME emoji for every item. Never use another lane\u2019s emoji or a topical/decorative emoji.
 - For HN items: reference the community signal (e.g. "171 points on HN") when it adds weight
 - NEVER fabricate statistics, metrics, or specific findings. If unsure, describe the piece's ambition, not its results.
 
