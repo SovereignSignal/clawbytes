@@ -99,13 +99,35 @@ def latest_modelbytes_report(modelbytes: Path) -> str:
 
 
 def clawbytes_preview_report(clawbytes: Path, *, python_bin: str = "python3") -> str:
+    # Compact digest: a one-line queue summary (no monospace status dump) + the
+    # enriched lanes; empty lanes collapse into a single trailing "Quiet" line.
     status = _run([python_bin, "clawbytes_threads.py", "status"], clawbytes)
-    sections = [f"*ClawBytes lane preview*\n```\n{status.strip()}\n```"]
+    counts = {}
+    for line in status.splitlines():
+        m = re.match(r"\s*-\s*(\w+):\s*(\d+)\s*queued", line)
+        if m:
+            counts[m.group(1)] = m.group(2)
+    parts = ["*ClawBytes — lane preview*"]
+    if counts:
+        summary = " · ".join(
+            f"{lane} {counts[lane]}"
+            for lane in ("Ship", "Watch", "Read", "Community")
+            if lane in counts
+        )
+        parts.append(f"_Queue: {summary}_")
+    quiet = []
     for category in ["ship", "watch", "read", "community"]:
         output = _run([python_bin, "clawbytes_threads.py", "preview", "--category", category], clawbytes)
-        rendered = telegram_html_to_slack_mrkdwn(output)
-        sections.append(rendered or f"*{category.title()}* — no output")
-    return "\n\n".join(sections)[:35000]
+        rendered = telegram_html_to_slack_mrkdwn(output).strip()
+        if not rendered:
+            continue
+        if "Nothing new" in rendered:
+            quiet.append(category.title())
+            continue
+        parts.append(rendered)
+    if quiet:
+        parts.append(f"_Quiet: {' · '.join(quiet)}_")
+    return "\n\n".join(parts)[:35000]
 
 
 def send_modelbytes_report(modelbytes: Path, channel_id: str) -> tuple[bool, str]:
