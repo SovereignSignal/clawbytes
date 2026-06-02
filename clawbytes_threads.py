@@ -49,7 +49,7 @@ CATEGORY_META = {
         "intro": "Fresh releases and product movement worth scanning.",
         "windows": [9, 18],
         "min_items": [1, 3],
-        "min_top_score": [85, 95],
+        "min_top_score": [58, 85],
     },
     "watch": {
         "label": "Watch",
@@ -341,7 +341,7 @@ def classify_rss(item: dict) -> Optional[dict]:
         base_score = REPO_PRIORITY.get(repo, 50)
         # Penalize minor releases heavily
         if is_minor_release(title):
-            base_score = max(20, base_score - 40)
+            base_score = max(20, base_score - 30)
         score = base_score + age_score(dt, 96) / 8
         summary = "New release" if repo == "openclaw" else f"New {repo.title()} release"
         return {
