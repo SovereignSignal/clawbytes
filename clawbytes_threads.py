@@ -309,8 +309,13 @@ def is_minor_release(title: str) -> bool:
     # Alpha/preview releases
     if any(x in low for x in ["alpha", "preview", "nightly", "canary", "dev", "experimental"]):
         return True
-    # Patch versions (0.x.y where x stays same, or .z increments)
-    if re.search(r"v?0\.\d+\.\d+$", low) and not re.search(r"v?0\.0\.1", low):
+    # Patch releases: any X.Y.Z with Z>0 (e.g. 2.1.160, 1.2.4, 0.4.2) — demote so
+    # routine patches don't headline. Keep .0 minor/major releases (1.2.0, 2.0.0)
+    # headline-worthy, and preserve the first-cut 0.0.1 exception.
+    if re.search(r"v?\d+\.\d+\.[1-9]\d*\b", low) and not re.search(r"v?0\.0\.1\b", low):
+        return True
+    # Compact pre-release tags (PEP 440 style: 1.14.6a2, 2.0rc1, 1.0b3)
+    if re.search(r"\d+\.\d+(?:\.\d+)?(?:a|b|rc)\d+", low):
         return True
     # Hotfix/patch keywords
     if any(x in low for x in ["hotfix", "patch", "fix", "minor"]):
