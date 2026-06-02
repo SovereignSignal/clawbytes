@@ -2,33 +2,88 @@ from __future__ import annotations
 
 import re
 import subprocess
-from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 
 from .slack import send_text
 
 
-class _TextExtractor(HTMLParser):
+class _SlackMrkdwnConverter(HTMLParser):
+    """Convert the small Telegram-HTML subset clawbytes/modelbytes emit
+    (<b>, <i>, <a href>, <code>) into Slack mrkdwn, preserving line breaks.
+
+    Slack link syntax is <url|label>; bold is *text*; italic is _text_.
+    Display text must have &, <, > escaped, so we escape data runs but emit
+    link/format markup literally.
+    """
+
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
+        self._in_link = False
+        self._href = ""
+        self._link_text: list[str] = []
+
+    @staticmethod
+    def _esc(text: str) -> str:
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag in ("b", "strong"):
+            self.parts.append("*")
+        elif tag in ("i", "em"):
+            self.parts.append("_")
+        elif tag in ("code", "pre"):
+            self.parts.append("`")
+        elif tag == "br":
+            self.parts.append("\n")
+        elif tag == "a":
+            self._in_link = True
+            self._href = dict(attrs).get("href", "") or ""
+            self._link_text = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("b", "strong"):
+            self.parts.append("*")
+        elif tag in ("i", "em"):
+            self.parts.append("_")
+        elif tag in ("code", "pre"):
+            self.parts.append("`")
+        elif tag == "a":
+            label = "".join(self._link_text).strip()
+            href = self._href.strip()
+            if href and label:
+                self.parts.append(f"<{href}|{self._esc(label).replace('|', '/')}>")
+            elif href:
+                self.parts.append(f"<{href}>")
+            else:
+                self.parts.append(self._esc(label))
+            self._in_link = False
+            self._href = ""
+            self._link_text = []
 
     def handle_data(self, data: str) -> None:
-        text = data.strip()
-        if text:
-            self.parts.append(text)
+        if self._in_link:
+            self._link_text.append(data)
+        else:
+            self.parts.append(self._esc(data))
 
-    def text(self) -> str:
-        return " ".join(self.parts)
+    def result(self) -> str:
+        return "".join(self.parts)
 
 
-def telegram_html_to_text(value: str) -> str:
-    value = re.sub(r'<a\s+href="([^"]+)">([^<]+)</a>', r'\2 \1', value)
-    parser = _TextExtractor()
+def telegram_html_to_slack_mrkdwn(value: str) -> str:
+    """Render Telegram-HTML message text as Slack mrkdwn.
+
+    Unlike a flat text strip, this keeps bold/links/line structure: links
+    become clickable <url|title>, <b> becomes *bold*, newlines are preserved.
+    """
+    parser = _SlackMrkdwnConverter()
     parser.feed(value)
-    text = unescape(parser.text())
-    text = re.sub(r"\s+", " ", text).strip()
+    text = parser.result()
+    # Tidy: trim trailing spaces per line, collapse 3+ blank lines to one gap.
+    text = "\n".join(line.rstrip() for line in text.splitlines())
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
 
 
@@ -36,20 +91,20 @@ def latest_modelbytes_report(modelbytes: Path) -> str:
     pending = modelbytes / "pending"
     files = sorted(pending.glob("*.txt"))
     if not files:
-        return "*ModelBytes* - no pending curated digests found."
+        return "*ModelBytes* — no published digests found yet."
     latest = files[-1]
     body = latest.read_text(encoding="utf-8")
-    plain = telegram_html_to_text(body)
-    plain = plain.replace("━━━", "\n\n")
-    return f"*ModelBytes latest digest* ({latest.stem})\n\n{plain[:35000]}"
+    md = telegram_html_to_slack_mrkdwn(body)
+    return f"*ModelBytes — latest digest* ({latest.stem})\n\n{md[:35000]}"
 
 
 def clawbytes_preview_report(clawbytes: Path, *, python_bin: str = "python3") -> str:
     status = _run([python_bin, "clawbytes_threads.py", "status"], clawbytes)
-    sections = [f"*ClawBytes lane preview*\n\n```{status.strip()}```"]
+    sections = [f"*ClawBytes lane preview*\n```\n{status.strip()}\n```"]
     for category in ["ship", "watch", "read", "community"]:
         output = _run([python_bin, "clawbytes_threads.py", "preview", "--category", category], clawbytes)
-        sections.append(f"*{category.title()}*\n{telegram_html_to_text(output) or 'No output'}")
+        rendered = telegram_html_to_slack_mrkdwn(output)
+        sections.append(rendered or f"*{category.title()}* — no output")
     return "\n\n".join(sections)[:35000]
 
 
@@ -79,4 +134,3 @@ def _run(cmd: list[str], cwd: Path) -> str:
     if result.returncode != 0:
         return (result.stdout + "\n" + result.stderr).strip()
     return result.stdout
-
