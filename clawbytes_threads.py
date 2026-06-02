@@ -371,7 +371,7 @@ def classify_rss(item: dict) -> Optional[dict]:
         categories = ["read"]
         if any(term in low for term in SECURITY_TERMS):
             categories = ["watch", "read"]
-        score = 38 + age_score(dt, 96) / 10 + (15 if item.get("high_signal") else 5)
+        score = 38 + age_score(dt, 168) / 10 + (15 if item.get("high_signal") else 5)
         summary = richer_read_summary(title, feed)
         primary = categories[0]
         return {
@@ -861,7 +861,11 @@ def queue_for_category(category: str) -> List[dict]:
         if expires and expires < now:
             continue
         out.append(item)
-    return sorted(out, key=lambda x: (-(x.get("score") or 0), x.get("publishedAt") or ""))
+    # Score desc; break ties by recency. publishedAt is often missing from feeds,
+    # so fall back to discoveredAt and order newest-first (stable two-pass sort).
+    out.sort(key=lambda x: x.get("discoveredAt") or x.get("publishedAt") or "", reverse=True)
+    out.sort(key=lambda x: -(x.get("score") or 0))
+    return out
 
 
 def source_bucket(item: dict) -> str:
@@ -870,6 +874,31 @@ def source_bucket(item: dict) -> str:
     if item.get("sourceType") == "security":
         return item.get("sourceName", "security")
     return item.get("sourceName", item.get("sourceType", "misc"))
+
+
+_TOPIC_STOPWORDS = {
+    "the", "and", "for", "with", "from", "into", "your", "this", "that", "new",
+    "now", "how", "why", "what", "using", "use", "guide", "update", "updates",
+    "release", "releases", "plugin", "plugins", "tool", "tools", "framework",
+    "frameworks", "role", "roles", "workflow", "workflows", "every", "almost",
+    "everything", "everyone", "model", "models", "agent", "agents", "open",
+    "source", "local", "fast", "support", "adds", "add", "via", "are", "you",
+}
+
+
+def _topic_tokens(title: str) -> set:
+    """Distinctive (non-generic) lowercase tokens used to detect same-topic items."""
+    toks = re.findall(r"[a-z0-9.]{4,}", (title or "").lower())
+    return {t for t in toks if t not in _TOPIC_STOPWORDS}
+
+
+def _same_topic(item: dict, picked: List[dict]) -> bool:
+    """True if item shares a distinctive token with something already picked
+    (e.g. 5 'Codex ...' headlines collapse to one)."""
+    sig = _topic_tokens(item.get("title", ""))
+    if not sig:
+        return False
+    return any(sig & _topic_tokens(p.get("title", "")) for p in picked)
 
 
 def bundle_for_category(category: str, limit: Optional[int] = None) -> List[dict]:
@@ -882,6 +911,8 @@ def bundle_for_category(category: str, limit: Optional[int] = None) -> List[dict
     for item in items:
         bucket = source_bucket(item)
         if bucket_counts.get(bucket, 0) >= bucket_cap:
+            continue
+        if category != "ship" and _same_topic(item, picked):
             continue
         picked.append(item)
         bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
