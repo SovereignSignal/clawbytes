@@ -1328,7 +1328,9 @@ def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: 
     if use_llm and LLM_API_KEY:
         llm_result = llm_summarize(bundle, category)
         if llm_result:
-            return llm_result
+            # The LLM fills the "— N items" template literally and writes
+            # "1 items" for a single-item lane; fix the singular.
+            return re.sub(r"\b1 items\b", "1 item", llm_result)
     
     # Fallback: static template format
     lines = [f"{meta['emoji']} <b>{meta['label']}</b> — {len(bundle)} item{'s' if len(bundle) > 1 else ''}"]
