@@ -333,6 +333,10 @@ def classify_rss(item: dict) -> Optional[dict]:
     if "releases" in feed.lower():
         if any(x in low for x in ["beta", "nightly", "staging", "alpha"]):
             return None
+        # Skip release candidates (v0.22.0rc2, 1.0-rc1) — pre-releases, same
+        # class as beta/alpha. Lookbehind avoids matching words like "search".
+        if re.search(r"(?<![a-z])rc[.\-]?\d", low):
+            return None
         # Skip chore/ci/internal release titles
         if any(x in low for x in ["chore:", "ci:", "build:", "internal"]):
             return None

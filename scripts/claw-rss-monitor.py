@@ -18,20 +18,17 @@ from urllib.error import URLError, HTTPError
 
 # Workspace path
 WORKSPACE = Path(__file__).parent.parent
-MEMORY_DIR = WORKSPACE / "memory"
+MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 STATE_FILE = MEMORY_DIR / "claw-rss-state.json"
 
 # RSS feeds to monitor
 RSS_FEEDS = [
-    # AI/Agent blogs — feed Read lane
+    # Primary/maintainer sources — feed Read lane
     {"name": "Simon Willison", "url": "https://simonwillison.net/atom/everything/", "tags": ["security", "technical"], "high_signal": True},
-    {"name": "AI Maker Substack", "url": "https://aimaker.substack.com/feed", "tags": ["community"]},
-    {"name": "AI Supremacy", "url": "https://ai-supremacy.com/feed", "tags": ["analysis"]},
-    {"name": "OpenAI Blog", "url": "https://openai.com/blog/rss.xml", "tags": ["official", "models"], "high_signal": True},
-    {"name": "Anthropic News", "url": "https://the-decoder.com/tag/anthropic/feed/", "tags": ["official", "models"], "high_signal": True},
+    {"name": "OpenAI News", "url": "https://openai.com/news/rss.xml", "tags": ["official", "models"], "high_signal": True},
+    {"name": "OpenAI Developers", "url": "https://developers.openai.com/rss.xml", "tags": ["official", "developers"], "high_signal": True},
     {"name": "Google DeepMind Blog", "url": "https://blog.google/technology/ai/rss/", "tags": ["official", "models"], "high_signal": True},
     {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml", "tags": ["open-source", "models"], "high_signal": True},
-    {"name": "Mistral News", "url": "https://the-decoder.com/tag/mistral/feed/", "tags": ["official", "models"], "high_signal": True},
     {"name": "LangChain Blog", "url": "https://blog.langchain.dev/rss/", "tags": ["frameworks", "agents"]},
     {"name": "Lilian Weng", "url": "https://lilianweng.github.io/index.xml", "tags": ["research", "technical"]},
     {"name": "Interconnects", "url": "https://www.interconnects.ai/feed", "tags": ["analysis", "models"]},
@@ -41,16 +38,7 @@ RSS_FEEDS = [
     # Research & papers
     {"name": "ArXiv cs.AI", "url": "https://rss.arxiv.org/rss/cs.AI", "tags": ["research", "papers"], "high_signal": True},
     {"name": "ArXiv cs.CL", "url": "https://rss.arxiv.org/rss/cs.CL", "tags": ["research", "papers"], "high_signal": True},
-    # AI/tech news
-    {"name": "TechCrunch AI", "url": "https://techcrunch.com/category/artificial-intelligence/feed/", "tags": ["news", "industry"]},
-    {"name": "The Verge AI", "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml", "tags": ["news", "industry"]},
-    {"name": "Reuters Tech", "url": "https://feeds.arstechnica.com/arstechnica/technology-lab", "tags": ["news", "industry"]},
-    {"name": "VentureBeat AI", "url": "https://venturebeat.com/category/ai/feed/", "tags": ["news", "industry"]},
-    {"name": "The Decoder", "url": "https://the-decoder.com/feed/", "tags": ["news", "models"], "high_signal": True},
-    {"name": "Ars Technica", "url": "https://feeds.arstechnica.com/arstechnica/technology-lab", "tags": ["news", "industry"]},
-    {"name": "ZDNet AI", "url": "https://www.zdnet.com/topic/artificial-intelligence/rss.xml", "tags": ["news", "industry"]},
-    {"name": "MIT Tech Review", "url": "https://www.technologyreview.com/feed/", "tags": ["news", "research"]},
-    # GitHub release feeds for core repos
+    # GitHub release feeds for core and adjacent operator-facing repos
     {"name": "OpenClaw Releases", "url": "https://github.com/openclaw/openclaw/releases.atom", "tags": ["releases", "official"]},
     {"name": "Hermes Agent Releases", "url": "https://github.com/NousResearch/hermes-agent/releases.atom", "tags": ["releases", "ecosystem"]},
     {"name": "Nanoclaw Releases", "url": "https://github.com/qwibitai/nanoclaw/releases.atom", "tags": ["releases", "ecosystem"]},
@@ -59,6 +47,14 @@ RSS_FEEDS = [
     {"name": "PicoClaw Releases", "url": "https://github.com/sipeed/picoclaw/releases.atom", "tags": ["releases", "ecosystem"]},
     {"name": "Moltis Releases", "url": "https://github.com/moltis-org/moltis/releases.atom", "tags": ["releases", "ecosystem"]},
     {"name": "Codex Releases", "url": "https://github.com/openai/codex/releases.atom", "tags": ["releases", "adjacent"]},
+    {"name": "Claude Code Releases", "url": "https://github.com/anthropics/claude-code/releases.atom", "tags": ["releases", "coding-agent"], "high_signal": True},
+    {"name": "Claude Code Action Releases", "url": "https://github.com/anthropics/claude-code-action/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "LangGraph Releases", "url": "https://github.com/langchain-ai/langgraph/releases.atom", "tags": ["releases", "frameworks"], "high_signal": True},
+    {"name": "AutoGen Releases", "url": "https://github.com/microsoft/autogen/releases.atom", "tags": ["releases", "frameworks"]},
+    {"name": "CrewAI Releases", "url": "https://github.com/crewAIInc/crewAI/releases.atom", "tags": ["releases", "frameworks"]},
+    {"name": "Browser Use Releases", "url": "https://github.com/browser-use/browser-use/releases.atom", "tags": ["releases", "browser-automation"]},
+    {"name": "vLLM Releases", "url": "https://github.com/vllm-project/vllm/releases.atom", "tags": ["releases", "inference"]},
+    {"name": "Ollama Releases", "url": "https://github.com/ollama/ollama/releases.atom", "tags": ["releases", "local-models"]},
 ]
 
 # Keywords for relevance filtering (lowercase)
