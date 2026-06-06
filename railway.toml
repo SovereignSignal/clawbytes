@@ -1,0 +1,26 @@
+# ClawBytes Railway config.
+#
+# All services in the claw-bytes project build from this Dockerfile.
+# Per-service `startCommand` and `cronSchedule` are configured at the
+# service level (Railway dashboard or GraphQL), not in this file —
+# different cron services (collect, publish-ship, publish-watch,
+# publish-read, publish-community, supervisor) all share this image
+# but each runs a different command on its own schedule.
+#
+# The [[cron]] blocks that used to live here were silently ignored by
+# Railway (the top-level [[cron]] array is not a recognized schema).
+# See docs/superpowers/specs/2026-05-20-clawbytes-architecture-design.md
+# for the full deployment model.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[env]
+TELEGRAM_BOT_TOKEN = { required = true }
+TELEGRAM_CHANNEL_ID = { required = true }
+CLAUDE_CREDENTIALS = { required = true }
+GITHUB_TOKEN = { required = false }
+BRAVE_API_KEY = { required = false }
+DATABASE_URL = { required = false }
+WORKSPACE = "/app"

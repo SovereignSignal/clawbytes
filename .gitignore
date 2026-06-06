@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+state/
+*.json
+!config.json
+
+# Local credential store read by the cred() helpers; never commit
+CREDS.md
+**/CREDS.md
+*.pem
+*.key
