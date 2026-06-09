@@ -39,7 +39,7 @@ from claude_common import (  # noqa: E402
 
 SUPERVISOR_PROMPT_FILE = REPO_ROOT / "docs" / "supervisor-prompt.md"
 SUPERVISOR_LOG_DIR = REPO_ROOT / "supervisor-log"
-MEMORY = REPO_ROOT / "memory"
+MEMORY = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(REPO_ROOT / "memory")))
 DEGRADED_LOG = MEMORY / "degraded_publishes.json"
 DISCOVERED_REFS = MEMORY / "discovered_references.json"
 CANDIDATE_SOURCES = MEMORY / "candidate_sources.json"
