@@ -58,14 +58,13 @@ RELEVANCE_KEYWORDS = {
 
 # Lane mapping rules
 LANE_RULES = [
-    # Security / watch lane — highest priority
-    {"lane": "watch", "keywords": ["security", "vulnerability", "exploit", "injection", "safety", "risk", "guardrail", "mcp"], "min_score": 2},
-    # Ship lane — model releases with code
-    {"lane": "ship", "keywords": [], "min_upvotes": 20, "requires_repo": True},
-    # Read lane — architecture, distillation, reasoning
-    {"lane": "read", "keywords": ["distill", "architecture", "reasoning", "rl", "reinforcement", "efficient", "multimodal"], "min_score": 3, "min_upvotes": 5},
-    # Community lane — everything else relevant
-    {"lane": "community", "keywords": [], "min_score": 2, "min_upvotes": 10},
+    # Security / watch lane — highest priority. Keep this narrow so broad safety
+    # papers don't crowd the operational Watch lane.
+    {"lane": "watch", "keywords": ["security", "vulnerability", "exploit", "prompt injection", "jailbreak", "sandbox", "unauthorized", "adversarial"], "min_score": 2},
+    # Read lane — architecture, distillation, reasoning, agents, tooling.
+    {"lane": "read", "keywords": ["agent", "tool", "distill", "architecture", "reasoning", "rl", "reinforcement", "efficient", "multimodal", "mcp", "benchmark"], "min_score": 3, "min_upvotes": 3},
+    # Community lane — high-attention papers that don't fit Read/Watch cleanly.
+    {"lane": "community", "keywords": [], "min_score": 2, "min_upvotes": 12},
 ]
 
 

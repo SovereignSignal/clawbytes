@@ -608,10 +608,16 @@ check_hackernews() {
     local state="$1"
     local new_stories="[]"
     
-    local queries=("openclaw" "claw+agent" "hermes+agent" "claude+code" "ai+coding+agent")
+    local queries=("openclaw" "claw+agent" "hermes+agent" "claude+code" "ai+coding+agent" "mcp+agent" "codex+agent" "browser+agent")
+    local min_created
+    min_created=$(python3 - <<'PY'
+from datetime import datetime, timedelta, timezone
+print(int((datetime.now(timezone.utc) - timedelta(days=14)).timestamp()))
+PY
+)
     
     for query in "${queries[@]}"; do
-        local url="https://hn.algolia.com/api/v1/search?query=${query}&tags=story&hitsPerPage=5"
+        local url="https://hn.algolia.com/api/v1/search?query=${query}&tags=story&hitsPerPage=10&numericFilters=created_at_i>${min_created}"
         local response
         response=$(curl -sf --max-time 30 "$url" 2>/dev/null || echo '{"hits":[]}')
         
