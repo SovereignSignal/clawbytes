@@ -10,11 +10,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
-STATE_FILE="${WORKSPACE_DIR}/memory/claw-ecosystem-state.json"
-SOURCES_FILE="${WORKSPACE_DIR}/memory/claw-ecosystem-sources.json"
-OUTPUT_FILE="${WORKSPACE_DIR}/memory/claw-ecosystem-new-items.json"
-DISCOVERIES_FILE="${WORKSPACE_DIR}/memory/claw-ecosystem-discoveries.json"
+WORKSPACE_DIR="${WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
+MEMORY_DIR="${CLAWBYTES_MEMORY_DIR:-${WORKSPACE_DIR}/memory}"
+STATE_FILE="${MEMORY_DIR}/claw-ecosystem-state.json"
+SOURCES_FILE="${MEMORY_DIR}/claw-ecosystem-sources.json"
+OUTPUT_FILE="${MEMORY_DIR}/claw-ecosystem-new-items.json"
+DISCOVERIES_FILE="${MEMORY_DIR}/claw-ecosystem-discoveries.json"
 CREDS_FILE="${WORKSPACE_DIR}/CREDS.md"
 
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
@@ -34,6 +35,7 @@ MODE="check"
 get_cred() {
     local section="$1"
     local key="$2"
+    [[ -f "$CREDS_FILE" ]] || return 0
     awk -v section="$section" -v key="$key" '
         $0 ~ /^## / { in_section = ($0 == "## " section) }
         in_section {
@@ -49,8 +51,8 @@ get_cred() {
 }
 
 load_tokens() {
-    if [[ -z "$GITHUB_TOKEN" ]]; then GITHUB_TOKEN="$(get_cred "GitHub API" "Token")"; fi
-    if [[ -z "$BRAVE_API_KEY" ]]; then BRAVE_API_KEY="$(get_cred "Brave Search API" "API Key")"; fi
+    if [[ -z "$GITHUB_TOKEN" ]]; then GITHUB_TOKEN="$(get_cred "GitHub API" "Token" || true)"; fi
+    if [[ -z "$BRAVE_API_KEY" ]]; then BRAVE_API_KEY="$(get_cred "Brave Search API" "API Key" || true)"; fi
 }
 
 github_api() {
