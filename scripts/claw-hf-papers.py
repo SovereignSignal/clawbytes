@@ -7,6 +7,7 @@ State file: memory/claw-hf-state.json
 """
 
 import json
+import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -14,8 +15,8 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import quote
 
-WORKSPACE = Path(__file__).parent.parent
-MEMORY_DIR = WORKSPACE / "memory"
+WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
+MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 STATE_FILE = MEMORY_DIR / "claw-hf-state.json"
 
 # HF API endpoints

@@ -10,6 +10,7 @@ Dynamic config: memory/clawbytes-dynamic-feeds.json
 """
 
 import json
+import os
 import re
 import sys
 import time
@@ -20,8 +21,8 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from xml.etree import ElementTree as ET
 
-WORKSPACE = Path(__file__).parent.parent
-MEMORY_DIR = WORKSPACE / "memory"
+WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
+MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 STATE_FILE = MEMORY_DIR / "clawbytes-discovered-sources.json"
 DYNAMIC_FEEDS_FILE = MEMORY_DIR / "clawbytes-dynamic-feeds.json"
 CREDS_FILE = WORKSPACE / "CREDS.md"

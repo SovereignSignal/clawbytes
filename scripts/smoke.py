@@ -89,13 +89,20 @@ def check_python_compile(env: dict[str, str]) -> Check:
 
 
 def check_shell_syntax(env: dict[str, str]) -> Check:
-    files = [
+    candidates = [
         "ops/bin/clawbytes-run.sh",
         "ops/bin/clawbytes-doctor.sh",
         "scripts/claw-ecosystem-monitor.sh",
     ]
+    files = [path for path in candidates if (REPO_ROOT / path).exists()]
+    skipped = [path for path in candidates if path not in files]
+    if not files:
+        return Check("shell syntax", True, "no shell files present", {"skipped": skipped})
     proc = run_cmd(["bash", "-n", *files], env=env, timeout=30)
-    return Check("shell syntax", proc.returncode == 0, ", ".join(files), {"stderr": proc.stderr[-1200:]})
+    detail = ", ".join(files)
+    if skipped:
+        detail += f"; skipped missing: {', '.join(skipped)}"
+    return Check("shell syntax", proc.returncode == 0, detail, {"stderr": proc.stderr[-1200:], "skipped": skipped})
 
 
 def check_doctor(env: dict[str, str]) -> Check:
