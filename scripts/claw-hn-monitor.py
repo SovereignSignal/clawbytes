@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
-from urllib.parse import quote
+from urllib.parse import urlencode
 
 WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
@@ -61,10 +61,19 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-def fetch_hn(query, tags="story", page=0, timeout=15):
-    """Fetch HN stories via Algolia API."""
-    params = f"?query={quote(query)}&tags={tags}&page={page}&hitsPerPage=15"
-    url = f"{ALGOLIA_URL}{params}"
+def fetch_hn(query, tags="story", page=0, timeout=15, days=14):
+    """Fetch recent HN stories via Algolia API."""
+    min_created = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
+    params = urlencode(
+        {
+            "query": query,
+            "tags": tags,
+            "page": page,
+            "hitsPerPage": 20,
+            "numericFilters": f"created_at_i>{min_created}",
+        }
+    )
+    url = f"{ALGOLIA_URL}?{params}"
     req = Request(url, headers={"User-Agent": "ClawBytes/1.0"})
     try:
         with urlopen(req, timeout=timeout) as resp:
