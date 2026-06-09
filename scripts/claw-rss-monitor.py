@@ -35,6 +35,8 @@ RSS_FEEDS = [
     {"name": "AI Snake Oil", "url": "https://aisnakeoil.substack.com/feed", "tags": ["analysis", "criticism"]},
     {"name": "Latent Space", "url": "https://latent.space/feed", "tags": ["podcast", "analysis"]},
     {"name": "The AI Edge", "url": "https://theaiedge.substack.com/feed", "tags": ["engineering", "agents"]},
+    {"name": "GitHub Changelog", "url": "https://github.blog/changelog/feed/", "tags": ["developer-tools", "official"], "high_signal": True},
+    {"name": "Cursor Changelog", "url": "https://cursor.com/changelog/rss.xml", "tags": ["coding-agent", "official"], "high_signal": True},
     # Research & papers
     {"name": "ArXiv cs.AI", "url": "https://rss.arxiv.org/rss/cs.AI", "tags": ["research", "papers"], "high_signal": True},
     {"name": "ArXiv cs.CL", "url": "https://rss.arxiv.org/rss/cs.CL", "tags": ["research", "papers"], "high_signal": True},
@@ -55,6 +57,15 @@ RSS_FEEDS = [
     {"name": "Browser Use Releases", "url": "https://github.com/browser-use/browser-use/releases.atom", "tags": ["releases", "browser-automation"]},
     {"name": "vLLM Releases", "url": "https://github.com/vllm-project/vllm/releases.atom", "tags": ["releases", "inference"]},
     {"name": "Ollama Releases", "url": "https://github.com/ollama/ollama/releases.atom", "tags": ["releases", "local-models"]},
+    {"name": "openai-agents Releases", "url": "https://github.com/openai/openai-agents-python/releases.atom", "tags": ["releases", "agent-sdk"], "high_signal": True},
+    {"name": "mcp Servers Releases", "url": "https://github.com/modelcontextprotocol/servers/releases.atom", "tags": ["releases", "mcp"]},
+    {"name": "mcp Python SDK Releases", "url": "https://github.com/modelcontextprotocol/python-sdk/releases.atom", "tags": ["releases", "mcp"]},
+    {"name": "mcp TypeScript SDK Releases", "url": "https://github.com/modelcontextprotocol/typescript-sdk/releases.atom", "tags": ["releases", "mcp"]},
+    {"name": "vercel-ai Releases", "url": "https://github.com/vercel/ai/releases.atom", "tags": ["releases", "agent-sdk"]},
+    {"name": "continue Releases", "url": "https://github.com/continuedev/continue/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "e2b Releases", "url": "https://github.com/e2b-dev/E2B/releases.atom", "tags": ["releases", "sandbox"]},
+    {"name": "opencode Releases", "url": "https://github.com/sst/opencode/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "gemini CLI Releases", "url": "https://github.com/google-gemini/gemini-cli/releases.atom", "tags": ["releases", "coding-agent"]},
 ]
 
 # Keywords for relevance filtering (lowercase)

@@ -92,6 +92,16 @@ REPO_PRIORITY = {
     "openfang": 78,
     "picoclaw": 74,
     "codex": 68,
+    "claude code action": 67,
+    "claude": 66,
+    "cursor": 64,
+    "gemini": 62,
+    "opencode": 60,
+    "openai-agents": 60,
+    "mcp": 58,
+    "vercel-ai": 56,
+    "continue": 54,
+    "e2b": 52,
 }
 
 def _load_dynamic_subreddits():
@@ -255,6 +265,16 @@ def display_repo_name(repo: str) -> str:
         "openfang": "OpenFang",
         "picoclaw": "PicoClaw",
         "codex": "Codex",
+        "claude code action": "Claude Code Action",
+        "claude": "Claude Code",
+        "cursor": "Cursor",
+        "gemini": "Gemini CLI",
+        "opencode": "OpenCode",
+        "openai-agents": "OpenAI Agents SDK",
+        "mcp": "MCP",
+        "vercel-ai": "Vercel AI SDK",
+        "continue": "Continue",
+        "e2b": "E2B",
     }.get(repo, repo.title())
 
 
@@ -317,6 +337,9 @@ def is_minor_release(title: str) -> bool:
     # Compact pre-release tags (PEP 440 style: 1.14.6a2, 2.0rc1, 1.0b3)
     if re.search(r"\d+\.\d+(?:\.\d+)?(?:a|b|rc)\d+", low):
         return True
+    # Repository-specific prerelease tags can show up as python-v0.1.0b3 or rust-v0.1.0b3.
+    if re.search(r"(?:python|rust|node|js)-v?\d+\.\d+\.\d+(?:a|b|rc)\d+", low):
+        return True
     # Hotfix/patch keywords
     if any(x in low for x in ["hotfix", "patch", "fix", "minor"]):
         return True
@@ -338,12 +361,14 @@ def classify_rss(item: dict) -> Optional[dict]:
     if "releases" in feed.lower():
         if any(x in low for x in ["beta", "nightly", "staging", "alpha"]):
             return None
+        if re.search(r"(?:^|[-_\s])v?\d+\.\d+\.\d+(?:a|b|rc)\d+\b", low):
+            return None
         # Skip release candidates (v0.22.0rc2, 1.0-rc1) — pre-releases, same
         # class as beta/alpha. Lookbehind avoids matching words like "search".
         if re.search(r"(?<![a-z])rc[.\-]?\d", low):
             return None
-        # Skip chore/ci/internal release titles
-        if any(x in low for x in ["chore:", "ci:", "build:", "internal"]):
+        # Skip chore/ci/internal/dependency release titles
+        if any(x in low for x in ["chore:", "ci:", "build:", "internal", "rusty-v8", "dependency"]):
             return None
         repo = repo_name_from_feed(feed)
         display_title = normalize_release_title(repo, title)
@@ -635,6 +660,76 @@ def classify_moltbook(item: dict) -> Optional[dict]:
     }
 
 
+def classify_hf_paper(item: dict) -> Optional[dict]:
+    """Classify HuggingFace Daily Papers output into Read/Watch/Community."""
+    url = item.get("url", "")
+    title = item.get("title", "")
+    if not url or not title:
+        return None
+    dt = parse_dt(item.get("publishedAt", "") or item.get("found_at", ""))
+    upvotes = int(item.get("upvotes", 0) or 0)
+    relevance = int(item.get("score", 0) or 0)
+    summary_text = item.get("ai_summary") or "HF Daily Papers signal"
+    low = f"{title} {summary_text}".lower()
+
+    hint = item.get("category_hint") if item.get("category_hint") in CATEGORY_META else "read"
+    # HF papers are context/research signals, not Ship releases. GitHub/project
+    # links add confidence, but should not route the item into Ship.
+    if hint in {"ship", "watch"}:
+        hint = "read"
+    hf_security_terms = [
+        "security", "vulnerability", "exploit", "prompt injection", "jailbreak",
+        "sandbox", "unauthorized", "adversarial", "supply chain",
+    ]
+    is_hf_security = any(term in low for term in hf_security_terms)
+    categories = [hint]
+    if is_hf_security:
+        categories = ["watch", "read"]
+    elif hint == "community":
+        categories = ["community", "read"]
+    elif "agent" in low or "benchmark" in low or "tool" in low:
+        categories = ["read", "community"]
+
+    primary = categories[0]
+    base = {"watch": 42, "read": 30, "community": 22}.get(primary, 30)
+    score = base + min(upvotes, 80) * 0.25 + relevance * 1.6 + age_score(dt, 168) / 16
+    if item.get("githubRepo"):
+        score += 3
+    if item.get("projectPage"):
+        score += 1
+
+    return {
+        "primaryCategory": primary,
+        "categories": categories,
+        "score": round(score, 2),
+        "summary": trim(summary_text, 180),
+        "rawScore": upvotes,
+        "rawComments": 0,
+        "expiresAt": (dt or now_utc()) + timedelta(hours=CATEGORY_META[primary]["ttl_hours"]),
+        "publishedAt": dt,
+        "sourceType": "hf_papers",
+        "sourceName": "HF Daily Papers",
+        "sourceId": item.get("id") or item.get("hf_id") or url,
+        "url": url,
+        "title": title,
+    }
+
+
+def classify_ecosystem_hn(item: dict) -> Optional[dict]:
+    """Classify HN stories produced by the ecosystem shell monitor."""
+    normalized = {
+        "id": item.get("id"),
+        "title": item.get("title"),
+        "url": item.get("hn_url") or item.get("url"),
+        "score": item.get("points", 0),
+        "comments": item.get("comments", 0),
+        "created_at": item.get("created"),
+        "found_at": item.get("found_at"),
+        "sourceType": "hackernews",
+    }
+    return classify_hackernews(normalized)
+
+
 def backlog_item(candidate: dict) -> dict:
     created = now_utc().isoformat()
     item = {
@@ -705,18 +800,39 @@ def run_monitors() -> None:
             print(p.stderr, file=sys.stderr)
 
 
+def _unique_items(items: List[dict], key_fields: tuple[str, ...] = ("id", "url", "link")) -> List[dict]:
+    seen = set()
+    out = []
+    for item in items:
+        key = next((str(item.get(field)) for field in key_fields if item.get(field)), json.dumps(item, sort_keys=True)[:200])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
 def collect_candidates() -> Dict[str, List[dict]]:
     rss = load_json(MEMORY / "claw-rss-state.json", {}).get("foundItems", [])
     reddit = load_json(MEMORY / "claw-reddit-state.json", {}).get("foundItems", [])
     security = load_json(MEMORY / "claw-security-state.json", {}).get("alerts", [])
     moltbook = load_json(MEMORY / "claw-moltbook-state.json", {}).get("foundItems", [])
     hackernews = load_json(MEMORY / "claw-hn-state.json", {}).get("foundItems", [])
+    hf_papers = load_json(MEMORY / "claw-hf-state.json", {}).get("foundItems", [])
+    ecosystem = load_json(MEMORY / "claw-ecosystem-new-items.json", {})
+    if isinstance(ecosystem, dict):
+        hf_papers = _unique_items(hf_papers + ecosystem.get("newHFPapers", []), ("id", "hf_id", "url"))
+        ecosystem_hn = ecosystem.get("newHNStories", [])
+    else:
+        ecosystem_hn = []
     return {
         "rss": rss,
         "reddit": reddit,
         "security": security,
         "moltbook": moltbook,
         "hackernews": hackernews,
+        "hf_papers": hf_papers,
+        "ecosystem_hn": ecosystem_hn,
     }
 
 
@@ -731,6 +847,10 @@ def classify_source_candidate(kind: str, item: dict) -> Optional[dict]:
         return classify_moltbook(item)
     if kind == "hackernews":
         return classify_hackernews(item)
+    if kind == "hf_papers":
+        return classify_hf_paper(item)
+    if kind == "ecosystem_hn":
+        return classify_ecosystem_hn(item)
     return None
 
 
@@ -741,6 +861,10 @@ def raw_source_label(kind: str, item: dict) -> str:
         return item.get("subreddit", "reddit")
     if kind == "security":
         return item.get("repo", "security")
+    if kind == "hf_papers":
+        return "HF Daily Papers"
+    if kind == "ecosystem_hn":
+        return "hackernews/ecosystem"
     return item.get("sourceName") or item.get("sourceType") or kind
 
 
@@ -814,6 +938,8 @@ def unconsumed_state_report() -> list:
         "claw-security-state.json",
         "claw-moltbook-state.json",
         "claw-hn-state.json",
+        "claw-hf-state.json",
+        "claw-ecosystem-new-items.json",
         "clawbytes-backlog.json",
         "clawbytes-thread-state.json",
     }
@@ -908,85 +1034,22 @@ def collect_into_backlog() -> dict:
     added = []
     candidates = collect_candidates()
 
-    for item in candidates["rss"]:
-        candidate = classify_rss(item)
-        if not candidate:
-            continue
-        if not is_fresh(candidate):
-            continue
-        key = source_key("rss", candidate["sourceId"], candidate["url"])
-        if key in seen_source_keys:
-            continue
-        seen_source_keys.add(key)
-        b = backlog_item(candidate)
-        if b["id"] not in existing_ids:
-            backlog["items"].append(b)
-            existing_ids.add(b["id"])
-            added.append(b)
-
-    for item in candidates["reddit"]:
-        candidate = classify_reddit(item)
-        if not candidate:
-            continue
-        if not is_fresh(candidate):
-            continue
-        key = source_key("reddit", candidate["sourceId"], candidate["url"])
-        if key in seen_source_keys:
-            continue
-        seen_source_keys.add(key)
-        b = backlog_item(candidate)
-        if b["id"] not in existing_ids:
-            backlog["items"].append(b)
-            existing_ids.add(b["id"])
-            added.append(b)
-
-    for item in candidates["security"]:
-        candidate = classify_security(item)
-        if not candidate:
-            continue
-        if not is_fresh(candidate):
-            continue
-        key = source_key("security", candidate["sourceId"], candidate["url"])
-        if key in seen_source_keys:
-            continue
-        seen_source_keys.add(key)
-        b = backlog_item(candidate)
-        if b["id"] not in existing_ids:
-            backlog["items"].append(b)
-            existing_ids.add(b["id"])
-            added.append(b)
-
-    for item in candidates["moltbook"]:
-        candidate = classify_moltbook(item)
-        if not candidate:
-            continue
-        if not is_fresh(candidate):
-            continue
-        key = source_key("moltbook", candidate["sourceId"], candidate["url"])
-        if key in seen_source_keys:
-            continue
-        seen_source_keys.add(key)
-        b = backlog_item(candidate)
-        if b["id"] not in existing_ids:
-            backlog["items"].append(b)
-            existing_ids.add(b["id"])
-            added.append(b)
-
-    for item in candidates["hackernews"]:
-        candidate = classify_hackernews(item)
-        if not candidate:
-            continue
-        if not is_fresh(candidate):
-            continue
-        key = source_key("hackernews", candidate["sourceId"], candidate["url"])
-        if key in seen_source_keys:
-            continue
-        seen_source_keys.add(key)
-        b = backlog_item(candidate)
-        if b["id"] not in existing_ids:
-            backlog["items"].append(b)
-            existing_ids.add(b["id"])
-            added.append(b)
+    for kind, items in candidates.items():
+        for item in items:
+            candidate = classify_source_candidate(kind, item)
+            if not candidate:
+                continue
+            if not is_fresh(candidate):
+                continue
+            key = source_key(kind, candidate["sourceId"], candidate["url"])
+            if key in seen_source_keys:
+                continue
+            seen_source_keys.add(key)
+            b = backlog_item(candidate)
+            if b["id"] not in existing_ids:
+                backlog["items"].append(b)
+                existing_ids.add(b["id"])
+                added.append(b)
 
     now = now_utc()
     for item in backlog["items"]:
@@ -1039,7 +1102,7 @@ def queue_for_category(category: str) -> List[dict]:
         out.append(item)
     # Score desc; break ties by recency. publishedAt is often missing from feeds,
     # so fall back to discoveredAt and order newest-first (stable two-pass sort).
-    out.sort(key=lambda x: x.get("discoveredAt") or x.get("publishedAt") or "", reverse=True)
+    out.sort(key=lambda x: x.get("publishedAt") or x.get("discoveredAt") or "", reverse=True)
     out.sort(key=lambda x: -(x.get("score") or 0))
     return out
 
