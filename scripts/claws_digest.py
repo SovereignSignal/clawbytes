@@ -21,7 +21,7 @@ PROTON_USER = "clawback1@proton.me"
 PROTON_PASS = os.environ.get("PROTON_PASS", "")
 RECIPIENT = "sov@sovereignsignal.com"
 WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
-MEMORY_DIR = WORKSPACE / "memory"
+MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 BACKLOG_FILE = MEMORY_DIR / "clawbytes-backlog.json"
 NOTION_SYNC_FILE = MEMORY_DIR / "notion-claws-sync.md"
 # ──────────────────────────────────────────────────────────────────────────────

@@ -17,8 +17,8 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
 # Workspace path
-WORKSPACE = Path(__file__).parent.parent
-MEMORY_DIR = WORKSPACE / "memory"
+WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
+MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 BACKLOG_FILE = MEMORY_DIR / "clawbytes-backlog.json"
 STATE_FILE = MEMORY_DIR / "clawbytes-thread-state.json"
 

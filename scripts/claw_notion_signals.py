@@ -22,7 +22,7 @@ from pathlib import Path
 
 WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 CREDS = WORKSPACE / "CREDS.md"
-MEMORY = WORKSPACE / "memory"
+MEMORY = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 
 NOTION_PAGE_ID = "337000c0-d590-805d-af74-f27d19215184"
 CACHE_FILE = MEMORY / "clawbytes-notion-signals.json"

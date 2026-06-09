@@ -25,7 +25,7 @@ from urllib.parse import quote_plus, urlencode
 from urllib.request import Request, urlopen
 
 WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
-MEMORY = WORKSPACE / "memory"
+MEMORY = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 CREDS = WORKSPACE / "CREDS.md"
 
 CHANNEL_ID = "-1003850321704"
