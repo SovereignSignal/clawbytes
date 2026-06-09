@@ -720,6 +720,182 @@ def collect_candidates() -> Dict[str, List[dict]]:
     }
 
 
+def classify_source_candidate(kind: str, item: dict) -> Optional[dict]:
+    if kind == "rss":
+        return classify_rss(item)
+    if kind == "reddit":
+        return classify_reddit(item)
+    if kind == "security":
+        return classify_security(item)
+    if kind == "moltbook":
+        return classify_moltbook(item)
+    if kind == "hackernews":
+        return classify_hackernews(item)
+    return None
+
+
+def raw_source_label(kind: str, item: dict) -> str:
+    if kind == "rss":
+        return item.get("feed", "rss")
+    if kind == "reddit":
+        return item.get("subreddit", "reddit")
+    if kind == "security":
+        return item.get("repo", "security")
+    return item.get("sourceName") or item.get("sourceType") or kind
+
+
+def raw_item_title(kind: str, item: dict) -> str:
+    return item.get("title") or item.get("name") or item.get("advisory_id") or "(untitled)"
+
+
+def audit_candidate(kind: str, item: dict, state: dict, backlog: dict) -> dict:
+    candidate = classify_source_candidate(kind, item)
+    row = {
+        "sourceType": kind,
+        "sourceName": raw_source_label(kind, item),
+        "rawTitle": trim(raw_item_title(kind, item), 160),
+        "rawId": item.get("id") or item.get("advisory_id") or item.get("url") or item.get("link"),
+        "status": "rejected",
+        "reason": "classifier_rejected",
+    }
+    if not candidate:
+        return row
+
+    row.update(
+        {
+            "title": trim(candidate.get("title", ""), 160),
+            "url": candidate.get("url"),
+            "primaryCategory": candidate.get("primaryCategory"),
+            "categories": candidate.get("categories", []),
+            "score": candidate.get("score"),
+            "summary": candidate.get("summary"),
+            "expiresAt": candidate.get("expiresAt").isoformat() if candidate.get("expiresAt") else None,
+        }
+    )
+
+    if not is_fresh(candidate):
+        row.update({"status": "rejected", "reason": "expired"})
+        return row
+
+    seen_source_keys = set(state.get("seenSourceKeys", []))
+    posted_urls = set(state.get("postedUrls", []))
+    existing = {existing_item.get("id"): existing_item for existing_item in backlog.get("items", [])}
+    key = source_key(kind, candidate["sourceId"], candidate["url"])
+    bid = backlog_id(candidate["url"], candidate["title"])
+    row["sourceKey"] = key
+    row["backlogId"] = bid
+
+    if candidate["url"] in posted_urls:
+        row.update({"status": "skipped", "reason": "posted_url"})
+    elif bid in existing:
+        row.update({"status": "skipped", "reason": "already_in_backlog", "backlogStatus": existing[bid].get("status")})
+    elif key in seen_source_keys:
+        row.update({"status": "skipped", "reason": "seen_source_key"})
+    else:
+        row.update({"status": "would_add", "reason": "passes_classifier"})
+    return row
+
+
+def state_item_count(path: Path) -> int:
+    data = load_json(path, {})
+    if isinstance(data, list):
+        return len(data)
+    if not isinstance(data, dict):
+        return 0
+    if isinstance(data.get("foundItems"), list):
+        return len(data["foundItems"])
+    return sum(len(data.get(key, [])) for key in ["newReleases", "newHNStories", "newSkills", "newHFPapers", "alerts"] if isinstance(data.get(key), list))
+
+
+def unconsumed_state_report() -> list:
+    consumed = {
+        "claw-rss-state.json",
+        "claw-reddit-state.json",
+        "claw-security-state.json",
+        "claw-moltbook-state.json",
+        "claw-hn-state.json",
+        "clawbytes-backlog.json",
+        "clawbytes-thread-state.json",
+    }
+    rows = []
+    for path in sorted(MEMORY.glob("*.json")):
+        if path.name in consumed:
+            continue
+        count = state_item_count(path)
+        if count:
+            rows.append({"file": path.name, "items": count, "consumedByBacklog": False})
+    return rows
+
+
+def audit_sources(category: Optional[str] = None, limit: int = 40) -> dict:
+    ensure_files()
+    backlog = load_json(BACKLOG_FILE, {"items": []})
+    state = load_json(THREAD_STATE_FILE, {})
+    rows = []
+    for kind, items in collect_candidates().items():
+        for item in items:
+            row = audit_candidate(kind, item, state, backlog)
+            if category and category not in row.get("categories", []):
+                continue
+            rows.append(row)
+
+    reason_counts: Dict[str, int] = {}
+    source_counts: Dict[str, int] = {}
+    lane_counts: Dict[str, int] = {c: 0 for c in CATEGORY_META}
+    status_counts: Dict[str, int] = {}
+    for row in rows:
+        status_counts[row["status"]] = status_counts.get(row["status"], 0) + 1
+        reason_counts[row["reason"]] = reason_counts.get(row["reason"], 0) + 1
+        source_counts[row["sourceType"]] = source_counts.get(row["sourceType"], 0) + 1
+        if row.get("status") in {"would_add", "skipped"}:
+            lane = row.get("primaryCategory")
+            if lane in lane_counts:
+                lane_counts[lane] += 1
+
+    priority = {"would_add": 0, "skipped": 1, "rejected": 2}
+    rows = sorted(rows, key=lambda r: (priority.get(r["status"], 9), -(r.get("score") or 0), r.get("sourceName", "")))
+    return {
+        "memoryDir": str(MEMORY),
+        "lastCollectedAt": state.get("lastCollectedAt"),
+        "rawItems": len(rows),
+        "statusCounts": status_counts,
+        "reasonCounts": reason_counts,
+        "sourceCounts": source_counts,
+        "laneCounts": lane_counts,
+        "currentBundles": {cat: [{"title": item.get("title"), "score": item.get("score"), "source": item.get("sourceName")} for item in bundle_for_category(cat)] for cat in CATEGORY_META},
+        "unconsumedStateFiles": unconsumed_state_report(),
+        "items": rows[:limit],
+    }
+
+
+def print_audit(report: dict) -> None:
+    print("ClawBytes ingestion audit")
+    print(f"memory: {report['memoryDir']}")
+    print(f"lastCollectedAt: {report.get('lastCollectedAt')}")
+    print(f"raw items inspected: {report['rawItems']}")
+    print(f"status: {json.dumps(report['statusCounts'], sort_keys=True)}")
+    print(f"reasons: {json.dumps(report['reasonCounts'], sort_keys=True)}")
+    print(f"sources: {json.dumps(report['sourceCounts'], sort_keys=True)}")
+    print(f"lanes: {json.dumps(report['laneCounts'], sort_keys=True)}")
+
+    if report["unconsumedStateFiles"]:
+        print("\nunconsumed state files with items:")
+        for row in report["unconsumedStateFiles"]:
+            print(f"- {row['file']}: {row['items']} item(s)")
+
+    print("\ncurrent deterministic bundles:")
+    for category, items in report["currentBundles"].items():
+        titles = "; ".join(f"{item['title']} ({item['score']})" for item in items) or "nothing ready"
+        print(f"- {category}: {titles}")
+
+    print("\nsource-item decisions:")
+    for row in report["items"]:
+        lane = row.get("primaryCategory") or "-"
+        score = row.get("score") if row.get("score") is not None else "-"
+        title = row.get("title") or row.get("rawTitle")
+        print(f"- {row['status']}/{row['reason']} [{row['sourceType']}:{row['sourceName']}] {lane} score={score} — {title}")
+
+
 def collect_into_backlog() -> dict:
     ensure_files()
 
@@ -1653,6 +1829,12 @@ def main() -> int:
     p_collect.add_argument("--run-monitors", action="store_true", help="Run source monitors before collecting")
     p_collect.add_argument("--summary", action="store_true", help="Print compact counts without the full item payload")
     sub.add_parser("status")
+    p_audit = sub.add_parser("audit", help="Explain source ingestion, classification, and bundle decisions")
+    p_audit.add_argument("--run-monitors", action="store_true", help="Refresh monitor state before auditing")
+    p_audit.add_argument("--collect-first", action="store_true", help="Collect current source state into the backlog before auditing")
+    p_audit.add_argument("--category", choices=list(CATEGORY_META.keys()), help="Only show decisions for one lane")
+    p_audit.add_argument("--limit", type=int, default=40, help="Maximum source-item decisions to print")
+    p_audit.add_argument("--json", action="store_true", help="Print machine-readable audit JSON")
     p_auto = sub.add_parser("autopublish")
     p_auto.add_argument("--send", action="store_true")
 
@@ -1686,6 +1868,18 @@ def main() -> int:
 
     if args.cmd == "status":
         print_status()
+        return 0
+
+    if args.cmd == "audit":
+        if getattr(args, "run_monitors", False):
+            run_monitors()
+        if getattr(args, "collect_first", False):
+            collect_into_backlog()
+        report = audit_sources(category=args.category, limit=args.limit)
+        if getattr(args, "json", False):
+            print(json.dumps(report, indent=2))
+        else:
+            print_audit(report)
         return 0
 
     if args.cmd == "autopublish":

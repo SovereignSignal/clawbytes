@@ -48,6 +48,9 @@ cp .env.example .env
 # Refresh state and post a single lane (preview without --send)
 python3 clawbytes_threads.py collect --run-monitors
 python3 clawbytes_threads.py preview --category ship
+
+# Explain source → classifier → score → lane decisions
+python3 clawbytes_threads.py audit --run-monitors --collect-first
 ```
 
 ## Environment Variables
