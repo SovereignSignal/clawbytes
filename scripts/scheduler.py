@@ -61,6 +61,35 @@ def autopublish() -> None:
     _run("autopublish", args)
 
 
+def slack_report() -> None:
+    """Post the daily ClawBytes lane preview to Slack via the content-engine reporter.
+
+    Gated on CLAWBYTES_SLACK_CHANNEL_ID (the enable flag) and the publish gate, so it
+    only posts in live mode once the channel is configured. content-engine is pure
+    stdlib; it just needs its src on PYTHONPATH. The preview subprocess it shells out
+    to inherits CLAWBYTES_MEMORY_DIR, so it reads the live backlog.
+    """
+    channel = os.environ.get("CLAWBYTES_SLACK_CHANNEL_ID", "").strip()
+    if not channel or not _publish_enabled():
+        log.info("SKIP slack_report (channel_set=%s publish=%s)", bool(channel), _publish_enabled())
+        return
+    env = dict(os.environ)
+    ce_src = str(REPO_ROOT / "content-engine" / "src")
+    env["PYTHONPATH"] = ce_src + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    cmd = [
+        sys.executable, "-m", "claw_content_engine", "send-clawbytes-report",
+        "--clawbytes", str(REPO_ROOT),
+        "--channel-id", channel,
+        "--python-bin", sys.executable,
+    ]
+    log.info("START slack_report")
+    try:
+        result = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, check=False)
+        log.info("DONE slack_report: exit=%s", result.returncode)
+    except Exception:  # noqa: BLE001 - a job failure must not kill the scheduler
+        log.exception("ERROR slack_report crashed")
+
+
 def main() -> int:
     memory_dir = os.environ.get("CLAWBYTES_MEMORY_DIR", "<unset - using repo default>")
     log.info("ClawBytes scheduler starting")
@@ -76,8 +105,10 @@ def main() -> int:
     scheduler.add_job(collect, "cron", minute="0,30", id="collect")
     # autopublish hourly at :05 (VM: OnCalendar=*-*-* *:05:00)
     scheduler.add_job(autopublish, "cron", minute=5, id="autopublish")
+    # daily Slack lane-preview report at 15:30 UTC (~08:30 PT; VM: 08:30 America/Los_Angeles)
+    scheduler.add_job(slack_report, "cron", hour=15, minute=30, id="slack_report")
 
-    log.info("Scheduled: collect=*:00,30  autopublish=*:05 (UTC). Waiting for triggers.")
+    log.info("Scheduled: collect=*:00,30  autopublish=*:05  slack_report=15:30 (UTC). Waiting for triggers.")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
