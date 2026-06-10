@@ -83,6 +83,8 @@ CATEGORY_META = {
     },
 }
 
+# NOTE: repo_name_from_feed() matches these keys as substrings in dict order —
+# more-specific keys ("claude agent sdk") must precede more-general ("claude").
 REPO_PRIORITY = {
     "openclaw": 100,
     "hermes": 90,
@@ -92,16 +94,25 @@ REPO_PRIORITY = {
     "openfang": 78,
     "picoclaw": 74,
     "codex": 68,
+    "claude agent sdk": 67,
     "claude code action": 67,
     "claude": 66,
     "cursor": 64,
     "gemini": 62,
     "opencode": 60,
     "openai-agents": 60,
+    "openhands": 58,
+    "aider": 58,
     "mcp": 58,
+    "cline": 56,
     "vercel-ai": 56,
+    "roo code": 55,
     "continue": 54,
+    "goose": 54,
+    "qwen code": 54,
+    "smolagents": 54,
     "e2b": 52,
+    "crush": 50,
 }
 
 def _load_dynamic_subreddits():
@@ -283,6 +294,15 @@ def display_repo_name(repo: str) -> str:
         "vercel-ai": "Vercel AI SDK",
         "continue": "Continue",
         "e2b": "E2B",
+        "claude agent sdk": "Claude Agent SDK",
+        "openhands": "OpenHands",
+        "aider": "Aider",
+        "cline": "Cline",
+        "roo code": "Roo Code",
+        "goose": "Goose",
+        "qwen code": "Qwen Code",
+        "smolagents": "Smolagents",
+        "crush": "Crush",
     }.get(repo, repo.title())
 
 
