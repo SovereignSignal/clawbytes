@@ -151,7 +151,7 @@ WATCH_REDDIT_TERMS = [
 ]
 
 # LLM enrichment settings
-LLM_URL = os.environ.get("CLAWBYTES_LLM_URL", "https://llm.example.com/v1")
+LLM_URL = os.environ.get("CLAWBYTES_LLM_URL", "")
 LLM_MODEL = os.environ.get("CLAWBYTES_LLM_MODEL", "gemma4:31b-cloud")
 LLM_API_KEY = os.environ.get("CLAWBYTES_LLM_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
 

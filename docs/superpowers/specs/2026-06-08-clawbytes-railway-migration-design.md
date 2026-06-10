@@ -6,7 +6,7 @@ Status: approved (design), pending implementation
 ## Goal
 
 Move the **ClawBytes ecosystem monitor** (the collect + Telegram-lane publishing
-pipeline) off the legacy VM (`claw-content-engine`) onto Railway, for
+pipeline) off the legacy VM onto Railway, for
 simpler iteration (git push = deploy) and to drop the VPN/manual-deploy friction.
 
 ## Scope
@@ -96,7 +96,7 @@ so once seeded, posted items remain marked posted.
 5. Set `CLAWBYTES_PUBLISH=1`, redeploy; confirm one real lane post lands from Railway
    and the channel shows no duplicates.
 
-## legacy-vm spin-down (clawbytes only — leave modelbytes & content-engine running)
+## Legacy VM spin-down (clawbytes only — leave modelbytes & content-engine running)
 
 ```bash
 sudo systemctl disable --now \

@@ -38,7 +38,7 @@ def llm_call(prompt, max_tokens=120, temperature=0.7):
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             req = Request(
-                f"{os.environ.get('CLAWBYTES_LLM_URL', 'https://llm.example.com/v1')}/chat/completions",
+                f"{os.environ.get('CLAWBYTES_LLM_URL', '')}/chat/completions",
                 data=json.dumps({
                     "model": os.environ.get('CLAWBYTES_LLM_MODEL', 'gemma4:31b-cloud'),
                     "messages": [{"role": "user", "content": prompt}],
@@ -473,7 +473,7 @@ Rules:
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             req = Request(
-                f"{os.environ.get('CLAWBYTES_LLM_URL', 'https://llm.example.com/v1')}/chat/completions",
+                f"{os.environ.get('CLAWBYTES_LLM_URL', '')}/chat/completions",
                 data=json.dumps({
                     "model": os.environ.get('CLAWBYTES_LLM_MODEL', 'gemma4:31b-cloud'),
                     "messages": [{"role": "user", "content": prompt}],
@@ -660,7 +660,7 @@ def _llm_call_short(prompt, max_tokens=60):
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         req = Request(
-            f"{os.environ.get('CLAWBYTES_LLM_URL', 'https://llm.example.com/v1')}/chat/completions",
+            f"{os.environ.get('CLAWBYTES_LLM_URL', '')}/chat/completions",
             data=json.dumps({
                 'model': os.environ.get('CLAWBYTES_LLM_MODEL', 'gemma4:31b-cloud'),
                 'messages': [{'role': 'user', 'content': prompt}],

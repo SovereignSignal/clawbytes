@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ClawBytes Weekly Digest Generator
-Uses the same the configured LLM LLM pipeline as daily threads for consistent quality.
+Uses the same LLM pipeline as daily threads for consistent quality.
 Reads from the threads backlog (not separate state files) to avoid duplication.
 
 State file: memory/clawbytes-thread-state.json + memory/clawbytes-backlog.json
@@ -23,7 +23,7 @@ BACKLOG_FILE = MEMORY_DIR / "clawbytes-backlog.json"
 STATE_FILE = MEMORY_DIR / "clawbytes-thread-state.json"
 
 # LLM config (same as daily threads)
-LLM_URL = os.environ.get("CLAWBYTES_LLM_URL", "https://llm.example.com/v1")
+LLM_URL = os.environ.get("CLAWBYTES_LLM_URL", "")
 LLM_MODEL = os.environ.get("CLAWBYTES_LLM_MODEL", "gemma4:31b-cloud")
 LLM_API_KEY = os.environ.get("CLAWBYTES_LLM_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
 
@@ -189,7 +189,7 @@ def display_title(item):
 
 
 def llm_weekly_digest(sections, total_items):
-    """Generate the weekly digest using the configured LLM LLM."""
+    """Generate the weekly digest using the configured LLM."""
     if not LLM_API_KEY:
         return None
     
@@ -369,7 +369,7 @@ def send_to_telegram(message, bot_token=None, channel_id=None):
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Generate weekly ClawBytes digest using the configured LLM LLM")
+    parser = argparse.ArgumentParser(description="Generate weekly ClawBytes digest using the configured LLM")
     parser.add_argument("--send", action="store_true", help="Send to Telegram channel")
     parser.add_argument("--preview", action="store_true", help="Preview without sending")
     parser.add_argument("--status", action="store_true", help="Show digest status")
