@@ -1678,6 +1678,46 @@ def html_escape(s: str) -> str:
     )
 
 
+def telegram_html_to_mrkdwn(text: str) -> str:
+    """Convert our own Telegram HTML (only <b>/<i>/<code>/<a href>) to Slack
+    mrkdwn. Slack shares the &amp;/&lt;/&gt; entity escapes, so those stay;
+    &quot; is not a Slack escape and unescapes back to a quote."""
+    out = re.sub(r'<a href="([^"]+)">(.*?)</a>', r"<\1|\2>", text)
+    out = re.sub(r"</?b>", "*", out)
+    out = re.sub(r"</?i>", "_", out)
+    out = re.sub(r"</?code>", "`", out)
+    return out.replace("&quot;", '"')
+
+
+def mirror_to_slack(message: str) -> None:
+    """Mirror a channel post to the Slack audience channel.
+
+    Best-effort by contract: Slack being down or unconfigured must never
+    block or fail a Telegram publish, so this swallows everything.
+    """
+    token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
+    channel = os.environ.get("CLAWBYTES_SLACK_CHANNEL_ID", "").strip()
+    if not token or not channel:
+        return
+    try:
+        req = Request(
+            "https://slack.com/api/chat.postMessage",
+            data=json.dumps({
+                "channel": channel,
+                "text": telegram_html_to_mrkdwn(message),
+                "unfurl_links": False,
+            }).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+        )
+        with urlopen(req, timeout=20) as response:
+            json.loads(response.read().decode("utf-8"))
+    except Exception:
+        pass
+
+
 def send_telegram(message: str) -> None:
     token = cred("ClawBytes Channel", "Bot Token") or cred("Telegram Bots", "Bot Token")
     if not token:
@@ -1693,6 +1733,8 @@ def send_telegram(message: str) -> None:
     )
     with urlopen(req, timeout=20) as response:
         json.loads(response.read().decode("utf-8"))
+    # Audience surfaces stay in sync: every channel post mirrors to Slack.
+    mirror_to_slack(message)
 
 
 def mark_posted(category: str, limit: Optional[int] = None, posted_items: Optional[List[dict]] = None) -> List[dict]:
