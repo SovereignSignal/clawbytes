@@ -1263,6 +1263,25 @@ def fetch_article_snippet(url: str) -> str:
         return ""
 
 
+def grounding_for_item(category: str, item: dict) -> str:
+    """Source-grounding text for one bundle item, '' when none applies.
+
+    GitHub release URLs get distilled release notes in every lane; anything
+    else gets an article snippet (paper abstracts, advisories, HN targets).
+    Reddit thread pages ground poorly (login walls, comment noise) and the
+    fetch burns rate limit — skip them; their engagement stats already ride
+    in the prompt.
+    """
+    url = item.get("url", "") or ""
+    if not url or "reddit.com" in url:
+        return ""
+    if "github.com" in url and "/releases/tag/" in url:
+        body = fetch_release_body(url)
+        return f"RELEASE NOTES: {body}" if body else ""
+    snippet = fetch_article_snippet(url)
+    return f"ARTICLE SNIPPET: {snippet}" if snippet else ""
+
+
 BANNED_VERBS = [
     "explores", "explored", "exploring",
     "reveals", "revealed", "revealing",
@@ -1380,6 +1399,13 @@ Rules:
 
 Items:"""
 
+    # Prefetch grounding in parallel — sequential fetches would add up to
+    # ~10s/item of wall-clock to every bundle render.
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        groundings = list(pool.map(lambda it: grounding_for_item(category, it), items))
+
     for i, item in enumerate(items):
         title = display_title(item)
         url = item.get("url", "")
@@ -1390,19 +1416,9 @@ Items:"""
             pts = item.get("rawScore", 0)
             comments = item.get("rawComments", 0)
             raw_summary = f"{pts}pts / {comments} comments on HN"
-        # For Read items from RSS, fetch article snippet for grounding
-        article_snippet = ""
-        if category == "read" and source == "rss" and url:
-            article_snippet = fetch_article_snippet(url)
-        # For ship items, try to fetch release body
-        release_body = ""
-        if category == "ship" and "github.com" in url:
-            release_body = fetch_release_body(url)
         item_line = f"\n{i+1}. {title} | {url} | {raw_summary} | source: {source}"
-        if release_body:
-            item_line += f" | RELEASE NOTES: {release_body}"
-        if article_snippet:
-            item_line += f" | ARTICLE SNIPPET: {article_snippet}"
+        if groundings[i]:
+            item_line += f" | {groundings[i]}"
         prompt += item_line
 
     prompt += "\n\nWrite the post now:"
