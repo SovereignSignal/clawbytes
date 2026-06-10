@@ -16,10 +16,13 @@ posting to the live @clawbytes channel:
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
 import sys
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -79,56 +82,82 @@ def discover() -> None:
     )
 
 
-def slack_report() -> None:
-    """Post the daily ClawBytes lane preview to Slack via the content-engine reporter.
+def _send_admin_dm(label: str, text: str, *, html: bool = False) -> None:
+    """Send an operational/status report to Sov as a Telegram DM.
 
-    Gated on CLAWBYTES_SLACK_CHANNEL_ID (the enable flag) and the publish gate, so it
-    only posts in live mode once the channel is configured. content-engine is pure
-    stdlib; it just needs its src on PYTHONPATH. The preview subprocess it shells out
-    to inherits CLAWBYTES_MEMORY_DIR, so it reads the live backlog.
+    Status reports never go to audience surfaces (the Slack channel or the
+    @clawbytes Telegram channel) — CLAWBYTES_ADMIN_CHAT_ID is the ops inbox.
+    Falls back to a plain-text resend if Telegram rejects the HTML parse.
     """
-    channel = os.environ.get("CLAWBYTES_SLACK_CHANNEL_ID", "").strip()
-    if not channel or not _publish_enabled():
-        log.info("SKIP slack_report (channel_set=%s publish=%s)", bool(channel), _publish_enabled())
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("CLAWBYTES_ADMIN_CHAT_ID", "").strip()
+    if not token or not chat_id:
+        log.info("SKIP %s (admin_chat_set=%s token_set=%s)", label, bool(chat_id), bool(token))
         return
-    env = dict(os.environ)
-    ce_src = str(REPO_ROOT / "content-engine" / "src")
-    env["PYTHONPATH"] = ce_src + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
-    cmd = [
-        sys.executable, "-m", "claw_content_engine", "send-clawbytes-report",
-        "--clawbytes", str(REPO_ROOT),
-        "--channel-id", channel,
-        "--python-bin", sys.executable,
-    ]
-    log.info("START slack_report")
-    try:
-        result = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, check=False)
-        log.info("DONE slack_report: exit=%s", result.returncode)
-    except Exception:  # noqa: BLE001 - a job failure must not kill the scheduler
-        log.exception("ERROR slack_report crashed")
+
+    def _post(payload: dict) -> bool:
+        data = urllib.parse.urlencode(payload).encode()
+        req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return bool(json.loads(resp.read().decode()).get("ok"))
+        except Exception:  # noqa: BLE001 - report delivery must not kill the scheduler
+            return False
+
+    payload = {"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": "true"}
+    if html:
+        ok = _post({**payload, "parse_mode": "HTML"})
+        if not ok:
+            ok = _post(payload)
+    else:
+        ok = _post(payload)
+    log.info("DONE %s: telegram_ok=%s", label, ok)
+
+
+def _capture(args: list[str]) -> str:
+    result = subprocess.run(
+        [sys.executable, THREADS, *args],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+    return (result.stdout or "").strip()
+
+
+def lane_preview_report() -> None:
+    """Daily lane preview, DMed to the admin (was a Slack channel post)."""
+    log.info("START lane_preview_dm")
+    parts = []
+    for category in ("ship", "watch", "read", "community"):
+        try:
+            output = _capture(["preview", "--category", category])
+        except Exception:  # noqa: BLE001
+            log.exception("ERROR lane_preview_dm preview %s crashed", category)
+            continue
+        if output and "Nothing new" not in output:
+            parts.append(output)
+    body = "\n\n".join(parts) or "All lanes quiet."
+    _send_admin_dm("lane_preview_dm", "ClawBytes — daily lane preview\n\n" + body, html=True)
 
 
 def audit_report() -> None:
-    """Weekly Slack ingestion audit — same gating as the daily lane preview."""
-    channel = os.environ.get("CLAWBYTES_SLACK_CHANNEL_ID", "").strip()
-    if not channel or not _publish_enabled():
-        log.info("SKIP audit_report (channel_set=%s publish=%s)", bool(channel), _publish_enabled())
-        return
-    env = dict(os.environ)
+    """Weekly ingestion audit, DMed to the admin (was a Slack channel post)."""
+    log.info("START audit_dm")
     ce_src = str(REPO_ROOT / "content-engine" / "src")
-    env["PYTHONPATH"] = ce_src + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
-    cmd = [
-        sys.executable, "-m", "claw_content_engine", "send-clawbytes-audit",
-        "--clawbytes", str(REPO_ROOT),
-        "--channel-id", channel,
-        "--python-bin", sys.executable,
-    ]
-    log.info("START audit_report")
+    if ce_src not in sys.path:
+        sys.path.insert(0, ce_src)
     try:
-        result = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, check=False)
-        log.info("DONE audit_report: exit=%s", result.returncode)
+        from claw_content_engine.feed_reports import clawbytes_audit_report
+
+        text = clawbytes_audit_report(REPO_ROOT, python_bin=sys.executable)
     except Exception:  # noqa: BLE001 - a job failure must not kill the scheduler
-        log.exception("ERROR audit_report crashed")
+        log.exception("ERROR audit_dm failed to build report")
+        return
+    # The builder emits Slack mrkdwn (*bold*/_italic_); send as plain text —
+    # Telegram Markdown parse would choke on underscores in reason names.
+    _send_admin_dm("audit_dm", text)
 
 
 def main() -> int:
@@ -146,14 +175,14 @@ def main() -> int:
     scheduler.add_job(collect, "cron", minute="0,30", id="collect")
     # autopublish hourly at :05 (VM: OnCalendar=*-*-* *:05:00)
     scheduler.add_job(autopublish, "cron", minute=5, id="autopublish")
-    # daily Slack lane-preview report at 15:30 UTC (~08:30 PT; VM: 08:30 America/Los_Angeles)
-    scheduler.add_job(slack_report, "cron", hour=15, minute=30, id="slack_report")
+    # daily lane preview at 15:30 UTC, DMed to the admin (~08:30 PT)
+    scheduler.add_job(lane_preview_report, "cron", hour=15, minute=30, id="lane_preview")
     # weekly source discovery, Mondays 14:10 UTC (before the day's collects pick it up)
     scheduler.add_job(discover, "cron", day_of_week="mon", hour=14, minute=10, id="discover")
-    # weekly ingestion audit to Slack, Mondays 15:45 UTC (after discovery + a collect cycle)
+    # weekly ingestion audit DM, Mondays 15:45 UTC (after discovery + a collect cycle)
     scheduler.add_job(audit_report, "cron", day_of_week="mon", hour=15, minute=45, id="audit_report")
 
-    log.info("Scheduled: collect=*:00,30  autopublish=*:05  slack_report=15:30  discover=Mon 14:10 (UTC). Waiting for triggers.")
+    log.info("Scheduled: collect=*:00,30  autopublish=*:05  lane_preview_dm=15:30  discover=Mon 14:10  audit_dm=Mon 15:45 (UTC). Waiting for triggers.")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
