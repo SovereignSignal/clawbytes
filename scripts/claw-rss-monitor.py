@@ -97,6 +97,13 @@ RELEVANCE_KEYWORDS = [
     # Infrastructure
     "inference", "serving", "deployment", "quantization",
     "on-device", "edge ai", "ai chip", "gpu shortage", "datacenter",
+    # Harness ecosystem (2026-06 widening). Substring-matched — only
+    # unambiguous tokens here (bare "amp"/"cline"/"zed" match inside
+    # ordinary words). Release feeds bypass this gate entirely.
+    "subagent", "agent harness", "coding harness", "windsurf",
+    "roo code", "claude agent sdk", "agent sdk", "computer use",
+    "context engineering", "mcp server", "github copilot",
+    "zed editor", "warp terminal", "openhands", "smolagents",
 ]
 
 def load_state():

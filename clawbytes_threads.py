@@ -152,6 +152,10 @@ SECURITY_TERMS = [
 READ_TERMS = [
     "agent", "agentic", "workflow", "memory", "mcp", "security",
     "claude code", "codex", "openclaw",
+    # Harness-era vocabulary (2026-06 widening)
+    "subagent", "harness", "skills", "hooks", "computer use",
+    "context engineering", "coding agent", "copilot", "cursor",
+    "gemini cli", "windsurf", "aider", "agent sdk",
 ]
 
 
