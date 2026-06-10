@@ -118,7 +118,11 @@ def _load_dynamic_subreddits():
     return extra
 
 
-ALLOWED_SUBREDDITS = {"openclaw", "selfhosted", "localllama", "machinelearning", "artificial", "homelab", "singularity"} | _load_dynamic_subreddits()
+ALLOWED_SUBREDDITS = {
+    "openclaw", "selfhosted", "localllama",
+    # Harness-space subs (2026-06 widening)
+    "claudeai", "claudecode", "cursor", "chatgptcoding", "ai_agents", "mcp",
+} | _load_dynamic_subreddits()
 
 # Reddit topics that belong in Read, not Community
 READ_REDDIT_TERMS = [
