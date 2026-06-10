@@ -20,7 +20,9 @@ WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 STATE_FILE = MEMORY_DIR / "claw-reddit-state.json"
 
-# Subreddits to monitor
+# Subreddits to monitor. Harness-space realignment 2026-06: dedicated harness
+# subs ride hot.json (gated by passes_quality_filter thresholds); the two
+# broad subs keep targeted search queries.
 SUBREDDITS = [
     {
         "name": "openclaw",
@@ -28,33 +30,43 @@ SUBREDDITS = [
         "type": "hot"
     },
     {
-        "name": "selfhosted",
-        "url": "https://www.reddit.com/r/selfhosted/search.json?q=openclaw+OR+ai+agent+OR+llm+agent&sort=new&limit=10",
-        "type": "search"
+        "name": "ClaudeAI",
+        "url": "https://www.reddit.com/r/ClaudeAI/hot.json?limit=15",
+        "type": "hot"
+    },
+    {
+        "name": "ClaudeCode",
+        "url": "https://www.reddit.com/r/ClaudeCode/hot.json?limit=15",
+        "type": "hot"
+    },
+    {
+        "name": "cursor",
+        "url": "https://www.reddit.com/r/cursor/hot.json?limit=10",
+        "type": "hot"
+    },
+    {
+        "name": "ChatGPTCoding",
+        "url": "https://www.reddit.com/r/ChatGPTCoding/hot.json?limit=10",
+        "type": "hot"
+    },
+    {
+        "name": "AI_Agents",
+        "url": "https://www.reddit.com/r/AI_Agents/hot.json?limit=10",
+        "type": "hot"
+    },
+    {
+        "name": "mcp",
+        "url": "https://www.reddit.com/r/mcp/hot.json?limit=10",
+        "type": "hot"
     },
     {
         "name": "LocalLLaMA",
-        "url": "https://www.reddit.com/r/LocalLLaMA/search.json?q=openclaw+OR+claw+agent+OR+ai+agent+workspace+OR+coding+agent&sort=new&limit=10",
+        "url": "https://www.reddit.com/r/LocalLLaMA/search.json?q=openclaw+OR+claude+code+OR+codex+OR+coding+agent&sort=new&limit=10",
         "type": "search"
     },
     {
-        "name": "MachineLearning",
-        "url": "https://www.reddit.com/r/MachineLearning/search.json?q=openclaw+OR+llm+agent+OR+tool+use+OR+function+calling&sort=new&limit=10",
-        "type": "search"
-    },
-    {
-        "name": "artificial",
-        "url": "https://www.reddit.com/r/artificial/search.json?q=ai+agent+OR+llm+framework+OR+coding+assistant&sort=new&limit=5",
-        "type": "search"
-    },
-    {
-        "name": "homelab",
-        "url": "https://www.reddit.com/r/homelab/search.json?q=openclaw+OR+ai+agent&sort=new&limit=5",
-        "type": "search"
-    },
-    {
-        "name": "singularity",
-        "url": "https://www.reddit.com/r/singularity/search.json?q=openclaw+OR+ai+agent+framework&sort=new&limit=5",
+        "name": "selfhosted",
+        "url": "https://www.reddit.com/r/selfhosted/search.json?q=openclaw+OR+ai+agent+OR+llm+agent&sort=new&limit=10",
         "type": "search"
     },
 ]
