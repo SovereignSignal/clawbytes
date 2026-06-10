@@ -1189,23 +1189,55 @@ def bundle_for_category(category: str, limit: Optional[int] = None) -> List[dict
     return picked
 
 
+RELEASE_NOTE_NOISE = re.compile(
+    r"dependabot|full changelog|new contributors|first contribution"
+    r"|^#+\s*(what'?s changed|changelog)\s*$|^\*\*full changelog",
+    re.IGNORECASE,
+)
+
+
+def clean_release_notes(body: str) -> str:
+    """Distill a GitHub release body into LLM-worthy grounding.
+
+    Release bodies open with changelog boilerplate (dependabot bumps,
+    contributor shoutouts, compare links) that crowds real features out of a
+    truncated context window. Keep substantive lines, strip link noise.
+    """
+    lines = []
+    for raw in (body or "").splitlines():
+        line = raw.strip()
+        if not line or RELEASE_NOTE_NOISE.search(line):
+            continue
+        # "feat: x by @dev in https://github.com/o/r/pull/1" -> "feat: x"
+        line = re.sub(r"\s+by @[\w\[\]-]+( in \S+)?", "", line)
+        line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)  # md links -> text
+        line = re.sub(r"https?://\S+", "", line).strip(" *-:")
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
+
+
 def fetch_release_body(url: str) -> str:
-    """Fetch GitHub release body text from the API."""
-    # Convert GitHub release URL to API URL
+    """Fetch and distill GitHub release notes for LLM grounding."""
     # https://github.com/owner/repo/releases/tag/v1.0 -> https://api.github.com/repos/owner/repo/releases/tags/v1.0
     m = re.match(r"https://github\.com/([^/]+)/([^/]+)/releases/tag/(.+)", url)
     if not m:
         return ""
     owner, repo, tag = m.group(1), m.group(2), m.group(3)
     api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}"
+    headers = {"User-Agent": "ClawBytes/1.0"}
+    # Unauthenticated GitHub API is 60 req/hr per IP — exhausted fast on shared
+    # egress, which silently degrades ship summaries to "vX released".
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     try:
-        req = Request(api_url, headers={"User-Agent": "ClawBytes/1.0"})
+        req = Request(api_url, headers=headers)
         with urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode())
-        body = (data.get("body") or "").strip()
-        # Truncate to 300 chars for LLM context
-        if len(body) > 300:
-            body = body[:297] + "..."
+        body = clean_release_notes((data.get("body") or "").strip())
+        if len(body) > 900:
+            body = body[:897] + "..."
         return body
     except Exception:
         return ""
@@ -1344,6 +1376,7 @@ Rules:
 - Start EVERY item with {item_emoji} (this lane\u2019s emoji) and use the SAME emoji for every item. Never use another lane\u2019s emoji or a topical/decorative emoji.
 - For HN items: reference the community signal (e.g. "171 points on HN") when it adds weight
 - NEVER fabricate statistics, metrics, or specific findings. If unsure, describe the piece's ambition, not its results.
+- Copy version numbers character-for-character from the item title or release notes. Never shorten, round, or invent a version.
 
 Items:"""
 
