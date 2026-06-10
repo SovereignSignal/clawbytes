@@ -6,7 +6,7 @@ Status: approved (design), pending implementation
 ## Goal
 
 Move the **ClawBytes ecosystem monitor** (the collect + Telegram-lane publishing
-pipeline) off the legacy VM (`claw-content-engine`, REDACTED) onto Railway, for
+pipeline) off the legacy VM (`claw-content-engine`) onto Railway, for
 simpler iteration (git push = deploy) and to drop the VPN/manual-deploy friction.
 
 ## Scope

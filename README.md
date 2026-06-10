@@ -18,15 +18,13 @@ Each lane has its own TTL, scoring thresholds, and posting windows — see `claw
 
 ## Deploy to Railway
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/YOUR_TEMPLATE_ID)
-
 ### Manual Setup
 
 1. **Create Railway project**
 2. **Add PostgreSQL** (Railway provides `DATABASE_URL`)
 3. **Set environment variables:**
    - `TELEGRAM_BOT_TOKEN` — From @BotFather  
-   - `TELEGRAM_CHANNEL_ID` — Your channel ID (e.g., `-100REDACTED`)
+   - `TELEGRAM_CHANNEL_ID` — Your channel ID (e.g., `-100xxxxxxxxxx`)
    - `BRAVE_API_KEY` — Optional, for discovery features
 4. **Deploy**
 

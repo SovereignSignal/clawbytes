@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 MEMORY = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 CREDS = WORKSPACE / "CREDS.md"
 
-CHANNEL_ID = "-100REDACTED"
+CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "")
 
 STATE_FILES = {
     "rss": MEMORY / "claw-rss-state.json",

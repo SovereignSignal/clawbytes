@@ -17,9 +17,9 @@ from urllib.error import URLError
 
 # ── Config ────────────────────────────────────────────────────────────────────
 NOTION_KEY = os.environ.get("NOTION_API_KEY", "")
-PROTON_USER = "redacted@example.com"
+PROTON_USER = os.environ.get("PROTON_USER", "")
 PROTON_PASS = os.environ.get("PROTON_PASS", "")
-RECIPIENT = "sov@sovereignsignal.com"
+RECIPIENT = os.environ.get("CLAWBYTES_DIGEST_RECIPIENT", "")
 WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 BACKLOG_FILE = MEMORY_DIR / "clawbytes-backlog.json"
@@ -996,8 +996,8 @@ li .ctx { color: #888; font-size: 12px; }
     html += '\n<div class="footer">\n'
     if tomorrow:
         html += f'<p class="tomorrow">{tomorrow}</p>\n'
-    html += """<p>&#x1F980; <a href="https://sovs.notion.site/Claws-337000c0d590805daf74f27d19215184">Full map</a> &middot; <a href="https://t.me/clawbytes">@clawbytes</a> &middot; <a href="https://t.me/modelbytes">@modelbytes</a></p>
-<p>Reply with feedback &middot; <a href="mailto:redacted@example.com">redacted@example.com</a></p>
+    html += f"""<p>&#x1F980; <a href="https://sovs.notion.site/Claws-337000c0d590805daf74f27d19215184">Full map</a> &middot; <a href="https://t.me/clawbytes">@clawbytes</a> &middot; <a href="https://t.me/modelbytes">@modelbytes</a></p>
+<p>Reply with feedback &middot; <a href="mailto:{PROTON_USER}">{PROTON_USER}</a></p>
 </div>
 </body></html>"""
 

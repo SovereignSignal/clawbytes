@@ -55,10 +55,6 @@ text = text.replace(
     'MEMORY = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))\n',
 )
 text = text.replace(
-    'CHANNEL_ID = "-100REDACTED"\n',
-    'CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "-100REDACTED")\n',
-)
-text = text.replace(
     '# Notion Claws signal integration (must import before WORKSPACE usage).\n'
     '# claw_notion_signals lives in scripts/, so both dirs go on sys.path.\n'
     'sys.path.insert(0, str(Path(__file__).parent / "scripts"))\n'

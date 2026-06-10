@@ -37,7 +37,7 @@ CREDS = WORKSPACE / "CREDS.md"
 BACKLOG_FILE = MEMORY / "clawbytes-backlog.json"
 THREAD_STATE_FILE = MEMORY / "clawbytes-thread-state.json"
 
-CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "-100REDACTED")
+CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "")
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 CATEGORY_META = {

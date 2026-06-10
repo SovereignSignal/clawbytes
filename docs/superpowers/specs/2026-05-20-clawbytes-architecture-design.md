@@ -13,7 +13,7 @@
 
 ## 1. Context
 
-ClawBytes is the public signal-surface of the Claws / OpenClaw ecosystem — a curated Telegram channel (`@clawbytes`, channel ID `-100REDACTED`) that posts four staggered "lanes" per day:
+ClawBytes is the public signal-surface of the Claws / OpenClaw ecosystem — a curated Telegram channel (`@clawbytes`) that posts four staggered "lanes" per day:
 
 - **Ship** — what released that changes operator behavior
 - **Watch** — what to worry about (security, supply-chain, breakage)
@@ -519,7 +519,7 @@ A concrete Wednesday, end to end.
 
 ### Integration tests
 
-- **End-to-end publish with curator**: `clawbytes_threads.py publish --category ship --preview --use-curator` runs full pipeline but posts to a test Telegram chat instead of `-100REDACTED`. Run before any production deploy.
+- **End-to-end publish with curator**: `clawbytes_threads.py publish --category ship --preview --use-curator` runs full pipeline but posts to a test Telegram chat instead of the production channel. Run before any production deploy.
 - **Supervisor dry-run mode**: `python scripts/supervisor.py --dry-run` emits all proposed actions to stdout without committing/PR-ing or DM-ing. Run nightly during initial rollout to verify behavior.
 - **Migration confidence test**: dry-run supervisor against current state, manually inspect actions. Ship when actions look sane.
 
