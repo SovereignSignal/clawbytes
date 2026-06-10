@@ -341,7 +341,7 @@ discover_awesome_lists() {
                 continue
             fi
 
-            ((checked++))
+            checked=$((checked + 1))
 
             # Fetch metadata
             local repo_data
@@ -596,7 +596,7 @@ check_github_releases() {
             fi
         ) &
         
-        ((worker_count++))
+        worker_count=$((worker_count + 1))
         # Progress output every 10 repos
         if (( worker_count % 10 == 0 )); then
             echo "   ... $worker_count/$total_repos" >&2
@@ -614,7 +614,7 @@ check_github_releases() {
         local item
         item=$(cat "$f")
         new_releases=$(echo "$new_releases" | jq --argjson item "$item" '. + [$item]')
-        ((batch_count++))
+        batch_count=$((batch_count + 1))
     done
     
     rm -rf "$tmpdir"
@@ -822,7 +822,7 @@ run_discover() {
     while IFS= read -r discovery; do
         [[ -z "$discovery" || "$discovery" == "null" ]] && continue
         add_repo_to_sources "$discovery" "dynamic"
-        ((count++))
+        count=$((count + 1))
     done < <(echo "$all_discoveries" | jq -c '.[]')
     
     # Update state
