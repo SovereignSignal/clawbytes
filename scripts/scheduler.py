@@ -82,18 +82,24 @@ def discover() -> None:
     )
 
 
+OPS_BANNER = "🔧 OPS REPORT — visible only to you, never posted to the channel.\n\n"
+
+
 def _send_admin_dm(label: str, text: str, *, html: bool = False) -> None:
     """Send an operational/status report to Sov as a Telegram DM.
 
     Status reports never go to audience surfaces (the Slack channel or the
     @clawbytes Telegram channel) — CLAWBYTES_ADMIN_CHAT_ID is the ops inbox.
-    Falls back to a plain-text resend if Telegram rejects the HTML parse.
+    Every DM is prefixed with OPS_BANNER so an ops report can never be
+    mistaken for channel content (same bot sends both). Falls back to a
+    plain-text resend if Telegram rejects the HTML parse.
     """
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.environ.get("CLAWBYTES_ADMIN_CHAT_ID", "").strip()
     if not token or not chat_id:
         log.info("SKIP %s (admin_chat_set=%s token_set=%s)", label, bool(chat_id), bool(token))
         return
+    text = OPS_BANNER + text
 
     def _post(payload: dict) -> bool:
         data = urllib.parse.urlencode(payload).encode()
