@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from html.parser import HTMLParser
@@ -130,12 +131,51 @@ def clawbytes_preview_report(clawbytes: Path, *, python_bin: str = "python3") ->
     return "\n\n".join(parts)[:35000]
 
 
+def clawbytes_audit_report(clawbytes: Path, *, python_bin: str = "python3") -> str:
+    """Weekly ingestion-audit summary: where raw items die in the pipeline.
+
+    Surfaces classifier rejections (vocab gaps), zero-yield sources (dead
+    feeds), and unconsumed state files (orphaned monitors).
+    """
+    raw = _run([python_bin, "clawbytes_threads.py", "audit", "--json"], clawbytes)
+    try:
+        report = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return f"*ClawBytes — ingestion audit*\n_audit failed:_\n```{raw[:1000]}```"
+
+    parts = ["*ClawBytes — weekly ingestion audit*"]
+    status = report.get("statusCounts", {})
+    if status:
+        joined = " · ".join(f"{key} {value}" for key, value in sorted(status.items()))
+        parts.append(f"_Pipeline: {joined} (of {report.get('rawItems', 0)} raw items)_")
+    reasons = report.get("reasonCounts", {})
+    if reasons:
+        top = sorted(reasons.items(), key=lambda kv: -kv[1])[:5]
+        parts.append("*Drop reasons:* " + " · ".join(f"{key} {value}" for key, value in top))
+    sources = report.get("sourceCounts", {})
+    if sources:
+        ranked = sorted(sources.items(), key=lambda kv: -kv[1])
+        parts.append("*Raw items by source:* " + " · ".join(f"{key} {value}" for key, value in ranked))
+    lanes = report.get("laneCounts", {})
+    if lanes:
+        parts.append("*Lane flow:* " + " · ".join(f"{key} {value}" for key, value in lanes.items()))
+    unconsumed = report.get("unconsumedStateFiles", [])
+    if unconsumed:
+        listed = ", ".join(f"{row['file']} ({row['items']})" for row in unconsumed)
+        parts.append(f"*Unconsumed state files:* {listed}")
+    return "\n\n".join(parts)[:35000]
+
+
 def send_modelbytes_report(modelbytes: Path, channel_id: str) -> tuple[bool, str]:
     return send_text(latest_modelbytes_report(modelbytes), channel_id=channel_id)
 
 
 def send_clawbytes_report(clawbytes: Path, channel_id: str, *, python_bin: str = "python3") -> tuple[bool, str]:
     return send_text(clawbytes_preview_report(clawbytes, python_bin=python_bin), channel_id=channel_id)
+
+
+def send_clawbytes_audit(clawbytes: Path, channel_id: str, *, python_bin: str = "python3") -> tuple[bool, str]:
+    return send_text(clawbytes_audit_report(clawbytes, python_bin=python_bin), channel_id=channel_id)
 
 
 def _run(cmd: list[str], cwd: Path) -> str:

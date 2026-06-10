@@ -108,6 +108,29 @@ def slack_report() -> None:
         log.exception("ERROR slack_report crashed")
 
 
+def audit_report() -> None:
+    """Weekly Slack ingestion audit — same gating as the daily lane preview."""
+    channel = os.environ.get("CLAWBYTES_SLACK_CHANNEL_ID", "").strip()
+    if not channel or not _publish_enabled():
+        log.info("SKIP audit_report (channel_set=%s publish=%s)", bool(channel), _publish_enabled())
+        return
+    env = dict(os.environ)
+    ce_src = str(REPO_ROOT / "content-engine" / "src")
+    env["PYTHONPATH"] = ce_src + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    cmd = [
+        sys.executable, "-m", "claw_content_engine", "send-clawbytes-audit",
+        "--clawbytes", str(REPO_ROOT),
+        "--channel-id", channel,
+        "--python-bin", sys.executable,
+    ]
+    log.info("START audit_report")
+    try:
+        result = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, check=False)
+        log.info("DONE audit_report: exit=%s", result.returncode)
+    except Exception:  # noqa: BLE001 - a job failure must not kill the scheduler
+        log.exception("ERROR audit_report crashed")
+
+
 def main() -> int:
     memory_dir = os.environ.get("CLAWBYTES_MEMORY_DIR", "<unset - using repo default>")
     log.info("ClawBytes scheduler starting")
@@ -127,6 +150,8 @@ def main() -> int:
     scheduler.add_job(slack_report, "cron", hour=15, minute=30, id="slack_report")
     # weekly source discovery, Mondays 14:10 UTC (before the day's collects pick it up)
     scheduler.add_job(discover, "cron", day_of_week="mon", hour=14, minute=10, id="discover")
+    # weekly ingestion audit to Slack, Mondays 15:45 UTC (after discovery + a collect cycle)
+    scheduler.add_job(audit_report, "cron", day_of_week="mon", hour=15, minute=45, id="audit_report")
 
     log.info("Scheduled: collect=*:00,30  autopublish=*:05  slack_report=15:30  discover=Mon 14:10 (UTC). Waiting for triggers.")
     try:

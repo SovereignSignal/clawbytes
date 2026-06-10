@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 from .checks import run_checks
-from .feed_reports import send_clawbytes_report, send_modelbytes_report
+from .feed_reports import send_clawbytes_audit, send_clawbytes_report, send_modelbytes_report
 from .packet import build_weekly_packet
 from .renderers import write_outputs
 from .slack import send_slack_summary
@@ -38,6 +38,11 @@ def main(argv: list[str] | None = None) -> int:
     claw_report.add_argument("--channel-id", default=os.environ.get("CLAWBYTES_SLACK_CHANNEL_ID", ""))
     claw_report.add_argument("--python-bin", default=os.environ.get("CLAWBYTES_PYTHON", "python3"))
 
+    claw_audit = sub.add_parser("send-clawbytes-audit", help="Post ClawBytes ingestion audit to Slack")
+    claw_audit.add_argument("--clawbytes", default=os.environ.get("CLAWBYTES_PATH", "../clawbytes-master"))
+    claw_audit.add_argument("--channel-id", default=os.environ.get("CLAWBYTES_SLACK_CHANNEL_ID", ""))
+    claw_audit.add_argument("--python-bin", default=os.environ.get("CLAWBYTES_PYTHON", "python3"))
+
     args = parser.parse_args(argv)
     if args.command == "generate-weekly":
         packet = build_weekly_packet(Path(args.clawbytes), Path(args.modelbytes), days=args.days)
@@ -62,6 +67,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "send-clawbytes-report":
         ok, message = send_clawbytes_report(Path(args.clawbytes), args.channel_id, python_bin=args.python_bin)
+        print(message)
+        return 0 if ok else 1
+
+    if args.command == "send-clawbytes-audit":
+        ok, message = send_clawbytes_audit(Path(args.clawbytes), args.channel_id, python_bin=args.python_bin)
         print(message)
         return 0 if ok else 1
 
