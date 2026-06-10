@@ -39,15 +39,19 @@ def _publish_enabled() -> bool:
     return os.environ.get("CLAWBYTES_PUBLISH", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _run(label: str, args: list[str]) -> None:
-    """Run a clawbytes_threads.py subcommand, logging start/finish; never raises."""
-    cmd = [sys.executable, THREADS, *args]
-    log.info("START %s: %s", label, " ".join(args))
+def _run_cmd(label: str, cmd: list[str]) -> None:
+    """Run a subprocess job, logging start/finish; never raises."""
+    log.info("START %s: %s", label, " ".join(cmd))
     try:
         result = subprocess.run(cmd, cwd=str(REPO_ROOT), check=False)
         log.info("DONE %s: exit=%s", label, result.returncode)
     except Exception:  # noqa: BLE001 - a job failure must not kill the scheduler
         log.exception("ERROR %s crashed", label)
+
+
+def _run(label: str, args: list[str]) -> None:
+    """Run a clawbytes_threads.py subcommand."""
+    _run_cmd(label, [sys.executable, THREADS, *args])
 
 
 def collect() -> None:
@@ -59,6 +63,20 @@ def autopublish() -> None:
     if _publish_enabled():
         args.append("--send")
     _run("autopublish", args)
+
+
+def discover() -> None:
+    """Weekly source discovery. New repos land in claw-ecosystem-sources.json
+    (merged into release checks by get_all_repos) and new feeds/subreddits in
+    clawbytes-dynamic-feeds.json (merged by the rss/reddit monitors)."""
+    _run_cmd(
+        "discover_ecosystem",
+        ["bash", str(REPO_ROOT / "scripts" / "claw-ecosystem-monitor.sh"), "--mode", "discover"],
+    )
+    _run_cmd(
+        "discover_feeds",
+        [sys.executable, str(REPO_ROOT / "scripts" / "claw-source-discovery.py")],
+    )
 
 
 def slack_report() -> None:
@@ -107,8 +125,10 @@ def main() -> int:
     scheduler.add_job(autopublish, "cron", minute=5, id="autopublish")
     # daily Slack lane-preview report at 15:30 UTC (~08:30 PT; VM: 08:30 America/Los_Angeles)
     scheduler.add_job(slack_report, "cron", hour=15, minute=30, id="slack_report")
+    # weekly source discovery, Mondays 14:10 UTC (before the day's collects pick it up)
+    scheduler.add_job(discover, "cron", day_of_week="mon", hour=14, minute=10, id="discover")
 
-    log.info("Scheduled: collect=*:00,30  autopublish=*:05  slack_report=15:30 (UTC). Waiting for triggers.")
+    log.info("Scheduled: collect=*:00,30  autopublish=*:05  slack_report=15:30  discover=Mon 14:10 (UTC). Waiting for triggers.")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
