@@ -229,6 +229,9 @@ discover_github() {
         "claw+agent+in:name&sort=stars&per_page=20"
         "ai+coding+agent+framework&sort=stars&per_page=10"
         "mcp+agent+framework&sort=updated&per_page=10"
+        "topic:coding-agent&sort=stars&per_page=10"
+        "topic:mcp-server&sort=stars&per_page=10"
+        "topic:ai-agent+created:>2026-01-01&sort=stars&per_page=10"
     )
     
     for query in "${queries[@]}"; do
@@ -301,6 +304,9 @@ discover_awesome_lists() {
     local lists=(
         "https://raw.githubusercontent.com/e2b-dev/awesome-ai-agents/main/README.md"
         "https://raw.githubusercontent.com/kyrolabs/awesome-agents/main/README.md"
+        "https://raw.githubusercontent.com/punkpeye/awesome-mcp-servers/main/README.md"
+        "https://raw.githubusercontent.com/hesreallyhim/awesome-claude-code/main/README.md"
+        "https://raw.githubusercontent.com/sourcegraph/awesome-code-ai/main/README.md"
     )
     
     for list_url in "${lists[@]}"; do
@@ -310,19 +316,33 @@ discover_awesome_lists() {
         # Extract GitHub URLs
         local urls
         urls=$(echo "$content" | grep -oE 'https://github\.com/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+' | sort -u)
-        
+
+        # Large lists (awesome-mcp-servers has thousands of entries) would blow
+        # the run budget at one metadata call per repo. Cap unknown candidates
+        # per list per run; known repos skip before counting, so successive
+        # weekly runs resume deeper into the list.
+        local checked=0
+        local max_per_list=30
+
         while IFS= read -r url; do
             [[ -z "$url" ]] && continue
-            
+
+            if (( checked >= max_per_list )); then
+                echo "   ⚠️ Hit $max_per_list-candidate cap for this list; deferring the rest to the next run" >&2
+                break
+            fi
+
             # Extract repo name
             local repo_name
             repo_name=$(echo "$url" | sed 's|https://github.com/||')
-            
+
             # Skip if already known
             if is_repo_known "$repo_name"; then
                 continue
             fi
-            
+
+            checked=$((checked + 1))
+
             # Fetch metadata
             local repo_data
             repo_data=$(fetch_repo_metadata "$repo_name")
@@ -576,7 +596,7 @@ check_github_releases() {
             fi
         ) &
         
-        ((worker_count++))
+        worker_count=$((worker_count + 1))
         # Progress output every 10 repos
         if (( worker_count % 10 == 0 )); then
             echo "   ... $worker_count/$total_repos" >&2
@@ -594,7 +614,7 @@ check_github_releases() {
         local item
         item=$(cat "$f")
         new_releases=$(echo "$new_releases" | jq --argjson item "$item" '. + [$item]')
-        ((batch_count++))
+        batch_count=$((batch_count + 1))
     done
     
     rm -rf "$tmpdir"
@@ -802,7 +822,7 @@ run_discover() {
     while IFS= read -r discovery; do
         [[ -z "$discovery" || "$discovery" == "null" ]] && continue
         add_repo_to_sources "$discovery" "dynamic"
-        ((count++))
+        count=$((count + 1))
     done < <(echo "$all_discoveries" | jq -c '.[]')
     
     # Update state

@@ -66,6 +66,19 @@ RSS_FEEDS = [
     {"name": "e2b Releases", "url": "https://github.com/e2b-dev/E2B/releases.atom", "tags": ["releases", "sandbox"]},
     {"name": "opencode Releases", "url": "https://github.com/sst/opencode/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "gemini CLI Releases", "url": "https://github.com/google-gemini/gemini-cli/releases.atom", "tags": ["releases", "coding-agent"]},
+    # Harness ecosystem widening (2026-06)
+    {"name": "GitHub Copilot Changelog", "url": "https://github.blog/changelog/label/copilot/feed/", "tags": ["coding-agent", "official"], "high_signal": True},
+    {"name": "Aider Releases", "url": "https://github.com/Aider-AI/aider/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Cline Releases", "url": "https://github.com/cline/cline/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Roo Code Releases", "url": "https://github.com/RooCodeInc/Roo-Code/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Goose Releases", "url": "https://github.com/block/goose/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "OpenHands Releases", "url": "https://github.com/All-Hands-AI/OpenHands/releases.atom", "tags": ["releases", "frameworks"]},
+    {"name": "Crush Releases", "url": "https://github.com/charmbracelet/crush/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Qwen Code Releases", "url": "https://github.com/QwenLM/qwen-code/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Smolagents Releases", "url": "https://github.com/huggingface/smolagents/releases.atom", "tags": ["releases", "frameworks"]},
+    {"name": "Claude Agent SDK Python Releases", "url": "https://github.com/anthropics/claude-agent-sdk-python/releases.atom", "tags": ["releases", "agent-sdk"], "high_signal": True},
+    {"name": "Claude Agent SDK TypeScript Releases", "url": "https://github.com/anthropics/claude-agent-sdk-typescript/releases.atom", "tags": ["releases", "agent-sdk"]},
+    {"name": "Zed Blog", "url": "https://zed.dev/blog.rss", "tags": ["coding-agent", "official"]},
 ]
 
 # Keywords for relevance filtering (lowercase)
@@ -97,6 +110,13 @@ RELEVANCE_KEYWORDS = [
     # Infrastructure
     "inference", "serving", "deployment", "quantization",
     "on-device", "edge ai", "ai chip", "gpu shortage", "datacenter",
+    # Harness ecosystem (2026-06 widening). Substring-matched — only
+    # unambiguous tokens here (bare "amp"/"cline"/"zed" match inside
+    # ordinary words). Release feeds bypass this gate entirely.
+    "subagent", "agent harness", "coding harness", "windsurf",
+    "roo code", "claude agent sdk", "agent sdk", "computer use",
+    "context engineering", "mcp server", "github copilot",
+    "zed editor", "warp terminal", "openhands", "smolagents",
 ]
 
 def load_state():

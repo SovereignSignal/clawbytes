@@ -39,15 +39,19 @@ def _publish_enabled() -> bool:
     return os.environ.get("CLAWBYTES_PUBLISH", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _run(label: str, args: list[str]) -> None:
-    """Run a clawbytes_threads.py subcommand, logging start/finish; never raises."""
-    cmd = [sys.executable, THREADS, *args]
-    log.info("START %s: %s", label, " ".join(args))
+def _run_cmd(label: str, cmd: list[str]) -> None:
+    """Run a subprocess job, logging start/finish; never raises."""
+    log.info("START %s: %s", label, " ".join(cmd))
     try:
         result = subprocess.run(cmd, cwd=str(REPO_ROOT), check=False)
         log.info("DONE %s: exit=%s", label, result.returncode)
     except Exception:  # noqa: BLE001 - a job failure must not kill the scheduler
         log.exception("ERROR %s crashed", label)
+
+
+def _run(label: str, args: list[str]) -> None:
+    """Run a clawbytes_threads.py subcommand."""
+    _run_cmd(label, [sys.executable, THREADS, *args])
 
 
 def collect() -> None:
@@ -59,6 +63,20 @@ def autopublish() -> None:
     if _publish_enabled():
         args.append("--send")
     _run("autopublish", args)
+
+
+def discover() -> None:
+    """Weekly source discovery. New repos land in claw-ecosystem-sources.json
+    (merged into release checks by get_all_repos) and new feeds/subreddits in
+    clawbytes-dynamic-feeds.json (merged by the rss/reddit monitors)."""
+    _run_cmd(
+        "discover_ecosystem",
+        ["bash", str(REPO_ROOT / "scripts" / "claw-ecosystem-monitor.sh"), "--mode", "discover"],
+    )
+    _run_cmd(
+        "discover_feeds",
+        [sys.executable, str(REPO_ROOT / "scripts" / "claw-source-discovery.py")],
+    )
 
 
 def slack_report() -> None:
@@ -90,6 +108,29 @@ def slack_report() -> None:
         log.exception("ERROR slack_report crashed")
 
 
+def audit_report() -> None:
+    """Weekly Slack ingestion audit — same gating as the daily lane preview."""
+    channel = os.environ.get("CLAWBYTES_SLACK_CHANNEL_ID", "").strip()
+    if not channel or not _publish_enabled():
+        log.info("SKIP audit_report (channel_set=%s publish=%s)", bool(channel), _publish_enabled())
+        return
+    env = dict(os.environ)
+    ce_src = str(REPO_ROOT / "content-engine" / "src")
+    env["PYTHONPATH"] = ce_src + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    cmd = [
+        sys.executable, "-m", "claw_content_engine", "send-clawbytes-audit",
+        "--clawbytes", str(REPO_ROOT),
+        "--channel-id", channel,
+        "--python-bin", sys.executable,
+    ]
+    log.info("START audit_report")
+    try:
+        result = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, check=False)
+        log.info("DONE audit_report: exit=%s", result.returncode)
+    except Exception:  # noqa: BLE001 - a job failure must not kill the scheduler
+        log.exception("ERROR audit_report crashed")
+
+
 def main() -> int:
     memory_dir = os.environ.get("CLAWBYTES_MEMORY_DIR", "<unset - using repo default>")
     log.info("ClawBytes scheduler starting")
@@ -107,8 +148,12 @@ def main() -> int:
     scheduler.add_job(autopublish, "cron", minute=5, id="autopublish")
     # daily Slack lane-preview report at 15:30 UTC (~08:30 PT; VM: 08:30 America/Los_Angeles)
     scheduler.add_job(slack_report, "cron", hour=15, minute=30, id="slack_report")
+    # weekly source discovery, Mondays 14:10 UTC (before the day's collects pick it up)
+    scheduler.add_job(discover, "cron", day_of_week="mon", hour=14, minute=10, id="discover")
+    # weekly ingestion audit to Slack, Mondays 15:45 UTC (after discovery + a collect cycle)
+    scheduler.add_job(audit_report, "cron", day_of_week="mon", hour=15, minute=45, id="audit_report")
 
-    log.info("Scheduled: collect=*:00,30  autopublish=*:05  slack_report=15:30 (UTC). Waiting for triggers.")
+    log.info("Scheduled: collect=*:00,30  autopublish=*:05  slack_report=15:30  discover=Mon 14:10 (UTC). Waiting for triggers.")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):

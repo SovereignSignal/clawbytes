@@ -5,6 +5,7 @@ The anchor against drift. Both curator and supervisor reference this file in eve
 ## In scope
 
 - **Claws / OpenClaw and its derivatives** — OpenClaw, Hermes, PicoClaw, NanoClaw, IronClaw, Moltis, Codex-style agent runtimes built on or around them
+- **Coding harnesses and agent CLIs, open or closed source** — Claude Code, Codex CLI, Cursor, Windsurf, GitHub Copilot (agent/CLI modes), Aider, Cline, Roo Code, Goose, OpenHands, Zed (agentic editing), Amp, Devin, Warp, Replit Agent, and credible new entrants. Releases, changelog moves, pricing/limit changes that hit operators, capability shifts, and post-mortems. The harness space is wide and fast-moving — bias toward covering a real move from a smaller harness over silence.
 - **AI agent runtimes, frameworks, SDKs** — Claude Agent SDK, MCP (Model Context Protocol), LangChain, LangGraph, AutoGen, CrewAI, MetaGPT, OpenHands, Smolagents, AGNO, Mastra, similar
 - **LLM releases that materially change agent capabilities** — new Claude/GPT/Gemini/Llama/DeepSeek/Qwen/Mistral models when they meaningfully shift what agents can do (longer context, tool use quality, speed/cost, code reasoning). Not every release.
 - **Security, safety, supply-chain concerns** for any of the above — CVEs, malicious packages, jailbreaks that affect agent deployments, sandbox escapes
@@ -35,6 +36,7 @@ The anchor against drift. Both curator and supervisor reference this file in eve
 - "OpenClaw 2026.5.19 — runtime now batches sub-agent calls when the parent is sleeping. ~30% latency drop for parallel workflows."
 - "GHSA-87cc — auth bypass in langflow's `/login` route. Fixed in 1.2.4. Anyone running langflow exposed beyond localhost should update today."
 - "Anthropic ships prompt caching for the API — 90% cost reduction on cached tokens. Material for any long-context agent."
+- "Cursor 1.3 changelog — background agents can now run shell commands in CI. Closed-source, but operators live in it; worth one line."
 
 ## Examples that would *not* pass
 
