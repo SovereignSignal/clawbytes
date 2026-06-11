@@ -743,6 +743,36 @@ def classify_hf_paper(item: dict) -> Optional[dict]:
     }
 
 
+def classify_leaderboard(item: dict) -> Optional[dict]:
+    """Benchmark-board movement (SWE-bench, Aider polyglot) — capability news.
+
+    The monitor only emits on real top-N change, so everything arriving here
+    is already news; route to Ship as product/capability movement with Read
+    as the secondary lane.
+    """
+    url = item.get("url", "")
+    title = item.get("title", "")
+    if not url or not title:
+        return None
+    dt = parse_dt(item.get("found_at", ""))
+    score = 64 + age_score(dt, 168) / 10
+    if item.get("change") == "new_leader":
+        score += 8
+    return {
+        "primaryCategory": "ship",
+        "categories": ["ship", "read"],
+        "score": round(score, 2),
+        "summary": item.get("summary") or "Leaderboard movement",
+        "expiresAt": (dt or now_utc()) + timedelta(hours=CATEGORY_META["ship"]["ttl_hours"]),
+        "publishedAt": dt,
+        "sourceType": "leaderboard",
+        "sourceName": item.get("board", "leaderboard"),
+        "sourceId": item.get("id", url),
+        "url": url,
+        "title": title,
+    }
+
+
 def classify_ecosystem_hn(item: dict) -> Optional[dict]:
     """Classify HN stories produced by the ecosystem shell monitor."""
     normalized = {
@@ -813,6 +843,7 @@ def run_monitors() -> None:
         'python3 scripts/claw-hn-monitor.py --quiet',
         'python3 scripts/claw-moltbook-monitor.py',
         'python3 scripts/claw-security-monitor.py --quiet',
+        'python3 scripts/claw-leaderboard-monitor.py --quiet',
         'bash scripts/claw-ecosystem-monitor.sh --mode check',
     ]
     for cmd in cmds:
@@ -847,6 +878,7 @@ def collect_candidates() -> Dict[str, List[dict]]:
     moltbook = load_json(MEMORY / "claw-moltbook-state.json", {}).get("foundItems", [])
     hackernews = load_json(MEMORY / "claw-hn-state.json", {}).get("foundItems", [])
     hf_papers = load_json(MEMORY / "claw-hf-state.json", {}).get("foundItems", [])
+    leaderboard = load_json(MEMORY / "claw-leaderboard-state.json", {}).get("foundItems", [])
     ecosystem = load_json(MEMORY / "claw-ecosystem-new-items.json", {})
     if isinstance(ecosystem, dict):
         hf_papers = _unique_items(hf_papers + ecosystem.get("newHFPapers", []), ("id", "hf_id", "url"))
@@ -860,6 +892,7 @@ def collect_candidates() -> Dict[str, List[dict]]:
         "moltbook": moltbook,
         "hackernews": hackernews,
         "hf_papers": hf_papers,
+        "leaderboard": leaderboard,
         "ecosystem_hn": ecosystem_hn,
     }
 
@@ -877,6 +910,8 @@ def classify_source_candidate(kind: str, item: dict) -> Optional[dict]:
         return classify_hackernews(item)
     if kind == "hf_papers":
         return classify_hf_paper(item)
+    if kind == "leaderboard":
+        return classify_leaderboard(item)
     if kind == "ecosystem_hn":
         return classify_ecosystem_hn(item)
     return None
@@ -891,6 +926,8 @@ def raw_source_label(kind: str, item: dict) -> str:
         return item.get("repo", "security")
     if kind == "hf_papers":
         return "HF Daily Papers"
+    if kind == "leaderboard":
+        return item.get("board", "leaderboard")
     if kind == "ecosystem_hn":
         return "hackernews/ecosystem"
     return item.get("sourceName") or item.get("sourceType") or kind
@@ -967,6 +1004,7 @@ def unconsumed_state_report() -> list:
         "claw-moltbook-state.json",
         "claw-hn-state.json",
         "claw-hf-state.json",
+        "claw-leaderboard-state.json",
         "claw-ecosystem-new-items.json",
         "clawbytes-backlog.json",
         "clawbytes-thread-state.json",

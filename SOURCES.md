@@ -18,6 +18,7 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 | Security advisories | GitHub advisories for ~28 watched repos + CVE search | `scripts/claw-security-monitor.py` | 30 min |
 | Moltbook | Community posts, HTML scrape | `scripts/claw-moltbook-monitor.py` | 30 min |
 | Discovery | GitHub topic/keyword search, awesome lists (awesome-ai-agents, awesome-agents, awesome-mcp-servers, awesome-claude-code, awesome-code-ai), Brave search | `claw-ecosystem-monitor.sh --mode discover`, `claw-source-discovery.py` | weekly (Mon 14:10 UTC) |
+| Leaderboards | SWE-bench (Verified, bash-only) and Aider polyglot — emits only on top-3 movement, sha-gated fetches | `scripts/claw-leaderboard-monitor.py` (`BOARDS`) | 30 min |
 
 Discovered repos/feeds/subreddits land in `claw-ecosystem-sources.json` /
 `clawbytes-dynamic-feeds.json` on the volume and are merged automatically —
@@ -34,6 +35,11 @@ Format: date · source · verdict (covered / added / passed) · why.
 - 2026-06-10 · HF Spaces · **passed for now** — high noise ratio.
 - 2026-06-10 · Windsurf changelog · **passed for now** — no RSS feed; needs a
   page-watcher; revisit if Windsurf news keeps missing.
+- 2026-06-10 · swebench.com · **added** — leaderboard monitor watches Verified
+  and bash-only boards via the site repo's `data/leaderboards.json`; posts to
+  Ship when the top 3 moves.
+- 2026-06-10 · aider.chat/docs/leaderboards · **added** — same monitor, via
+  `polyglot_leaderboard.yml` in the Aider repo.
 
 ## How to propose a source
 
