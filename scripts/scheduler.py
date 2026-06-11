@@ -23,6 +23,7 @@ import subprocess
 import sys
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -43,13 +44,20 @@ def _publish_enabled() -> bool:
 
 
 def _run_cmd(label: str, cmd: list[str]) -> None:
-    """Run a subprocess job, logging start/finish; never raises."""
+    """Run a subprocess job, logging start/finish; never raises.
+
+    A nonzero exit is "things are not going well" — the one case ops DMs
+    exist for — so it alerts the admin immediately.
+    """
     log.info("START %s: %s", label, " ".join(cmd))
     try:
         result = subprocess.run(cmd, cwd=str(REPO_ROOT), check=False)
         log.info("DONE %s: exit=%s", label, result.returncode)
+        if result.returncode != 0:
+            _send_admin_dm(f"alert:{label}", f"⚠️ ClawBytes job '{label}' exited {result.returncode}. Check Railway logs.")
     except Exception:  # noqa: BLE001 - a job failure must not kill the scheduler
         log.exception("ERROR %s crashed", label)
+        _send_admin_dm(f"alert:{label}", f"⚠️ ClawBytes job '{label}' crashed before completing. Check Railway logs.")
 
 
 def _run(label: str, args: list[str]) -> None:
@@ -120,50 +128,77 @@ def _send_admin_dm(label: str, text: str, *, html: bool = False) -> None:
     log.info("DONE %s: telegram_ok=%s", label, ok)
 
 
-def _capture(args: list[str]) -> str:
-    result = subprocess.run(
-        [sys.executable, THREADS, *args],
-        cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
-    return (result.stdout or "").strip()
+_PARSE_ISO_FAIL = object()
+
+COLLECT_STALL_HOURS = 2
+CHANNEL_SILENT_HOURS = 30
+ALERT_REPEAT_HOURS = 6
 
 
-def lane_preview_report() -> None:
-    """Daily lane preview, DMed to the admin (was a Slack channel post)."""
-    log.info("START lane_preview_dm")
-    parts = []
-    for category in ("ship", "watch", "read", "community"):
-        try:
-            output = _capture(["preview", "--category", category])
-        except Exception:  # noqa: BLE001
-            log.exception("ERROR lane_preview_dm preview %s crashed", category)
-            continue
-        if output and "Nothing new" not in output:
-            parts.append(output)
-    body = "\n\n".join(parts) or "All lanes quiet."
-    _send_admin_dm("lane_preview_dm", "ClawBytes — daily lane preview\n\n" + body, html=True)
-
-
-def audit_report() -> None:
-    """Weekly ingestion audit, DMed to the admin (was a Slack channel post)."""
-    log.info("START audit_dm")
-    ce_src = str(REPO_ROOT / "content-engine" / "src")
-    if ce_src not in sys.path:
-        sys.path.insert(0, ce_src)
+def _parse_iso(value):
+    if not value:
+        return None
     try:
-        from claw_content_engine.feed_reports import clawbytes_audit_report
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
-        text = clawbytes_audit_report(REPO_ROOT, python_bin=sys.executable)
-    except Exception:  # noqa: BLE001 - a job failure must not kill the scheduler
-        log.exception("ERROR audit_dm failed to build report")
+
+def health_issues(memory_dir: Path, now: datetime | None = None) -> list[str]:
+    """Things that are NOT going well. Empty list = healthy = no DM.
+
+    Ops DMs are exception-only by contract: routine status never reaches the
+    admin; only breakage does.
+    """
+    now = now or datetime.now(timezone.utc)
+    state_path = Path(memory_dir) / "clawbytes-thread-state.json"
+    try:
+        state = json.loads(state_path.read_text())
+    except Exception:  # noqa: BLE001
+        return [f"thread state unreadable at {state_path}"]
+
+    issues = []
+    last_collect = _parse_iso(state.get("lastCollectedAt"))
+    if not last_collect or now - last_collect > timedelta(hours=COLLECT_STALL_HOURS):
+        issues.append(f"collect stalled — lastCollectedAt={state.get('lastCollectedAt')}")
+
+    last_post = None
+    for event in reversed(state.get("publishLog", [])):
+        last_post = _parse_iso(event.get("at"))
+        if last_post:
+            break
+    if not last_post or now - last_post > timedelta(hours=CHANNEL_SILENT_HOURS):
+        issues.append(f"channel silent — no post since {last_post.isoformat() if last_post else 'ever'}")
+    return issues
+
+
+def health_check() -> None:
+    """Hourly: DM the admin ONLY when something is wrong. An unchanged issue
+    set re-alerts at most every ALERT_REPEAT_HOURS."""
+    memory_dir = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(REPO_ROOT / "memory")))
+    issues = health_issues(memory_dir)
+    if not issues:
+        log.info("health_check: healthy, no DM")
         return
-    # The builder emits Slack mrkdwn (*bold*/_italic_); send as plain text —
-    # Telegram Markdown parse would choke on underscores in reason names.
-    _send_admin_dm("audit_dm", text)
+    text = "⚠️ ClawBytes health check found problems:\n- " + "\n- ".join(issues)
+    marker_path = memory_dir / "claw-health-alert-state.json"
+    try:
+        marker = json.loads(marker_path.read_text())
+    except Exception:  # noqa: BLE001
+        marker = {}
+    sent_at = _parse_iso(marker.get("sentAt"))
+    if (
+        marker.get("text") == text
+        and sent_at
+        and datetime.now(timezone.utc) - sent_at < timedelta(hours=ALERT_REPEAT_HOURS)
+    ):
+        log.info("health_check: issues unchanged, alert already sent recently")
+        return
+    _send_admin_dm("health_alert", text)
+    try:
+        marker_path.write_text(json.dumps({"sentAt": datetime.now(timezone.utc).isoformat(), "text": text}))
+    except Exception:  # noqa: BLE001
+        log.exception("health_check: could not write alert marker")
 
 
 def main() -> int:
@@ -181,14 +216,12 @@ def main() -> int:
     scheduler.add_job(collect, "cron", minute="0,30", id="collect")
     # autopublish hourly at :05 (VM: OnCalendar=*-*-* *:05:00)
     scheduler.add_job(autopublish, "cron", minute=5, id="autopublish")
-    # daily lane preview at 15:30 UTC, DMed to the admin (~08:30 PT)
-    scheduler.add_job(lane_preview_report, "cron", hour=15, minute=30, id="lane_preview")
+    # hourly health check at :20 — silent when healthy, DMs the admin only on breakage
+    scheduler.add_job(health_check, "cron", minute=20, id="health_check")
     # weekly source discovery, Mondays 14:10 UTC (before the day's collects pick it up)
     scheduler.add_job(discover, "cron", day_of_week="mon", hour=14, minute=10, id="discover")
-    # weekly ingestion audit DM, Mondays 15:45 UTC (after discovery + a collect cycle)
-    scheduler.add_job(audit_report, "cron", day_of_week="mon", hour=15, minute=45, id="audit_report")
 
-    log.info("Scheduled: collect=*:00,30  autopublish=*:05  lane_preview_dm=15:30  discover=Mon 14:10  audit_dm=Mon 15:45 (UTC). Waiting for triggers.")
+    log.info("Scheduled: collect=*:00,30  autopublish=*:05  health_check=*:20 (alert-only)  discover=Mon 14:10 (UTC). Waiting for triggers.")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
