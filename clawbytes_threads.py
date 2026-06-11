@@ -1461,33 +1461,39 @@ Items:"""
 
     prompt += "\n\nWrite the post now:"
 
-    try:
-        data = json.dumps({
-            "model": LLM_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 1200,
-            "temperature": 0.4,
-        }).encode()
+    data = json.dumps({
+        "model": LLM_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 1200,
+        "temperature": 0.4,
+    }).encode()
 
-        req = Request(
-            f"{LLM_URL}/chat/completions",
-            data=data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {LLM_API_KEY}",
-            },
-        )
-        with urlopen(req, timeout=45) as resp:
-            result = json.loads(resp.read().decode())
-        content = result["choices"][0]["message"]["content"].strip()
-        # Strip banned soft verbs
-        content = strip_banned_verbs(content)
-        # Basic sanity check
-        if len(content) < 50 or "I cannot" in content:
-            return None
-        return content
-    except Exception as e:
-        return None
+    # One retry: enrichment failures degrade the channel to the bare fallback
+    # renderer, so a transient proxy hiccup is worth a second attempt — and a
+    # logged reason, since a silent None made this failure mode invisible.
+    for attempt in range(2):
+        try:
+            req = Request(
+                f"{LLM_URL}/chat/completions",
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {LLM_API_KEY}",
+                },
+            )
+            with urlopen(req, timeout=45) as resp:
+                result = json.loads(resp.read().decode())
+            content = result["choices"][0]["message"]["content"].strip()
+            # Strip banned soft verbs
+            content = strip_banned_verbs(content)
+            # Basic sanity check
+            if len(content) < 50 or "I cannot" in content:
+                print(f"llm_summarize({category}): rejected output (len={len(content)})", file=sys.stderr)
+                return None
+            return content
+        except Exception as e:
+            print(f"llm_summarize({category}) attempt {attempt + 1} failed: {e}", file=sys.stderr)
+    return None
 
 
 def compress_ship_bundle(items: List[dict]) -> List[dict]:
@@ -1695,7 +1701,12 @@ def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: 
         url = item['url']
         
         # Short summary: first sentence, max 80 chars
-        summary = (item.get('summary') or '').split('.')[0][:80].strip()
+        # Truncate at a word boundary with an ellipsis — a hard [:80] slice
+        # published mid-word lines ("…from VLMs to wo") when enrichment fell
+        # back to this renderer.
+        summary = re.sub(r"\s+", " ", (item.get('summary') or '').split('.')[0].strip())
+        if len(summary) > 110:
+            summary = summary[:110].rsplit(" ", 1)[0] + "…"
         if summary:
             summary = f" — {summary}"
         
