@@ -137,6 +137,8 @@ ALLOWED_SUBREDDITS = {
     "openclaw", "selfhosted", "localllama",
     # Harness-space subs (2026-06 widening)
     "claudeai", "claudecode", "cursor", "chatgptcoding", "ai_agents", "mcp",
+    # Round 2 (2026-06-12, hunter-verified operator signal)
+    "codex", "anthropic", "githubcopilot", "windsurf",
 } | _load_dynamic_subreddits()
 
 # Reddit topics that belong in Read, not Community

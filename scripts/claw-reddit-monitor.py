@@ -60,6 +60,26 @@ SUBREDDITS = [
         "type": "hot"
     },
     {
+        "name": "codex",
+        "url": "https://www.reddit.com/r/codex/hot.json?limit=15",
+        "type": "hot"
+    },
+    {
+        "name": "Anthropic",
+        "url": "https://www.reddit.com/r/Anthropic/hot.json?limit=10",
+        "type": "hot"
+    },
+    {
+        "name": "GithubCopilot",
+        "url": "https://www.reddit.com/r/GithubCopilot/hot.json?limit=10",
+        "type": "hot"
+    },
+    {
+        "name": "windsurf",
+        "url": "https://www.reddit.com/r/windsurf/hot.json?limit=10",
+        "type": "hot"
+    },
+    {
         "name": "LocalLLaMA",
         "url": "https://www.reddit.com/r/LocalLLaMA/search.json?q=openclaw+OR+claude+code+OR+codex+OR+coding+agent&sort=new&limit=10",
         "type": "search"

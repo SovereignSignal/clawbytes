@@ -30,3 +30,10 @@ def test_classify_reddit_accepts_claudecode_post():
     candidate = ct.classify_reddit(_item("ClaudeCode"))
     assert candidate is not None
     assert "community" in candidate["categories"] or "read" in candidate["categories"]
+
+
+def test_round2_subreddits_are_allowed():
+    for sub in ["codex", "anthropic", "githubcopilot", "windsurf"]:
+        assert sub in ct.ALLOWED_SUBREDDITS, f"{sub} missing"
+    candidate = ct.classify_reddit(_item("GithubCopilot", title="Copilot usage-based billing changes"))
+    assert candidate is not None
