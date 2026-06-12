@@ -1,0 +1,92 @@
+import importlib.util
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import clawbytes_threads as ct
+
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+
+
+def _load(name, filename):
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / filename)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+reg = _load("claw_registry_monitor", "claw-registry-monitor.py")
+pw = _load("claw_pagewatch_monitor", "claw-pagewatch-monitor.py")
+bsky = _load("claw_bsky_monitor", "claw-bsky-monitor.py")
+
+
+def test_registry_diff_baseline_is_silent():
+    assert reg.diff_new_keys([], ["a", "b"]) == []
+    assert reg.diff_new_keys(["a"], ["a", "b", "c"]) == ["b", "c"]
+
+
+def test_hf_trending_filter_requires_code_agent_and_recency():
+    now = datetime(2026, 6, 12, tzinfo=timezone.utc)
+    fresh = (now - timedelta(days=2)).isoformat()
+    old = (now - timedelta(days=90)).isoformat()
+    models = [
+        {"id": "org/Kimi-K2.7-Code", "tags": [], "createdAt": fresh},
+        {"id": "org/great-image-model", "tags": ["diffusion"], "createdAt": fresh},
+        {"id": "org/old-coder", "tags": ["code"], "createdAt": old},
+        {"id": "org/seen-coder", "tags": ["code"], "createdAt": fresh},
+    ]
+    picks = reg.hf_trending_picks(models, known_ids={"org/seen-coder"}, now=now)
+    assert [m["id"] for m in picks] == ["org/Kimi-K2.7-Code"]
+
+
+def test_pagewatch_sitemap_helpers():
+    xml = """<urlset>
+      <loc>https://www.anthropic.com/news/zoom-partnership-and-investment</loc>
+      <loc>https://www.anthropic.com/engineering/advanced-tool-use</loc>
+      <loc>https://www.anthropic.com/careers</loc>
+    </urlset>"""
+    slugs = pw.sitemap_slugs(xml, ("https://www.anthropic.com/news/", "https://www.anthropic.com/engineering/"))
+    assert len(slugs) == 2
+    assert pw.slug_title("https://www.anthropic.com/news/zoom-partnership-and-investment") == "Zoom partnership and investment"
+    assert pw.lane_for_slug(slugs[0]) == "read"  # engineering sorts first
+    assert pw.lane_for_slug(slugs[1]) == "ship"
+
+
+def test_bsky_engagement_gate_and_url():
+    assert bsky.passes_engagement({"likeCount": 25, "repostCount": 0})
+    assert bsky.passes_engagement({"likeCount": 0, "repostCount": 12})
+    assert not bsky.passes_engagement({"likeCount": 5, "repostCount": 2})
+    post = {"author": {"handle": "dev.bsky.social"}, "uri": "at://did:plc:x/app.bsky.feed.post/3kabc"}
+    assert bsky.post_web_url(post) == "https://bsky.app/profile/dev.bsky.social/post/3kabc"
+
+
+def _found(extra):
+    base = {"found_at": datetime.now(timezone.utc).isoformat()}
+    base.update(extra)
+    return base
+
+
+def test_classify_registry_routes_to_ship():
+    c = ct.classify_registry(_found({
+        "id": "OpenRouter:moonshotai/kimi-k2.7-code", "registry": "OpenRouter",
+        "title": "Kimi K2.7 Code now live on OpenRouter",
+        "url": "https://openrouter.ai/moonshotai/kimi-k2.7-code", "summary": "x"}))
+    assert c and c["primaryCategory"] == "ship" and c["sourceName"] == "OpenRouter"
+
+
+def test_classify_pagewatch_lanes():
+    ship = ct.classify_pagewatch(_found({
+        "id": "pagewatch:anthropic:x", "watch": "Anthropic", "lane": "ship",
+        "title": "Anthropic: Something new", "url": "https://www.anthropic.com/news/x", "summary": "s"}))
+    read = ct.classify_pagewatch(_found({
+        "id": "pagewatch:anthropic:y", "watch": "Anthropic", "lane": "read",
+        "title": "Anthropic: Engineering deep dive", "url": "https://www.anthropic.com/engineering/y", "summary": "s"}))
+    assert ship["primaryCategory"] == "ship" and read["primaryCategory"] == "read"
+    assert ship["score"] > read["score"]
+
+
+def test_classify_bsky_routes_to_community():
+    c = ct.classify_bsky(_found({
+        "id": "at://x", "handle": "dev.bsky.social", "likes": 40, "reposts": 5,
+        "title": "@dev: Claude Code v2.1.176 ships hooks v2", "url": "https://bsky.app/profile/dev/post/1"}))
+    assert c and c["primaryCategory"] == "community"
+    assert c["score"] >= 25  # clears the community lane's first-window bar

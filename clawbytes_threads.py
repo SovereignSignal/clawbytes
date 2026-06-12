@@ -836,6 +836,82 @@ def classify_leaderboard(item: dict) -> Optional[dict]:
     }
 
 
+def classify_registry(item: dict) -> Optional[dict]:
+    """Model-availability movement from machine registries (OpenRouter,
+    LiteLLM pricing, HF trending). The monitor baselines silently and only
+    emits post-baseline diffs, so arrivals here are already news → Ship."""
+    url = item.get("url", "")
+    title = item.get("title", "")
+    if not url or not title:
+        return None
+    dt = parse_dt(item.get("found_at", ""))
+    score = 58 + age_score(dt, 96) / 10
+    return {
+        "primaryCategory": "ship",
+        "categories": ["ship"],
+        "score": round(score, 2),
+        "summary": item.get("summary") or "Registry movement",
+        "expiresAt": (dt or now_utc()) + timedelta(hours=CATEGORY_META["ship"]["ttl_hours"]),
+        "publishedAt": dt,
+        "sourceType": "registry",
+        "sourceName": item.get("registry", "registry"),
+        "sourceId": item.get("id", url),
+        "url": url,
+        "title": title,
+    }
+
+
+def classify_pagewatch(item: dict) -> Optional[dict]:
+    """Feedless vendor pages (Anthropic news/engineering, Claude release
+    notes, Devin CLI, xAI, DeepSeek). Lane comes from the watcher; Anthropic
+    announcements score high — this was the channel's biggest blind spot."""
+    url = item.get("url", "")
+    title = item.get("title", "")
+    if not url or not title:
+        return None
+    lane = item.get("lane") if item.get("lane") in CATEGORY_META else "ship"
+    dt = parse_dt(item.get("found_at", ""))
+    score = (63 if lane == "ship" else 48) + age_score(dt, 96) / 10
+    return {
+        "primaryCategory": lane,
+        "categories": [lane],
+        "score": round(score, 2),
+        "summary": item.get("summary") or "Vendor page update",
+        "expiresAt": (dt or now_utc()) + timedelta(hours=CATEGORY_META[lane]["ttl_hours"]),
+        "publishedAt": dt,
+        "sourceType": "pagewatch",
+        "sourceName": item.get("watch", "pagewatch"),
+        "sourceId": item.get("id", url),
+        "url": url,
+        "title": title,
+    }
+
+
+def classify_bsky(item: dict) -> Optional[dict]:
+    """High-engagement Bluesky posts on harness phrases → Community."""
+    url = item.get("url", "")
+    title = item.get("title", "")
+    if not url or not title:
+        return None
+    likes = int(item.get("likes", 0) or 0)
+    reposts = int(item.get("reposts", 0) or 0)
+    dt = parse_dt(item.get("found_at", ""))
+    score = likes * 0.5 + reposts * 1.0 + age_score(dt, 72) / 10
+    return {
+        "primaryCategory": "community",
+        "categories": ["community"],
+        "score": round(score, 2),
+        "summary": f"Bluesky signal ({likes}♥ / {reposts}🔁)",
+        "expiresAt": (dt or now_utc()) + timedelta(hours=CATEGORY_META["community"]["ttl_hours"]),
+        "publishedAt": dt,
+        "sourceType": "bsky",
+        "sourceName": item.get("handle", "bluesky"),
+        "sourceId": item.get("id", url),
+        "url": url,
+        "title": title,
+    }
+
+
 def classify_ecosystem_hn(item: dict) -> Optional[dict]:
     """Classify HN stories produced by the ecosystem shell monitor."""
     normalized = {
@@ -907,6 +983,9 @@ def run_monitors() -> None:
         'python3 scripts/claw-moltbook-monitor.py',
         'python3 scripts/claw-security-monitor.py --quiet',
         'python3 scripts/claw-leaderboard-monitor.py --quiet',
+        'python3 scripts/claw-registry-monitor.py --quiet',
+        'python3 scripts/claw-pagewatch-monitor.py --quiet',
+        'python3 scripts/claw-bsky-monitor.py --quiet',
         'bash scripts/claw-ecosystem-monitor.sh --mode check',
     ]
     for cmd in cmds:
@@ -942,6 +1021,9 @@ def collect_candidates() -> Dict[str, List[dict]]:
     hackernews = load_json(MEMORY / "claw-hn-state.json", {}).get("foundItems", [])
     hf_papers = load_json(MEMORY / "claw-hf-state.json", {}).get("foundItems", [])
     leaderboard = load_json(MEMORY / "claw-leaderboard-state.json", {}).get("foundItems", [])
+    registry = load_json(MEMORY / "claw-registry-state.json", {}).get("foundItems", [])
+    pagewatch = load_json(MEMORY / "claw-pagewatch-state.json", {}).get("foundItems", [])
+    bsky = load_json(MEMORY / "claw-bsky-state.json", {}).get("foundItems", [])
     ecosystem = load_json(MEMORY / "claw-ecosystem-new-items.json", {})
     if isinstance(ecosystem, dict):
         hf_papers = _unique_items(hf_papers + ecosystem.get("newHFPapers", []), ("id", "hf_id", "url"))
@@ -956,6 +1038,9 @@ def collect_candidates() -> Dict[str, List[dict]]:
         "hackernews": hackernews,
         "hf_papers": hf_papers,
         "leaderboard": leaderboard,
+        "registry": registry,
+        "pagewatch": pagewatch,
+        "bsky": bsky,
         "ecosystem_hn": ecosystem_hn,
     }
 
@@ -975,6 +1060,12 @@ def classify_source_candidate(kind: str, item: dict) -> Optional[dict]:
         return classify_hf_paper(item)
     if kind == "leaderboard":
         return classify_leaderboard(item)
+    if kind == "registry":
+        return classify_registry(item)
+    if kind == "pagewatch":
+        return classify_pagewatch(item)
+    if kind == "bsky":
+        return classify_bsky(item)
     if kind == "ecosystem_hn":
         return classify_ecosystem_hn(item)
     return None
@@ -991,6 +1082,12 @@ def raw_source_label(kind: str, item: dict) -> str:
         return "HF Daily Papers"
     if kind == "leaderboard":
         return item.get("board", "leaderboard")
+    if kind == "registry":
+        return item.get("registry", "registry")
+    if kind == "pagewatch":
+        return item.get("watch", "pagewatch")
+    if kind == "bsky":
+        return item.get("handle", "bluesky")
     if kind == "ecosystem_hn":
         return "hackernews/ecosystem"
     return item.get("sourceName") or item.get("sourceType") or kind
@@ -1068,6 +1165,9 @@ def unconsumed_state_report() -> list:
         "claw-hn-state.json",
         "claw-hf-state.json",
         "claw-leaderboard-state.json",
+        "claw-registry-state.json",
+        "claw-pagewatch-state.json",
+        "claw-bsky-state.json",
         "claw-ecosystem-new-items.json",
         "clawbytes-backlog.json",
         "clawbytes-thread-state.json",
