@@ -113,6 +113,10 @@ REPO_PRIORITY = {
     "smolagents": 54,
     "e2b": 52,
     "crush": 50,
+    "anthropic-sdk": 58,
+    "openai-python": 56,
+    "python-genai": 54,
+    "agent framework": 54,
 }
 
 def _load_dynamic_subreddits():
@@ -167,6 +171,12 @@ READ_TERMS = [
     "subagent", "harness", "skills", "hooks", "computer use",
     "context engineering", "coding agent", "copilot", "cursor",
     "gemini cli", "windsurf", "aider", "agent sdk",
+    # Round 2 (2026-06-12): vendor-blog vocabulary. Substring-matched — use
+    # anchored compounds for trap tokens ("opus" is in "corpus", "droid" in
+    # "android", "augment" in "augmentation").
+    "opus 4", "opus 5", "devin", "junie", "codestral", "mistral",
+    "replit", "augment code", "amp news", "warp blog", "jetbrains",
+    "sourcegraph",
 ]
 
 
@@ -303,6 +313,10 @@ def display_repo_name(repo: str) -> str:
         "qwen code": "Qwen Code",
         "smolagents": "Smolagents",
         "crush": "Crush",
+        "anthropic-sdk": "Anthropic SDK",
+        "openai-python": "OpenAI SDK",
+        "python-genai": "Google GenAI SDK",
+        "agent framework": "MS Agent Framework",
     }.get(repo, repo.title())
 
 
@@ -385,8 +399,55 @@ def classify_rss(item: dict) -> Optional[dict]:
         return None
     dt = parse_dt(item.get("published", "") or item.get("found_at", ""))
     low = f"{feed} {title}".lower()
+    feed_low = feed.lower()
 
-    if "releases" in feed.lower():
+    if "status" in feed_low:
+        # Provider incident feeds → Watch. Multi-product status pages get a
+        # relevance gate so all-of-GitHub / ChatGPT-consumer noise stays out.
+        if "github" in feed_low and not any(
+            t in low for t in ["copilot", "actions", "api", "codespaces", "git operations", "models"]
+        ):
+            return None
+        if "openai" in feed_low and any(t in low for t in ["free and go", "chatgpt", "sora"]):
+            return None
+        vendor = re.sub(r"\s*status\s*$", "", feed, flags=re.IGNORECASE).strip() or feed
+        score = 48 + age_score(dt, 96) / 8
+        return {
+            "primaryCategory": "watch",
+            "categories": ["watch"],
+            "score": round(score, 2),
+            "summary": "Provider incident",
+            # Incidents go stale fast — don't let week-old outages linger.
+            "expiresAt": (dt or now_utc()) + timedelta(hours=48),
+            "publishedAt": dt,
+            "sourceType": "rss",
+            "sourceName": feed,
+            "sourceId": item.get("id", url),
+            "url": url,
+            "title": f"{vendor}: {title}",
+        }
+
+    if "release notes" in feed_low:
+        # Mintlify-style changelogs title entries by date ("June 10, 2026") —
+        # prefix the vendor so the line is meaningful; grounding fetches the
+        # page content for the enrichment pass.
+        vendor = re.sub(r"\s*release notes\s*$", "", feed, flags=re.IGNORECASE).strip() or feed
+        score = 55 + age_score(dt, 96) / 8
+        return {
+            "primaryCategory": "ship",
+            "categories": ["ship"],
+            "score": round(score, 2),
+            "summary": f"{vendor} release notes update",
+            "expiresAt": (dt or now_utc()) + timedelta(hours=CATEGORY_META["ship"]["ttl_hours"]),
+            "publishedAt": dt,
+            "sourceType": "rss",
+            "sourceName": feed,
+            "sourceId": item.get("id", url),
+            "url": url,
+            "title": f"{vendor}: {title}",
+        }
+
+    if "releases" in feed_low:
         if any(x in low for x in ["beta", "nightly", "staging", "alpha"]):
             return None
         if re.search(r"(?:^|[-_\s])v?\d+\.\d+\.\d+(?:a|b|rc)\d+\b", low):

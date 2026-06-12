@@ -27,14 +27,12 @@ RSS_FEEDS = [
     {"name": "Simon Willison", "url": "https://simonwillison.net/atom/everything/", "tags": ["security", "technical"], "high_signal": True},
     {"name": "OpenAI News", "url": "https://openai.com/news/rss.xml", "tags": ["official", "models"], "high_signal": True},
     {"name": "OpenAI Developers", "url": "https://developers.openai.com/rss.xml", "tags": ["official", "developers"], "high_signal": True},
-    {"name": "Google DeepMind Blog", "url": "https://blog.google/technology/ai/rss/", "tags": ["official", "models"], "high_signal": True},
+    {"name": "Google DeepMind Blog", "url": "https://deepmind.google/blog/rss.xml", "tags": ["official", "models"], "high_signal": True},
     {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog/feed.xml", "tags": ["open-source", "models"], "high_signal": True},
-    {"name": "LangChain Blog", "url": "https://blog.langchain.dev/rss/", "tags": ["frameworks", "agents"]},
-    {"name": "Lilian Weng", "url": "https://lilianweng.github.io/index.xml", "tags": ["research", "technical"]},
+    {"name": "LangChain Blog", "url": "https://www.langchain.com/blog/rss.xml", "tags": ["frameworks", "agents"]},
     {"name": "Interconnects", "url": "https://www.interconnects.ai/feed", "tags": ["analysis", "models"]},
     {"name": "AI Snake Oil", "url": "https://aisnakeoil.substack.com/feed", "tags": ["analysis", "criticism"]},
     {"name": "Latent Space", "url": "https://latent.space/feed", "tags": ["podcast", "analysis"]},
-    {"name": "The AI Edge", "url": "https://theaiedge.substack.com/feed", "tags": ["engineering", "agents"]},
     {"name": "GitHub Changelog", "url": "https://github.blog/changelog/feed/", "tags": ["developer-tools", "official"], "high_signal": True},
     {"name": "Cursor Changelog", "url": "https://cursor.com/changelog/rss.xml", "tags": ["coding-agent", "official"], "high_signal": True},
     # Research & papers
@@ -52,7 +50,7 @@ RSS_FEEDS = [
     {"name": "Claude Code Releases", "url": "https://github.com/anthropics/claude-code/releases.atom", "tags": ["releases", "coding-agent"], "high_signal": True},
     {"name": "Claude Code Action Releases", "url": "https://github.com/anthropics/claude-code-action/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "LangGraph Releases", "url": "https://github.com/langchain-ai/langgraph/releases.atom", "tags": ["releases", "frameworks"], "high_signal": True},
-    {"name": "AutoGen Releases", "url": "https://github.com/microsoft/autogen/releases.atom", "tags": ["releases", "frameworks"]},
+    {"name": "Microsoft Agent Framework Releases", "url": "https://github.com/microsoft/agent-framework/releases.atom", "tags": ["releases", "frameworks"]},
     {"name": "CrewAI Releases", "url": "https://github.com/crewAIInc/crewAI/releases.atom", "tags": ["releases", "frameworks"]},
     {"name": "Browser Use Releases", "url": "https://github.com/browser-use/browser-use/releases.atom", "tags": ["releases", "browser-automation"]},
     {"name": "vLLM Releases", "url": "https://github.com/vllm-project/vllm/releases.atom", "tags": ["releases", "inference"]},
@@ -79,6 +77,32 @@ RSS_FEEDS = [
     {"name": "Claude Agent SDK Python Releases", "url": "https://github.com/anthropics/claude-agent-sdk-python/releases.atom", "tags": ["releases", "agent-sdk"], "high_signal": True},
     {"name": "Claude Agent SDK TypeScript Releases", "url": "https://github.com/anthropics/claude-agent-sdk-typescript/releases.atom", "tags": ["releases", "agent-sdk"]},
     {"name": "Zed Blog", "url": "https://zed.dev/blog.rss", "tags": ["coding-agent", "official"]},
+    # 2026-06-12 widening round 2 — vendor changelogs/blogs (all endpoint-verified)
+    {"name": "Devin Release Notes", "url": "https://docs.devin.ai/release-notes/overview/rss.xml", "tags": ["coding-agent", "official"], "high_signal": True},
+    {"name": "Factory Release Notes", "url": "https://docs.factory.ai/changelog/release-notes/rss.xml", "tags": ["coding-agent", "official"]},
+    {"name": "Amp News", "url": "https://ampcode.com/news.rss", "tags": ["coding-agent", "official"], "high_signal": True},
+    {"name": "Windsurf Blog", "url": "https://windsurf.com/feed.xml", "tags": ["coding-agent", "official"]},
+    {"name": "Warp Blog", "url": "https://www.warp.dev/blog/feed.xml", "tags": ["coding-agent"]},
+    {"name": "Replit Blog", "url": "https://blog.replit.com/feed.xml", "tags": ["coding-agent"]},
+    {"name": "Augment Code Blog", "url": "https://augmentcode.com/blog/rss.xml", "tags": ["coding-agent"]},
+    {"name": "JetBrains AI Blog", "url": "https://blog.jetbrains.com/ai/feed/", "tags": ["coding-agent", "official"]},
+    {"name": "JetBrains Junie Blog", "url": "https://blog.jetbrains.com/junie/feed/", "tags": ["coding-agent", "official"]},
+    {"name": "Sourcegraph Blog", "url": "https://sourcegraph.com/blog/rss.xml", "tags": ["security", "agents"]},
+    {"name": "Mistral AI Blog", "url": "https://mistral.ai/rss.xml", "tags": ["official", "models"]},
+    {"name": "lobste.rs AI", "url": "https://lobste.rs/t/ai.rss", "tags": ["community", "technical"]},
+    {"name": "IndyDevDan (YouTube)", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC_x36zCEGilGpB1m-V4gmjg", "tags": ["coding-agent", "video"]},
+    # Core SDK releases — model-id constants and feature flags land here first
+    {"name": "anthropic-sdk-python Releases", "url": "https://github.com/anthropics/anthropic-sdk-python/releases.atom", "tags": ["releases", "agent-sdk"]},
+    {"name": "anthropic-sdk-typescript Releases", "url": "https://github.com/anthropics/anthropic-sdk-typescript/releases.atom", "tags": ["releases", "agent-sdk"]},
+    {"name": "openai-python Releases", "url": "https://github.com/openai/openai-python/releases.atom", "tags": ["releases", "agent-sdk"]},
+    {"name": "python-genai Releases", "url": "https://github.com/googleapis/python-genai/releases.atom", "tags": ["releases", "agent-sdk"]},
+    # Provider status feeds — incident signal for the Watch lane
+    {"name": "Anthropic Status", "url": "https://status.claude.com/history.atom", "tags": ["status"]},
+    {"name": "OpenAI Status", "url": "https://status.openai.com/history.atom", "tags": ["status"]},
+    {"name": "Cursor Status", "url": "https://status.cursor.com/history.atom", "tags": ["status"]},
+    {"name": "GitHub Status", "url": "https://www.githubstatus.com/history.atom", "tags": ["status"]},
+    {"name": "Hugging Face Status", "url": "https://status.huggingface.co/feed.rss", "tags": ["status"]},
+    {"name": "OpenRouter Status", "url": "https://status.openrouter.ai/incidents.rss", "tags": ["status"]},
 ]
 
 # Keywords for relevance filtering (lowercase)
@@ -117,6 +141,11 @@ RELEVANCE_KEYWORDS = [
     "roo code", "claude agent sdk", "agent sdk", "computer use",
     "context engineering", "mcp server", "github copilot",
     "zed editor", "warp terminal", "openhands", "smolagents",
+    # 2026-06-12 round 2: vendor blog vocabulary (anchored compounds for
+    # substring-trap tokens; see READ_TERMS note in clawbytes_threads.py)
+    "opus 4", "opus 5", "devin", "junie", "mellum", "codestral",
+    "replit agent", "agent mode", "augment code", "amp news",
+    "warp blog", "jetbrains", "sourcegraph",
 ]
 
 def load_state():
@@ -245,8 +274,10 @@ def parse_feed(xml_text):
 
 def is_relevant(entry, feed_name):
     """Check if entry is relevant to OpenClaw ecosystem."""
-    # Release feeds are always relevant
-    if "releases" in feed_name.lower():
+    # Release, release-notes, and status feeds are always relevant: their
+    # entry titles are versions/dates/incidents that carry no keywords.
+    low_name = feed_name.lower()
+    if any(marker in low_name for marker in ("releases", "release notes", "status")):
         return True
     
     # Check title and summary for keywords
