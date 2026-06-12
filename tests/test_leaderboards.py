@@ -68,3 +68,22 @@ def test_classify_leaderboard_routes_to_ship():
     assert "takes #1 on SWE-bench Verified" in candidate["title"]
     # URL must be unique per movement or postedUrls dedup eats future changes
     assert "#swebench-verified-20260610" in candidate["url"]
+
+
+LIVEBENCH_CSV = """model,coding,reasoning,math
+claude-fable-5,90.0,88.0,86.0
+gpt-6,89.0,,91.0
+broken-row,,,
+"""
+
+
+def test_parse_livebench_means_numeric_columns():
+    tops = lb.parse_livebench(LIVEBENCH_CSV)
+    assert tops[0] == ("gpt-6", 90.0)      # mean of 89, 91 (blank skipped)
+    assert tops[1] == ("claude-fable-5", 88.0)
+    assert len(tops) == 2                   # all-blank row dropped
+
+
+def test_pick_latest_table_is_lexical():
+    names = ["table_2025_06_01.csv", "table_2026_01_08.csv", "categories_2026_01_08.json", "table_2026_01_08.csv.bak"]
+    assert lb.pick_latest_table(names, "table_", ".csv") == "table_2026_01_08.csv"

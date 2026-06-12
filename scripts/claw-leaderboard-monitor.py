@@ -13,6 +13,8 @@ baseline and emits nothing.
 State file: memory/claw-leaderboard-state.json
 """
 
+import csv
+import io
 import json
 import os
 import re
@@ -56,6 +58,19 @@ BOARDS = [
         "path": "aider/website/_data/polyglot_leaderboard.yml",
         "ref": "main",
         "parser": "aider",
+    },
+    {
+        # The data CSV is release-dated and rotates (~2x/yr) when LiveBench
+        # snapshots a new question set — resolve the latest table_*.csv from
+        # the dir listing instead of hardcoding a date.
+        "key": "livebench",
+        "label": "LiveBench",
+        "page": "https://livebench.ai",
+        "repo": "LiveBench/livebench.github.io",
+        "dir": "public",
+        "pattern": ("table_", ".csv"),
+        "ref": "main",
+        "parser": "livebench",
     },
 ]
 
@@ -110,6 +125,49 @@ def parse_swebench(text, board_name, top_n=TOP_N):
         entries.sort(key=lambda pair: -pair[1])
         return entries[:top_n]
     return []
+
+
+def pick_latest_table(names, prefix, suffix):
+    """Lexically-latest matching filename (dates in names sort correctly)."""
+    matching = [n for n in names if n.startswith(prefix) and n.endswith(suffix)]
+    return max(matching) if matching else None
+
+
+def resolve_dynamic_path(board):
+    """Resolve a rotating-filename board to (path, sha) via one dir listing."""
+    url = f"https://api.github.com/repos/{board['repo']}/contents/{board['dir']}?ref={board['ref']}"
+    try:
+        req = Request(url, headers=_github_headers())
+        with urlopen(req, timeout=20) as resp:
+            listing = json.loads(resp.read().decode())
+        prefix, suffix = board["pattern"]
+        latest = pick_latest_table([f.get("name", "") for f in listing], prefix, suffix)
+        if not latest:
+            return None
+        sha = next((f.get("sha", "") for f in listing if f.get("name") == latest), "")
+        return f"{board['dir']}/{latest}", sha
+    except Exception:
+        return None
+
+
+def parse_livebench(text, top_n=TOP_N):
+    """Top entries from a LiveBench table CSV: model column + per-category
+    numeric scores; overall = mean of categories (matches the site's math)."""
+    entries = []
+    for row in csv.DictReader(io.StringIO(text)):
+        name = (row.get("model") or "").strip()
+        values = []
+        for key, value in row.items():
+            if key == "model" or value in (None, ""):
+                continue
+            try:
+                values.append(float(value))
+            except ValueError:
+                continue
+        if name and values:
+            entries.append((name, round(sum(values) / len(values), 1)))
+    entries.sort(key=lambda pair: -pair[1])
+    return entries[:top_n]
 
 
 def parse_aider_polyglot(text, top_n=TOP_N):
@@ -187,15 +245,24 @@ def check_boards(verbose=True):
     raw_cache = {}
 
     for board in BOARDS:
-        file_key = f"{board['repo']}/{board['path']}@{board['ref']}"
-        sha = github_file_sha(board["repo"], board["path"], board["ref"])
+        if "pattern" in board:
+            resolved = resolve_dynamic_path(board)
+            if not resolved:
+                if verbose:
+                    print(f"  ! {board['label']}: could not resolve data file")
+                continue
+            path, sha = resolved
+        else:
+            path = board["path"]
+            sha = github_file_sha(board["repo"], path, board["ref"])
+        file_key = f"{board['repo']}/{path}@{board['ref']}"
         if sha and sha == state["shas"].get(file_key) and board["key"] in state["tops"]:
             if verbose:
                 print(f"  = {board['label']}: unchanged (sha match)")
             continue
 
         if file_key not in raw_cache:
-            raw_cache[file_key] = fetch_raw(board["repo"], board["path"], board["ref"])
+            raw_cache[file_key] = fetch_raw(board["repo"], path, board["ref"])
         text = raw_cache[file_key]
         if not text:
             if verbose:
@@ -204,6 +271,8 @@ def check_boards(verbose=True):
 
         if board["parser"] == "swebench":
             tops = parse_swebench(text, board["board_name"])
+        elif board["parser"] == "livebench":
+            tops = parse_livebench(text)
         else:
             tops = parse_aider_polyglot(text)
         if not tops:
