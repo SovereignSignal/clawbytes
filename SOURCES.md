@@ -18,7 +18,11 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 | Security advisories | GitHub advisories for ~28 watched repos + CVE search | `scripts/claw-security-monitor.py` | 30 min |
 | Moltbook | Community posts, HTML scrape | `scripts/claw-moltbook-monitor.py` | 30 min |
 | Discovery | GitHub topic/keyword search, awesome lists (awesome-ai-agents, awesome-agents, awesome-mcp-servers, awesome-claude-code, awesome-code-ai), Brave search | `claw-ecosystem-monitor.sh --mode discover`, `claw-source-discovery.py` | weekly (Mon 14:10 UTC) |
-| Leaderboards | SWE-bench (Verified, bash-only) and Aider polyglot — emits only on top-3 movement, sha-gated fetches | `scripts/claw-leaderboard-monitor.py` (`BOARDS`) | 30 min |
+| Leaderboards | SWE-bench (Verified, bash-only), Aider polyglot, LiveBench — emits only on top-3 movement, sha-gated fetches | `scripts/claw-leaderboard-monitor.py` (`BOARDS`) | 30 min |
+| Registries | OpenRouter model list (id diff = minutes-level new-model detection), LiteLLM pricing registry (sha-gated key diff), HF trending (weekly, coding/agent filter) | `scripts/claw-registry-monitor.py` | 30 min |
+| Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + sitemap slug diffs (Anthropic news/engineering, DeepSeek news) | `scripts/claw-pagewatch-monitor.py` | 30 min |
+| Bluesky | Phrase search ("claude code", "codex cli", "openclaw", "mcp server", "agent harness"), engagement-gated | `scripts/claw-bsky-monitor.py` | 30 min |
+| Status feeds | Provider incident feeds (Anthropic, OpenAI, Cursor, GitHub, HF, OpenRouter) → Watch lane with consumer/multi-product filters, 48h expiry | `claw-rss-monitor.py` feeds tagged `status` | 30 min |
 
 Discovered repos/feeds/subreddits land in `claw-ecosystem-sources.json` /
 `clawbytes-dynamic-feeds.json` on the volume and are merged automatically —
@@ -40,6 +44,44 @@ Format: date · source · verdict (covered / added / passed) · why.
   Ship when the top 3 moves.
 - 2026-06-10 · aider.chat/docs/leaderboards · **added** — same monitor, via
   `polyglot_leaderboard.yml` in the Aider repo.
+
+### 2026-06-12 round 2 (six-hunter verified sweep)
+
+Fixes from the feed-health audit: LangChain feed URL corrected
+(post-Webflow), "Google DeepMind Blog" repointed from Google's corporate
+Keyword feed to deepmind.google, AutoGen replaced by microsoft/agent-framework
+(successor repo), Lilian Weng dropped (407d stale), The AI Edge dropped
+(drifted to general-AI roundups).
+
+**Added** — Devin + Factory release-notes RSS; Amp news; Windsurf, Warp,
+Replit, Augment, JetBrains AI + Junie, Sourcegraph, Mistral blogs; lobste.rs
+`/t/ai` (the `ml` tag is OCaml — never add it); IndyDevDan YouTube RSS; core
+SDK release feeds (anthropic-sdk py+ts, openai-python, python-genai); six
+provider status feeds; r/codex, r/Anthropic, r/GithubCopilot, r/windsurf;
+LiveBench; OpenRouter models API; LiteLLM pricing registry; HF trending
+(verdict flipped from 2026-06-10 pass — with a coding/agent + 30-day filter
+it catches model drops like Kimi-K2.7-Code within a day); Claude platform
+release notes (.md hash); Anthropic sitemap (news/engineering); Devin CLI
+changelog (.md); xAI release notes (.md); DeepSeek news sitemap; Bluesky
+search (api.bsky.app, engagement-gated).
+
+**Passed** — Terminal-Bench (data behind private Supabase RPC; revisit if
+they publish); LMArena (no machine source since the HF space went stale);
+SWE-bench Pro / MCPMark / Windsurf changelog (data embedded in page JS —
+needs an RSC-extractor class; deferred); OSWorld (xlsx-only, needs openpyxl);
+GAIA (near-saturated benchmark); BigCodeBench + llm-stats (dead repos); METR
+(DVC-gated, reports covered via RSS); MCP registry firehose (100+ version
+bumps per 3 days — revisit as weekly aggregate); npm /latest polls (covered
+via GitHub atom equivalents); litellm release RSS (several/day; pricing file
+watched instead); GCP incidents JSON (deferred; Vertex/Gemini filter sketched);
+Railway status (our infra, not channel content); Qwen blog (moved to a
+feedless SPA; partial coverage via qwen-code releases + HF trending);
+r/OpenAI, r/Bard, r/GoogleGemini, r/vibecoding, r/replit, r/Devin,
+r/aipromptprogramming, r/AgentsOfAI (consumer/showcase/dead); dev.to/t/ai
+(content farm); Theo t3.gg (stale feed), Ray Fernando (off-scope).
+
+**Borderline, revisit on audit evidence** — r/LLMDevs (~25% in-scope),
+AICodeKing YouTube (fast but clickbait/daily).
 
 ## How to propose a source
 
