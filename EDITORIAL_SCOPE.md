@@ -11,10 +11,11 @@ The anchor against drift. Both curator and supervisor reference this file in eve
 - **Security, safety, supply-chain concerns** for any of the above — CVEs, malicious packages, jailbreaks that affect agent deployments, sandbox escapes
 - **Tools agent builders rely on** — vector databases (Chroma, Qdrant, Pinecone, Weaviate, Milvus), eval frameworks (Inspect AI, Phoenix, LangSmith), observability (Helicone, LangFuse), browser automation (Playwright, browser-use), code execution sandboxes (E2B, Modal, Daytona)
 - **People building or shaping the above** — notable engineers, researchers, founders publishing about agent infrastructure, agent capability, or operational experience
+- **Substantive research on agents, harnesses, and coding agents** (the Read lane) — papers and technical reports that advance how agents are built, evaluated, or operated: agent architectures, tool-use / function-calling methods, context engineering, coding-agent benchmarks and eval frameworks, memory/retrieval for agents, multi-agent orchestration, agent security/robustness findings. These belong in **Read**, not Watch. A paper does **not** need a shipped product to qualify — if it would change how a thoughtful operator thinks about building or running agents, it's in scope. (Still exclude generic ML/vision/image-gen papers with no agent angle.)
 
 ## Out of scope
 
-- Generic AI/ML news that doesn't shift agent capability or deployment — most image/video gen releases, most academic ML papers, most fine-tuning announcements
+- Generic AI/ML news that doesn't shift agent capability or deployment — most image/video gen releases, generic ML/vision papers with no agent angle, most fine-tuning announcements. (Agent/harness/coding-agent research is **in** scope for Read — see the Read bullet above.)
 - Application-layer chatbot products (ChatGPT consumer features, Claude consumer features, character.ai, etc.) — unless they expose new agent-relevant primitives
 - AI ethics meta-discourse not tied to a specific agent capability or deployment risk
 - VC funding / acquisition news not tied to a specific Claws-ecosystem move (e.g. "X raised Series B" without context)
@@ -41,7 +42,7 @@ The anchor against drift. Both curator and supervisor reference this file in eve
 ## Examples that would *not* pass
 
 - "OpenAI announces new ChatGPT voice mode" — application-layer, not agent infrastructure
-- "Researchers publish paper on agent reasoning capabilities" — academic, unless tied to a deployed capability
+- "Researchers publish a paper on diffusion image quality" — generic ML, no agent angle. (But a paper on agent architectures, coding-agent benchmarks, tool-use methods, or agent security IS in scope for Read.)
 - "Drama on Twitter about agent benchmarks" — not signal
 - "Tutorial: how to build your first MCP server" — pedagogy, not news
 - "Stable Diffusion 4 released" — not agent-relevant unless it gates a new agent capability
