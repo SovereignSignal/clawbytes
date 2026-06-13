@@ -41,3 +41,17 @@ def test_release_notes_feed_routes_to_ship_with_vendor_prefix():
 def test_sdk_release_repo_priorities():
     assert ct.repo_name_from_feed("anthropic-sdk-python Releases") == "anthropic-sdk"
     assert ct.repo_name_from_feed("Microsoft Agent Framework Releases") == "agent framework"
+
+
+def test_security_paper_routes_to_read_not_watch():
+    # Papers belong in Read; Watch is for actionable incidents/advisories only.
+    item = {
+        "title": "Prompt injection and jailbreak benchmark for LLM agents",
+        "url": "https://huggingface.co/papers/2606.0001",
+        "found_at": datetime.now(timezone.utc).isoformat(),
+        "upvotes": 30, "score": 5,
+    }
+    c = ct.classify_hf_paper(item)
+    assert c is not None
+    assert "watch" not in c["categories"]
+    assert c["primaryCategory"] == "read"

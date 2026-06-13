@@ -37,6 +37,12 @@ If the `fetched` content is missing or thin, you have **WebFetch** tool access. 
 
 When the actual source is read and there's no substantive operator-relevant change — drop the item. Many GitHub releases are dependency bumps, doc fixes, or minor refactors. Those don't belong in @clawbytes.
 
+## Lane fullness — aim for 3-5, keep borderline-but-relevant
+
+Readers want fuller lanes, not a single survivor. **Aim to keep 3-5 items per lane** when the input bundle has them. Only drop an item for a concrete reason: CI-only / dependency-bump releases with no operator-facing change, genuinely off-scope (outside EDITORIAL_SCOPE.md), broken/empty, or redundant with the last 14 days. **When an item is in-scope and has *some* real operator interest but isn't your strongest — KEEP it.** A solid-but-not-stellar item beats an empty slot. Do not drop an item just because another is better; rank them and keep the top 3-5.
+
+**Exception — Watch stays tight.** Watch is for actionable incidents and advisories (outages, CVEs, exploits, malicious packages, sandbox escapes). Never pad it with research papers or speculative items; a single real incident is a correct Watch post. Research papers belong in Read, never Watch.
+
 ## How to find what the bundle missed — REQUIRED when the bundle is thin
 
 You have **WebSearch** access and you are **required to use it** in either of these conditions:

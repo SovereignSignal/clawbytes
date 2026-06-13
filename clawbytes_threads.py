@@ -768,17 +768,13 @@ def classify_hf_paper(item: dict) -> Optional[dict]:
     # links add confidence, but should not route the item into Ship.
     if hint in {"ship", "watch"}:
         hint = "read"
-    hf_security_terms = [
-        "security", "vulnerability", "exploit", "prompt injection", "jailbreak",
-        "sandbox", "unauthorized", "adversarial", "supply chain",
-    ]
-    is_hf_security = any(term in low for term in hf_security_terms)
+    # Papers never route to Watch — that lane is for actionable incidents and
+    # advisories (security monitor, status feeds), not academic research. Even
+    # security-flavored papers belong in Read. Keeps Watch tight and Read full.
     categories = [hint]
-    if is_hf_security:
-        categories = ["watch", "read"]
-    elif hint == "community":
+    if hint == "community":
         categories = ["community", "read"]
-    elif "agent" in low or "benchmark" in low or "tool" in low:
+    elif "agent" in low or "benchmark" in low or "tool" in low or "harness" in low:
         categories = ["read", "community"]
 
     primary = categories[0]
