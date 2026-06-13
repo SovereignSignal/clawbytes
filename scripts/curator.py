@@ -30,10 +30,80 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from claude_common import (  # noqa: E402
     ClaudeCodeError,
+    ClaudeResult,
     call_claude,
     load_scope,
     parse_json_from_text,
 )
+
+
+def _ollama_curator_configured() -> bool:
+    """True when an OpenAI-compatible curator backend is configured.
+
+    Lets the curator run on a strong Ollama-cloud model (e.g. deepseek-v4-pro)
+    instead of the Claude CLI, without code changes — just env vars.
+    """
+    return bool(
+        os.environ.get("CLAWBYTES_CURATOR_URL")
+        and os.environ.get("CLAWBYTES_CURATOR_MODEL")
+        and (os.environ.get("CLAWBYTES_CURATOR_API_KEY") or os.environ.get("CLAWBYTES_LLM_API_KEY"))
+    )
+
+
+def _curate_via_openai(system_prompt: str, user_prompt: str, timeout: int) -> ClaudeResult:
+    """Run the curator pass against an OpenAI-compatible chat endpoint.
+
+    Returns a ClaudeResult so the rest of curate() is backend-agnostic. This
+    backend has NO web tools (unlike the Claude path), so the prompt tells the
+    model to curate strictly from the provided bundle. Reasoning models put
+    chain-of-thought in a separate field; we read only `content`.
+    """
+    import urllib.request
+
+    base = os.environ["CLAWBYTES_CURATOR_URL"].rstrip("/")
+    model = os.environ["CLAWBYTES_CURATOR_MODEL"]
+    key = os.environ.get("CLAWBYTES_CURATOR_API_KEY") or os.environ.get("CLAWBYTES_LLM_API_KEY", "")
+    max_tokens = int(os.environ.get("CLAWBYTES_CURATOR_MAX_TOKENS", "8000"))
+
+    user = (
+        user_prompt
+        + "\n\nNOTE: You have no web access on this backend — curate strictly from "
+        "the bundle above. Return ONLY the curated bundle JSON, no prose or markdown."
+    )
+    body = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user},
+        ],
+        "max_tokens": max_tokens,
+        "temperature": 0.3,
+    }).encode()
+    req = urllib.request.Request(
+        f"{base}/chat/completions",
+        data=body,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
+    start = time.time()
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    duration_ms = int((time.time() - start) * 1000)
+    content = (data["choices"][0]["message"].get("content") or "").strip()
+    # Strip a leading/trailing markdown code fence if the model added one.
+    if content.startswith("```"):
+        content = content.split("\n", 1)[-1]
+        if content.rstrip().endswith("```"):
+            content = content.rstrip()[:-3]
+    usage = data.get("usage", {})
+    return ClaudeResult(
+        text=content,
+        raw=data,
+        duration_ms=duration_ms,
+        model=model,
+        input_tokens=usage.get("prompt_tokens"),
+        output_tokens=usage.get("completion_tokens"),
+    )
+
 
 CURATOR_PROMPT_FILE = REPO_ROOT / "docs" / "curator-prompt.md"
 DISCOVERED_REFS_FILE = REPO_ROOT / "memory" / "discovered_references.json"
@@ -131,25 +201,33 @@ def curate(bundle: dict, *, timeout: int = 180, dry_run: bool = False) -> dict:
         log_degraded(lane, "missing_prompt", str(e))
         return fallback_bundle(bundle, f"missing prompt file: {e}", "missing_prompt")
 
-    try:
-        result = call_claude(
-            user_prompt,
-            system_prompt=system_prompt,
-            # Curator has research powers: WebSearch to find what shipped today
-            # in the agent ecosystem, WebFetch to pull primary sources, Read to
-            # consult EDITORIAL_SCOPE.md and the repo's own docs.
-            # When the input bundle is weak, the curator is expected to actively
-            # find better signal rather than skip the publish.
-            allowed_tools=["WebSearch", "WebFetch", "Read"],
-            timeout=timeout,
-        )
-    except ClaudeCodeError as e:
-        log_degraded(lane, e.kind, str(e))
-        # Emit stderr to our own stderr so Railway logs capture it for diagnosis
-        print(f"[curator] ClaudeCodeError kind={e.kind} msg={e}", file=sys.stderr)
-        if e.stderr:
-            print(f"[curator] claude stderr (first 2000 chars):\n{e.stderr[:2000]}", file=sys.stderr)
-        return fallback_bundle(bundle, f"claude error: {e}", e.kind)
+    if _ollama_curator_configured():
+        try:
+            result = _curate_via_openai(system_prompt, user_prompt, timeout)
+        except Exception as e:  # noqa: BLE001 - any backend failure → safe fallback
+            log_degraded(lane, "ollama_curator_error", str(e))
+            print(f"[curator] ollama backend error: {e}", file=sys.stderr)
+            return fallback_bundle(bundle, f"ollama curator error: {e}", "ollama_error")
+    else:
+        try:
+            result = call_claude(
+                user_prompt,
+                system_prompt=system_prompt,
+                # Curator has research powers: WebSearch to find what shipped today
+                # in the agent ecosystem, WebFetch to pull primary sources, Read to
+                # consult EDITORIAL_SCOPE.md and the repo's own docs.
+                # When the input bundle is weak, the curator is expected to actively
+                # find better signal rather than skip the publish.
+                allowed_tools=["WebSearch", "WebFetch", "Read"],
+                timeout=timeout,
+            )
+        except ClaudeCodeError as e:
+            log_degraded(lane, e.kind, str(e))
+            # Emit stderr to our own stderr so Railway logs capture it for diagnosis
+            print(f"[curator] ClaudeCodeError kind={e.kind} msg={e}", file=sys.stderr)
+            if e.stderr:
+                print(f"[curator] claude stderr (first 2000 chars):\n{e.stderr[:2000]}", file=sys.stderr)
+            return fallback_bundle(bundle, f"claude error: {e}", e.kind)
 
     try:
         curated = parse_json_from_text(result.text)

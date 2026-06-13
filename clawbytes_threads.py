@@ -1998,6 +1998,55 @@ def print_status() -> None:
         )
 
 
+def _curator_enabled_for(category: str) -> bool:
+    """Whether autopublish should run the curator pass on this lane.
+
+    Off by default. Enable with CLAWBYTES_USE_CURATOR=1; restrict to specific
+    lanes with CLAWBYTES_CURATOR_LANES (comma-separated; default all four).
+    The curator backend (Claude vs Ollama model) is chosen inside curator.py.
+    """
+    if os.environ.get("CLAWBYTES_USE_CURATOR", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        return False
+    lanes = os.environ.get("CLAWBYTES_CURATOR_LANES", "ship,watch,read,community")
+    return category in {l.strip().lower() for l in lanes.split(",") if l.strip()}
+
+
+def _publish_lane(category: str, send: bool) -> tuple:
+    """Publish one ready lane; return (sent, count).
+
+    When the curator is enabled for the lane it runs the editorial pass and, on
+    success, sends the curated per-item messages. ANY curator failure, fallback,
+    or unconfigured state drops to the deterministic renderer — channel
+    reliability always wins over editorial purity. A curator that explicitly
+    declines to approve skips the lane this cycle (no send, no quota spent)."""
+    if _curator_enabled_for(category):
+        timeout = int(os.environ.get("CLAWBYTES_CURATOR_TIMEOUT", "300"))
+        curated = run_curator_subprocess(curator_input_bundle(category), timeout=timeout)
+        if curated is not None:
+            meta = curated.get("_curator", {})
+            if not meta.get("fallback") and meta.get("approved", True):
+                messages = format_curated_messages(curated, category)
+                items = curated.get("items") or []
+                if send and messages:
+                    send_telegram_message_list(messages)
+                    mark_posted(category, None, items)
+                    return (True, len(items))
+                return (False, len(items))
+            if not meta.get("approved", True):
+                print(f"[autopublish] curator declined {category}; skipping this cycle", file=sys.stderr)
+                return (False, 0)
+            # fallback marker → fall through to deterministic
+        # curated is None (curator failed) → fall through to deterministic
+
+    message = format_category_bundle(category)
+    bundle = bundle_for_category(category)
+    if send and bundle:
+        send_telegram(message)
+        mark_posted(category)
+        return (True, len(bundle))
+    return (False, len(bundle))
+
+
 def autopublish(send: bool = False) -> List[dict]:
     collect_into_backlog()
     state = load_json(THREAD_STATE_FILE, {})
@@ -2007,14 +2056,9 @@ def autopublish(send: bool = False) -> List[dict]:
         sent = False
         count = 0
         if ready["ready"]:
-            message = format_category_bundle(category)
-            bundle = bundle_for_category(category)
-            count = len(bundle)
-            if send and bundle:
-                send_telegram(message)
-                mark_posted(category)
+            sent, count = _publish_lane(category, send)
+            if sent:
                 state = load_json(THREAD_STATE_FILE, {})
-                sent = True
         results.append({"category": category, **ready, "sent": sent, "count": count})
     return results
 
