@@ -1,109 +1,93 @@
 # ClawBytes
 
-Claw ecosystem monitor. Aggregates updates from RSS feeds, Reddit, Hacker News, GitHub releases, security advisories, HuggingFace papers, and editorial signals from a Notion market map. Posts to the @clawbytes Telegram channel as four staggered lanes, and produces a separate Proton Mail HTML digest.
+Signal aggregator for the AI coding-harness ecosystem. Collects from RSS/Atom feeds, vendor changelogs, provider status pages, Reddit, Hacker News, HuggingFace papers, security advisories, benchmark leaderboards, model registries, feedless vendor pages, and Bluesky — classifies every item into four editorial lanes, and publishes staggered lane bundles to the [@clawbytes](https://t.me/clawbytes) Telegram channel and a mirrored Slack channel.
+
+Editorial scope lives in [`EDITORIAL_SCOPE.md`](EDITORIAL_SCOPE.md); the full source inventory and the candidate decision log live in [`SOURCES.md`](SOURCES.md).
 
 ## Lanes
 
-- 📦 **Ship** — New releases from OpenClaw, Hermes, PicoClaw, etc.
-- 🚨 **Watch** — Security advisories, critical updates
-- 📚 **Read** — Blog posts, articles, documentation updates
-- 💬 **Community** — Hacker News mentions, GitHub discussions
+| Lane | Emoji | Carries |
+|------|-------|---------|
+| **Ship** | ⚙️ | New releases, changelog moves, model listings, capability shifts |
+| **Watch** | 🚨 | Security advisories, provider incidents, breakage, risk |
+| **Read** | 📚 | Substantive analysis, papers, deep dives worth the click |
+| **Community** | 💬 | What operators are actually discussing (Reddit, HN, Bluesky) |
 
-Each lane has its own TTL, scoring thresholds, and posting windows — see `clawbytes_threads.py` (`CATEGORY_META`) for the live config. Items cluster into persistent threads (by repo, author, or topic) rather than posting as flat lists. Schema spec: `memory/clawbytes-thread-schema.md`.
+Each lane has its own TTL, scoring thresholds, and staggered posting windows — see `CATEGORY_META` in `clawbytes_threads.py` for the live config. Items are deterministically ranked and deduped (by source key, backlog id, and posted URL); only the top of a lane that clears its quality bar in its window gets published.
 
-## Storage
+## Architecture
 
-- **PostgreSQL** (Railway-provided) — Persistent state
-- **Local JSON state files** under `memory/` — Source monitor caches and thread state
-
-## Deploy to Railway
-
-### Manual Setup
-
-1. **Create Railway project**
-2. **Add PostgreSQL** (Railway provides `DATABASE_URL`)
-3. **Set environment variables:**
-   - `TELEGRAM_BOT_TOKEN` — From @BotFather  
-   - `TELEGRAM_CHANNEL_ID` — Your channel ID (e.g., `-100xxxxxxxxxx`)
-   - `BRAVE_API_KEY` — Optional, for discovery features
-4. **Deploy**
-
-## Local Development
-
-```bash
-# Clone
-git clone https://github.com/SovereignSignal/clawbytes.git
-cd clawbytes
-
-# Setup
-python3 -m venv venv
-venv/bin/pip install -r requirements.txt
-
-# Create .env
-cp .env.example .env
-# Edit .env with your tokens
-
-# Refresh state and post a single lane (preview without --send)
-python3 clawbytes_threads.py collect --run-monitors
-python3 clawbytes_threads.py preview --category ship
-
-# Explain source → classifier → score → lane decisions
-python3 clawbytes_threads.py audit --run-monitors --collect-first
+```
+source monitors (scripts/)  →  shared backlog JSON  →  classifiers  →  lanes  →  Telegram + Slack
+   write per-source state         memory/*.json        clawbytes_threads.py      (mirror)
 ```
 
-## Environment Variables
+Monitors only **fetch and remember** (each owns a state file under the memory dir). All **editorial judgment** lives in one place — the `classify_*` functions in `clawbytes_threads.py`. Widening intake and tuning routing are therefore independent changes.
+
+Deployed on Railway as a single always-on container running `scripts/scheduler.py` (APScheduler), against a persistent volume mounted at `CLAWBYTES_MEMORY_DIR`. There is **no database** — state is JSON on the volume. (Earlier docs referenced PostgreSQL/per-service crons; neither is used.)
+
+## Source classes
+
+The authoritative, current list with file references is in [`SOURCES.md`](SOURCES.md). In brief: RSS/Atom feeds (vendor blogs, changelogs, GitHub `releases.atom`, research, ArXiv), provider **status** feeds, Reddit, Hacker News, HuggingFace Daily Papers, GitHub security advisories, weekly **discovery** (GitHub topics, awesome-list diffs, Brave), benchmark **leaderboards** (SWE-bench, Aider, LiveBench — sha-gated, emit on top-3 movement only), model **registries** (OpenRouter, LiteLLM pricing, HF trending), **feedless pages** (Mintlify `.md` hashes + sitemap slug diffs for Anthropic/Claude/Devin CLI/xAI/DeepSeek), and **Bluesky** phrase search.
+
+## Scheduler jobs
+
+`scripts/scheduler.py` runs everything in one process (UTC):
+
+| Job | Schedule | What |
+|-----|----------|------|
+| `collect` | every :00/:30 | run all monitors → refresh backlog |
+| `autopublish` | hourly :05 | publish any lane that is ready in its window (gated by `CLAWBYTES_PUBLISH`) |
+| `health_check` | hourly :20 | **alert-only** — DMs the admin only if collect stalled or the channel went silent |
+| `discover` | Mon 14:10 | weekly source discovery |
+
+There are **no routine status reports**. Ops DMs are exception-only: the admin hears from the bot only when something breaks. See "Reporting model" below.
+
+## Reporting model
+
+- **@clawbytes (Telegram) + Slack channel** — audience surfaces. Content lane posts only. Every Telegram channel post mirrors to Slack (`mirror_to_slack` in `clawbytes_threads.py`).
+- **Admin Telegram DM** (`CLAWBYTES_ADMIN_CHAT_ID`) — operations only, and only on breakage. Every ops DM is prefixed with an unmistakable `🔧 OPS REPORT` banner. Routine previews/audits are available **on demand** (`preview`, `audit`) but are never pushed.
+
+## Environment variables
 
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather | ✅ |
-| `TELEGRAM_CHANNEL_ID` | Telegram channel ID | ✅ |
-| `DATABASE_URL` | PostgreSQL connection string | ✅ (Railway auto-sets) |
-| `BRAVE_API_KEY` | For discovery features | ❌ |
+| `TELEGRAM_CHANNEL_ID` | Audience channel id | ✅ |
+| `CLAWBYTES_MEMORY_DIR` | Path to the state volume | ✅ (on Railway) |
+| `CLAWBYTES_PUBLISH` | `1`/`true` to actually post; otherwise dry | publish gate |
+| `CLAWBYTES_ADMIN_CHAT_ID` | Admin user chat id for ops alerts | for alerts |
+| `CLAWBYTES_SLACK_CHANNEL_ID` + `SLACK_BOT_TOKEN` | Slack mirror target | for mirror |
+| `CLAWBYTES_LLM_URL` / `CLAWBYTES_LLM_API_KEY` / `CLAWBYTES_LLM_MODEL` | Enrichment LLM (OpenAI-compatible) | for enriched summaries |
+| `OPENAI_API_KEY` | Fallback for `CLAWBYTES_LLM_API_KEY` if that's unset | optional |
+| `GITHUB_TOKEN` | Lifts GitHub API rate limits (release-note grounding, leaderboard/registry sha checks, discovery) | recommended |
+| `BRAVE_API_KEY` | Discovery search | optional |
 
-## Scripts
+## Local development
 
-### Orchestrators (repo root)
-| Script | Purpose |
-|--------|---------|
-| `clawbytes_threads.py` | Lane-based thread collector/publisher — the live system invoked by Railway crons |
-| `clawbytes_daily.py` | Older single-shot daily digest poster; still wired as the Railway service `startCommand` |
-| `claw-digest-generator.py` | Digest formatting helpers |
+```bash
+git clone https://github.com/SovereignSignal/clawbytes.git
+cd clawbytes
+python3 -m venv venv && venv/bin/pip install -r requirements.txt
 
-### Source monitors (`scripts/`)
-| Script | Purpose |
-|--------|---------|
-| `claw-rss-monitor.py` | RSS/Atom feeds (20+ AI/agent blogs and research) |
-| `claw-reddit-monitor.py` | Reddit (r/MachineLearning, r/LocalLLaMA, and related) |
-| `claw-hn-monitor.py` | Hacker News search |
-| `claw-security-monitor.py` | GitHub security advisories for tracked repos |
-| `claw-moltbook-monitor.py` | Moltbook (curated source) |
-| `claw-hf-papers.py` | HuggingFace Daily Papers (invoked by `claw-ecosystem-monitor.sh`) |
-| `claw-ecosystem-monitor.sh` | GitHub releases, repo activity, HN discovery |
+# Always run against a throwaway state dir locally — never the repo's memory/.
+export CLAWBYTES_MEMORY_DIR=/tmp/cb-dev
 
-### Discovery and signal enrichment (`scripts/`)
-| Script | Purpose |
-|--------|---------|
-| `claw-discover.py` | Project discovery (GitHub + Brave) |
-| `claw-source-discovery.py` | Auto-discover new RSS/subreddit/HN sources |
-| `claw-notion-sync.py` | Bidirectional sync with Notion Claws market map (append-only writeback) |
-| `claw_notion_signals.py` | Editorial-signal extractor from Notion page updates |
-| `claw-people-tracker.py` | Influencer content tracker via Brave (weekly cadence) |
+python3 clawbytes_threads.py collect --run-monitors --summary   # refresh backlog
+python3 clawbytes_threads.py preview --category ship            # render a lane (no send)
+python3 clawbytes_threads.py audit                              # source → classifier → score → lane
+python3 -m pytest tests/ content-engine/tests/ -q               # test suite
+```
 
-### Output formatters
-| Script | Purpose |
-|--------|---------|
-| `claws_digest.py` | Proton Mail HTML email digest |
-| `claw-weekly-digest.py` | Weekly Telegram summary |
+Publishing requires `--send` and a live token; `preview` never posts.
 
-## Cron Schedule (Railway)
+## Repo map
 
-| Job | Time PT | Time UTC | Command |
-|-----|---------|----------|---------|
-| collect | every 30 min | every 30 min | `clawbytes_threads.py collect --run-monitors` |
-| Ship | 9:00 AM | 16:00 | `clawbytes_threads.py publish --category ship --if-ready --send` |
-| Watch | 12:00 PM | 19:00 | `clawbytes_threads.py publish --category watch --if-ready --send` |
-| Read | 3:00 PM | 22:00 | `clawbytes_threads.py publish --category read --if-ready --send` |
-| Community | 7:00 PM | 02:00 (next day) | `clawbytes_threads.py publish --category community --if-ready --send` |
+**Root:** `clawbytes_threads.py` (the live collector/classifier/publisher), `clawbytes_daily.py` + `claw-digest-generator.py` (legacy single-shot digest), `EDITORIAL_SCOPE.md`, `SOURCES.md`.
+
+**`scripts/` — scheduler + monitors:** `scheduler.py`; the monitors `run_monitors()` invokes directly — `claw-rss-monitor.py`, `claw-reddit-monitor.py`, `claw-hn-monitor.py`, `claw-security-monitor.py`, `claw-moltbook-monitor.py`, `claw-leaderboard-monitor.py`, `claw-registry-monitor.py`, `claw-pagewatch-monitor.py`, `claw-bsky-monitor.py`, and `claw-ecosystem-monitor.sh` (releases + discovery); `claw-hf-papers.py` (HF Daily Papers — run *inside* `claw-ecosystem-monitor.sh`, not standalone); `claw-source-discovery.py` (weekly discovery). (Notion/Proton/people-tracker scripts are legacy VM-era and not wired into the scheduler.)
+
+**`content-engine/` — Slack reporting helpers** (`send-clawbytes-report`, `send-clawbytes-audit`); pure stdlib, used on demand.
 
 ## License
 

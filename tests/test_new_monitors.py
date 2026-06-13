@@ -90,3 +90,34 @@ def test_classify_bsky_routes_to_community():
         "title": "@dev: Claude Code v2.1.176 ships hooks v2", "url": "https://bsky.app/profile/dev/post/1"}))
     assert c and c["primaryCategory"] == "community"
     assert c["score"] >= 25  # clears the community lane's first-window bar
+
+
+def test_pagewatch_md_url_unique_per_change(tmp_path, monkeypatch):
+    # Regression: bare page URL meant only the FIRST changelog change ever
+    # published (postedUrls is URL-keyed). Two consecutive changes must differ.
+    monkeypatch.setattr(pw, "STATE_FILE", tmp_path / "pw-state.json")
+    monkeypatch.setattr(pw, "MD_WATCHES", [{
+        "key": "fake", "label": "Fake", "md": "https://x/y.md",
+        "page": "https://x/y", "heading": r"^##\s+(.+)$", "lane": "ship",
+    }])
+    monkeypatch.setattr(pw, "SITEMAP_WATCHES", [])
+    contents = iter(["## v1\nbody", "## v2\nbody2", "## v3\nbody3"])
+    monkeypatch.setattr(pw, "fetch_text", lambda url, timeout=30: next(contents))
+    assert pw.check_pages(verbose=False) == []          # baseline, silent
+    items2 = pw.check_pages(verbose=False)
+    items3 = pw.check_pages(verbose=False)
+    assert len(items2) == 1 and len(items3) == 1
+    assert items2[0]["url"] != items3[0]["url"]
+    assert items2[0]["url"].startswith("https://x/y#updated-")
+
+
+def test_registry_litellm_batch_url_carries_date(monkeypatch):
+    def fake_fetch(url, headers=None, timeout=30):
+        if "api.github.com" in url:
+            return {"sha": "abc"}
+        return {"model-a": {}, "model-b": {}}
+    monkeypatch.setattr(reg, "_fetch_json", fake_fetch)
+    state = {"litellmKeys": ["model-a"], "litellmSha": "old"}
+    items = reg.check_litellm(state, "2026-06-13T00:00:00+00:00", False)
+    assert len(items) == 1
+    assert "#new-2026-06-13" in items[0]["url"]

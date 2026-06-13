@@ -136,7 +136,11 @@ def check_pages(verbose=True):
                 "id": f"pagewatch:{watch['key']}:{digest[:12]}",
                 "watch": watch["label"],
                 "title": f"{watch['label']} — {heading}" if heading else f"{watch['label']} updated",
-                "url": watch["page"],
+                # Unique fragment per content change — publish dedup is
+                # URL-keyed, so the bare page URL would let only the first
+                # change post (see CLAUDE.md invariant 4). The fragment is
+                # inert in a browser; the page still loads.
+                "url": f"{watch['page']}#updated-{digest[:8]}",
                 "summary": "Changelog page updated",
                 "lane": watch["lane"],
                 "found_at": now_iso,

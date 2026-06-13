@@ -148,10 +148,12 @@ def check_litellm(state, now_iso, verbose):
     items = []
     if old and new_keys:
         shown = ", ".join(new_keys[:6]) + ("…" if len(new_keys) > 6 else "")
+        # Unique URL per batch — publish dedup is URL-keyed, so a bare file
+        # URL would let only the first batch ever post (see CLAUDE.md inv. 4).
         items.append(_item(
             "LiteLLM registry", f"batch:{now_iso[:10]}:{len(new_keys)}",
             f"{len(new_keys)} new model(s) priced in the LiteLLM registry",
-            "https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json",
+            f"https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json#new-{now_iso[:10]}",
             shown,
             now_iso,
         ))
