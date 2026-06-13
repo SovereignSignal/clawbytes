@@ -1445,6 +1445,44 @@ def fetch_release_body(url: str) -> str:
         return ""
 
 
+def fetch_changelog_markdown(url: str) -> str:
+    """Mintlify-style docs serve the real page as raw markdown at <page>.md.
+
+    Release-notes / changelog pages (Devin, Factory, Claude platform, xAI)
+    render as JS shells in HTML — fetch_article_snippet gets nothing usable,
+    so the curator only saw a date and wrote a generic 'check the changelog'
+    blurb. The .md sibling carries the actual entries. Returns cleaned
+    markdown (newest entries lead) or '' if there's no real markdown there.
+    """
+    base = url.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+    if not base:
+        return ""
+    md_url = base if base.endswith(".md") else base + ".md"
+    try:
+        req = Request(md_url, headers={"User-Agent": "ClawBytes/1.0", "Accept": "text/markdown, text/plain, */*"})
+        with urlopen(req, timeout=10) as resp:
+            text = resp.read().decode("utf-8", errors="replace").strip()
+    except Exception:
+        return ""
+    head = text[:200].lstrip().lower()
+    if not text or head.startswith("<!doctype") or head.startswith("<html") or "<head" in head:
+        return ""  # got an HTML shell, not markdown
+    # Mintlify prepends a "> ## Documentation Index ..." blockquote callout;
+    # skip leading blockquote/blank lines so the truncation keeps real entries.
+    lines, skipping = [], True
+    for ln in text.splitlines():
+        if skipping and (not ln.strip() or ln.lstrip().startswith(">")):
+            continue
+        skipping = False
+        lines.append(ln)
+    text = "\n".join(lines).strip()
+    return text[:1800] if text else ""
+
+
+def _looks_like_changelog(url: str) -> bool:
+    return ("/release-notes" in url or "/changelog" in url or "://docs." in url)
+
+
 def fetch_article_snippet(url: str) -> str:
     """Fetch first ~500 chars of text from an article URL for LLM grounding."""
     try:
@@ -1480,6 +1518,10 @@ def grounding_for_item(category: str, item: dict) -> str:
     if "github.com" in url and "/releases/tag/" in url:
         body = fetch_release_body(url)
         return f"RELEASE NOTES: {body}" if body else ""
+    if _looks_like_changelog(url):
+        md = fetch_changelog_markdown(url)
+        if md:
+            return f"RELEASE NOTES: {md}"
     snippet = fetch_article_snippet(url)
     return f"ARTICLE SNIPPET: {snippet}" if snippet else ""
 
@@ -2082,6 +2124,19 @@ def _fetch_item_context(item: dict) -> dict:
         if body:
             context["fetched"]["release_notes"] = body
             context["fetched"]["release_notes_source"] = "github_api"
+
+    # Mintlify-style changelog/release-notes pages — fetch the raw .md (the
+    # HTML is a JS shell). Gives the curator the real entries, not just a date.
+    elif _looks_like_changelog(url):
+        md = fetch_changelog_markdown(url)
+        if md:
+            context["fetched"]["release_notes"] = md
+            context["fetched"]["release_notes_source"] = "mintlify_md"
+        else:
+            snippet = fetch_article_snippet(url)
+            if snippet:
+                context["fetched"]["page_excerpt"] = snippet[:1200]
+                context["fetched"]["page_excerpt_source"] = "page_text"
 
     # Other URLs — try article snippet (gracefully skips paywalls, JS-heavy sites, etc.)
     elif url.startswith("http"):

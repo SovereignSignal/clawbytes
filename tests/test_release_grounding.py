@@ -45,3 +45,31 @@ def test_fetch_release_body_sends_auth_header_when_token_set(monkeypatch):
     body = ct.fetch_release_body("https://github.com/o/r/releases/tag/v1.0")
     assert body == "feat: real notes"
     assert captured["auth"] == "Bearer test-token-123"
+
+
+def test_changelog_md_strips_preamble_and_rejects_html(monkeypatch):
+    import io
+
+    class FakeResp(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    # Markdown with a Mintlify "Documentation Index" blockquote preamble
+    md = ("> ## Documentation Index\n> Fetch the full index at https://x/llms.txt\n> Use this file.\n\n"
+          "# Recent Updates\n<Update label=\"June 12\">\n**Session Folders** — group sessions.\n</Update>")
+    monkeypatch.setattr(ct, "urlopen", lambda req, timeout=0: FakeResp(md.encode()))
+    out = ct.fetch_changelog_markdown("https://docs.devin.ai/release-notes/overview#updated-abc")
+    assert out.startswith("# Recent Updates")          # preamble stripped
+    assert "Documentation Index" not in out
+    assert "Session Folders" in out
+
+    # HTML shell must be rejected (returns '')
+    monkeypatch.setattr(ct, "urlopen", lambda req, timeout=0: FakeResp(b"<!DOCTYPE html><html><head></head></html>"))
+    assert ct.fetch_changelog_markdown("https://docs.factory.ai/changelog") == ""
+
+
+def test_looks_like_changelog():
+    assert ct._looks_like_changelog("https://docs.devin.ai/release-notes/overview")
+    assert ct._looks_like_changelog("https://docs.factory.ai/changelog")
+    assert not ct._looks_like_changelog("https://huggingface.co/papers/2606.1")
+    assert not ct._looks_like_changelog("https://news.ycombinator.com/item?id=1")
