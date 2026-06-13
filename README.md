@@ -24,6 +24,8 @@ source monitors (scripts/)  →  shared backlog JSON  →  classifiers  →  lan
 
 Monitors only **fetch and remember** (each owns a state file under the memory dir). All **editorial judgment** lives in one place — the `classify_*` functions in `clawbytes_threads.py`. Widening intake and tuning routing are therefore independent changes.
 
+**Two-tier enrichment.** Per-item summaries are written by a cheap high-volume model (`CLAWBYTES_LLM_*`). When `CLAWBYTES_USE_CURATOR=1`, each lane bundle also gets a stronger per-publish **curator** pass (`scripts/curator.py`) that drops weak items, rewrites blurbs, and adds an editorial take — runnable on an Ollama-cloud model (`CLAWBYTES_CURATOR_*`) or the Claude CLI. The curator fires ~4×/day (once per lane window), so a strong model there is cheap. Any curator failure or whole-lane decline falls back to the deterministic post — the channel never goes quieter than the un-curated path.
+
 Deployed on Railway as a single always-on container running `scripts/scheduler.py` (APScheduler), against a persistent volume mounted at `CLAWBYTES_MEMORY_DIR`. There is **no database** — state is JSON on the volume. (Earlier docs referenced PostgreSQL/per-service crons; neither is used.)
 
 ## Source classes
@@ -58,8 +60,11 @@ There are **no routine status reports**. Ops DMs are exception-only: the admin h
 | `CLAWBYTES_PUBLISH` | `1`/`true` to actually post; otherwise dry | publish gate |
 | `CLAWBYTES_ADMIN_CHAT_ID` | Admin user chat id for ops alerts | for alerts |
 | `CLAWBYTES_SLACK_CHANNEL_ID` + `SLACK_BOT_TOKEN` | Slack mirror target | for mirror |
-| `CLAWBYTES_LLM_URL` / `CLAWBYTES_LLM_API_KEY` / `CLAWBYTES_LLM_MODEL` | Enrichment LLM (OpenAI-compatible) | for enriched summaries |
+| `CLAWBYTES_LLM_URL` / `CLAWBYTES_LLM_API_KEY` / `CLAWBYTES_LLM_MODEL` | Per-item enrichment LLM (OpenAI-compatible) | for enriched summaries |
 | `OPENAI_API_KEY` | Fallback for `CLAWBYTES_LLM_API_KEY` if that's unset | optional |
+| `CLAWBYTES_USE_CURATOR` | `1` to run the per-lane curator editorial pass in autopublish | optional |
+| `CLAWBYTES_CURATOR_URL` / `CLAWBYTES_CURATOR_MODEL` / `CLAWBYTES_CURATOR_API_KEY` | Curator backend (OpenAI-compatible; key falls back to `CLAWBYTES_LLM_API_KEY`). If unset, the curator uses the Claude CLI. | optional |
+| `CLAWBYTES_CURATOR_LANES` | Comma-separated lanes to curate (default all four) | optional |
 | `GITHUB_TOKEN` | Lifts GitHub API rate limits (release-note grounding, leaderboard/registry sha checks, discovery) | recommended |
 | `BRAVE_API_KEY` | Discovery search | optional |
 
