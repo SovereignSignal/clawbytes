@@ -83,6 +83,11 @@ CATEGORY_META = {
     },
 }
 
+# How many candidates to feed the curator per lane (wider than a deterministic
+# post). The curator keeps the best 3-5 in-scope ones; the surplus is headroom
+# so dropping off-scope/noise items doesn't starve the lane to a single survivor.
+CURATOR_INPUT_LIMIT = 8
+
 # NOTE: repo_name_from_feed() matches these keys as substrings in dict order —
 # more-specific keys ("claude agent sdk") must precede more-general ("claude").
 REPO_PRIORITY = {
@@ -2099,9 +2104,16 @@ def curator_input_bundle(category: str, limit: Optional[int] = None) -> dict:
     Pre-fetches real source content for each item so the curator has substantive
     material to work with, not just titles. Without this enrichment, the curator
     can only paraphrase headlines.
+
+    The curator gets a WIDER candidate pool than a deterministic post (default
+    CURATOR_INPUT_LIMIT) so that after it drops off-scope/noise items, enough
+    in-scope ones remain to fill the lane (3-5). A lane like Read has dozens of
+    candidates but only the top few are in-scope; feeding only `default_limit`
+    starved it to one survivor.
     """
     meta = CATEGORY_META[category]
-    raw_items = [hydrate_item(item) for item in bundle_for_category(category, limit)]
+    effective_limit = limit if limit is not None else CURATOR_INPUT_LIMIT
+    raw_items = [hydrate_item(item) for item in bundle_for_category(category, effective_limit)]
 
     if category == "watch":
         raw_items = compress_watch_bundle(raw_items)
