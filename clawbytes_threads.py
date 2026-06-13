@@ -2033,9 +2033,11 @@ def _publish_lane(category: str, send: bool) -> tuple:
                     return (True, len(items))
                 return (False, len(items))
             if not meta.get("approved", True):
-                print(f"[autopublish] curator declined {category}; skipping this cycle", file=sys.stderr)
-                return (False, 0)
-            # fallback marker → fall through to deterministic
+                # Breadth over purity: a whole-lane decline falls back to the
+                # deterministic post rather than going silent. The curator still
+                # improves approved lanes and drops weak *individual* items.
+                print(f"[autopublish] curator declined {category}; using deterministic bundle", file=sys.stderr)
+            # fallback marker or decline → fall through to deterministic
         # curated is None (curator failed) → fall through to deterministic
 
     message = format_category_bundle(category)

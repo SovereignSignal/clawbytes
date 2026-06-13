@@ -62,15 +62,22 @@ def test_publish_lane_sends_curated_when_approved(monkeypatch):
     assert ok is True and count == 2 and n["n"] == 2
 
 
-def test_publish_lane_skips_when_curator_declines(monkeypatch):
+def test_publish_lane_decline_falls_back_to_deterministic(monkeypatch):
+    # Breadth over purity: a whole-lane decline must NOT silence the lane — it
+    # falls back to the deterministic post. The curator's per-item drops still
+    # apply on approved lanes; only a full decline triggers this.
     monkeypatch.setenv("CLAWBYTES_USE_CURATOR", "1")
     declined = {"lane": "read", "items": [{"id": "x"}], "_curator": {"approved": False, "fallback": False}}
     monkeypatch.setattr(ct, "curator_input_bundle", lambda c, *a, **k: {"lane": c})
     monkeypatch.setattr(ct, "run_curator_subprocess", lambda *a, **k: declined)
-    monkeypatch.setattr(ct, "send_telegram", lambda m: (_ for _ in ()).throw(AssertionError("must not send")))
-    monkeypatch.setattr(ct, "send_telegram_message_list", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not send")))
+    monkeypatch.setattr(ct, "format_curated_messages", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not send curated")))
+    monkeypatch.setattr(ct, "format_category_bundle", lambda c, *a, **k: "DET")
+    monkeypatch.setattr(ct, "bundle_for_category", lambda c, *a, **k: [{"id": "x"}])
+    sent = {}
+    monkeypatch.setattr(ct, "send_telegram", lambda m: sent.setdefault("msg", m))
+    monkeypatch.setattr(ct, "mark_posted", lambda *a, **k: None)
     ok, count = ct._publish_lane("read", send=True)
-    assert ok is False and count == 0
+    assert ok is True and count == 1 and sent["msg"] == "DET"
 
 
 def test_ollama_curator_config_gate(monkeypatch):
