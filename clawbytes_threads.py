@@ -2021,10 +2021,9 @@ def _publish_lane(category: str, send: bool) -> tuple:
         if curated is not None:
             meta = curated.get("_curator", {})
             if not meta.get("fallback") and meta.get("approved", True):
-                messages = format_curated_messages(curated, category)
                 items = curated.get("items") or []
-                if send and messages:
-                    send_telegram_message_list(messages)
+                if send and items:
+                    send_telegram(format_curated_html(curated, category))
                     mark_posted(category, None, items)
                     return (True, len(items))
                 return (False, len(items))
@@ -2172,29 +2171,24 @@ def run_curator_subprocess(bundle: dict, timeout: int = 300) -> Optional[dict]:
 
 
 def format_curated_html(curated: dict, category: str) -> str:
-    """Single-message HTML rendering (kept for preview mode and backward compat).
-
-    The publish path uses format_curated_messages() + send_telegram_message_list()
-    instead, which produces one Telegram message per item — significantly more
-    readable in the channel.
+    """Single consolidated message: lane header + one compact line per item +
+    an optional editorial Take. Matches the deterministic lane style
+    (emoji Title — blurb) so the channel gets ONE post with a few entries
+    rather than a separate message per item.
     """
     meta = CATEGORY_META[category]
-    lines = [f"{meta['emoji']} <b>{meta['label']}</b>"]
-    lead = (curated.get("lead_signal") or "").strip()
-    if lead:
-        lines.append("")
-        lines.append(f"<b>Lead:</b> {html_escape(lead)}")
+    item_emoji = {"ship": "📦", "watch": "🚨", "read": "📚", "community": "💬"}.get(category, meta["emoji"])
     items = curated.get("items") or []
-    if items:
-        lines.append("")
-        for item in items:
-            title = item.get("title") or ""
-            url = item.get("url") or ""
-            blurb = (item.get("blurb") or "").strip()
-            line = f"• <a href=\"{url}\">{html_escape(title)}</a>"
-            if blurb:
-                line += f"\n  {html_escape(blurb)}"
-            lines.append(line)
+    n = len(items)
+    lines = [f"{meta['emoji']} <b>{meta['label']} — {n} item{'s' if n != 1 else ''}</b>"]
+    for item in items:
+        title = item.get("title") or ""
+        url = item.get("url") or ""
+        blurb = (item.get("blurb") or item.get("existing_blurb") or "").strip()
+        line = f"\n{item_emoji} <a href=\"{url}\">{html_escape(title)}</a>"
+        if blurb:
+            line += f" — {html_escape(blurb)}"
+        lines.append(line)
     take = (curated.get("take") or "").strip()
     if take:
         lines.append("")
@@ -2387,17 +2381,16 @@ def main() -> int:
                 print("(curator declined to approve — skipping publish)", file=sys.stderr)
                 print(json.dumps(meta, indent=2), file=sys.stderr)
                 return 0
-            # Render as a list of per-item messages (one Telegram message per item)
-            messages = format_curated_messages(curated, args.category)
-            # Also print the single-message form to stdout for log readability
-            print(format_curated_html(curated, args.category))
-            print(f"\n--- {len(messages)} message(s) will be sent ---", file=sys.stderr)
+            # One consolidated message (header + compact item lines + take)
+            message = format_curated_html(curated, args.category)
+            print(message)
             print("\n--- curator metadata ---", file=sys.stderr)
             print(json.dumps(meta, indent=2), file=sys.stderr)
-            if args.send and messages:
-                sent = send_telegram_message_list(messages)
-                print(f"[publish] sent {sent} message(s) to Telegram", file=sys.stderr)
-                mark_posted(args.category, args.limit, curated.get("items") or [])
+            items = curated.get("items") or []
+            if args.send and items:
+                send_telegram(message)
+                print(f"[publish] sent consolidated {args.category} post ({len(items)} items) to Telegram", file=sys.stderr)
+                mark_posted(args.category, args.limit, items)
             return 0
 
         message = format_category_bundle(args.category, args.limit)

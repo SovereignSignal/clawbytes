@@ -54,12 +54,30 @@ def test_publish_lane_sends_curated_when_approved(monkeypatch):
     curated = {"lane": "ship", "items": [{"id": "a"}, {"id": "b"}], "_curator": {"approved": True, "fallback": False}}
     monkeypatch.setattr(ct, "curator_input_bundle", lambda c, *a, **k: {"lane": c})
     monkeypatch.setattr(ct, "run_curator_subprocess", lambda *a, **k: curated)
-    monkeypatch.setattr(ct, "format_curated_messages", lambda cur, c: ["m1", "m2"])
+    monkeypatch.setattr(ct, "format_curated_html", lambda cur, c: "ONE CONSOLIDATED MESSAGE")
     n = {}
-    monkeypatch.setattr(ct, "send_telegram_message_list", lambda msgs, *a, **k: n.setdefault("n", len(msgs)) or len(msgs))
+    # one consolidated send_telegram, NOT a per-item list
+    monkeypatch.setattr(ct, "send_telegram", lambda m: n.setdefault("msg", m))
+    monkeypatch.setattr(ct, "send_telegram_message_list", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should send one consolidated message")))
     monkeypatch.setattr(ct, "mark_posted", lambda *a, **k: n.setdefault("marked", a))
     ok, count = ct._publish_lane("ship", send=True)
-    assert ok is True and count == 2 and n["n"] == 2
+    assert ok is True and count == 2 and n["msg"] == "ONE CONSOLIDATED MESSAGE"
+
+
+def test_format_curated_html_is_consolidated_compact():
+    curated = {
+        "items": [
+            {"title": "Aider 0.9", "url": "https://x/1", "blurb": "adds streaming"},
+            {"title": "Cline 3.9", "url": "https://x/2", "blurb": "fixes MCP"},
+        ],
+        "take": "Two real shipments.",
+    }
+    out = ct.format_curated_html(curated, "ship")
+    assert out.count("📦") == 2                      # one compact line per item
+    assert "Ship — 2 items" in out                   # consolidated header w/ count
+    assert "Aider 0.9</a> — adds streaming" in out   # emoji Title — blurb style
+    assert "<i>Two real shipments.</i>" in out       # take at the end
+    assert out.count("🚀") == 0
 
 
 def test_publish_lane_decline_falls_back_to_deterministic(monkeypatch):
