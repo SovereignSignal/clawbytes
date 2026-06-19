@@ -59,7 +59,8 @@ There are **no routine status reports**. Ops DMs are exception-only: the admin h
 | `CLAWBYTES_MEMORY_DIR` | Path to the state volume | ✅ (on Railway) |
 | `CLAWBYTES_PUBLISH` | `1`/`true` to actually post; otherwise dry | publish gate |
 | `CLAWBYTES_ADMIN_CHAT_ID` | Admin user chat id for ops alerts | for alerts |
-| `CLAWBYTES_SLACK_CHANNEL_ID` + `SLACK_BOT_TOKEN` | Slack mirror target | for mirror |
+| `CLAWBYTES_SLACK_CHANNEL_ID` + `SLACK_BOT_TOKEN` | Slack mirror target (audience copy of channel posts) | for mirror |
+| `CLAWBYTES_OPS_SLACK_CHANNEL_ID` + `SLACK_BOT_TOKEN` | Slack ops fallback for admin alerts when the Telegram DM can't be delivered (e.g. a Telegram outage) | for alert resilience |
 | `CLAWBYTES_LLM_URL` / `CLAWBYTES_LLM_API_KEY` / `CLAWBYTES_LLM_MODEL` | Per-item enrichment LLM (OpenAI-compatible) | for enriched summaries |
 | `OPENAI_API_KEY` | Fallback for `CLAWBYTES_LLM_API_KEY` if that's unset | optional |
 | `CLAWBYTES_USE_CURATOR` | `1` to run the per-lane curator editorial pass in autopublish | optional |

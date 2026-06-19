@@ -14,3 +14,5 @@ os.environ["CLAWBYTES_MEMORY_DIR"] = _TMP_MEMORY
 os.environ.setdefault("WORKSPACE", str(Path(__file__).resolve().parent.parent))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# scripts/ holds scheduler.py and the monitors, which some tests import directly.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))

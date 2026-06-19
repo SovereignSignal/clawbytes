@@ -19,7 +19,7 @@ The split is the point: adding a source and tuning how items are routed are inde
 ## Reporting model — do not regress this
 
 - **@clawbytes (Telegram) + Slack channel = audience.** Content lane posts only. Every Telegram channel post auto-mirrors to Slack (`mirror_to_slack`, best-effort — Slack failure never blocks Telegram).
-- **Admin Telegram DM (`CLAWBYTES_ADMIN_CHAT_ID`) = ops, exception-only.** The bot DMs the admin ONLY when something breaks (job nonzero exit, or hourly `health_check` finds collect stalled >2h / channel silent >30h). **Silence means healthy.** Never wire a scheduled DM that fires when things are fine — that was explicitly built and removed. Previews/audits are on-demand only. Every ops DM carries the `🔧 OPS REPORT` banner.
+- **Admin Telegram DM (`CLAWBYTES_ADMIN_CHAT_ID`) = ops, exception-only.** The bot DMs the admin ONLY when something breaks (job nonzero exit, or hourly `health_check` finds collect stalled >2h / channel silent >30h). **Silence means healthy.** Never wire a scheduled DM that fires when things are fine — that was explicitly built and removed. Previews/audits are on-demand only. Every ops DM carries the `🔧 OPS REPORT` banner. If the Telegram DM can't be delivered (e.g. a Telegram outage), the alert falls through to a separate Slack ops channel (`CLAWBYTES_OPS_SLACK_CHANNEL_ID`, same `SLACK_BOT_TOKEN`) — distinct from the audience-mirror `CLAWBYTES_SLACK_CHANNEL_ID` — so a Telegram outage can still page the operator. Both paths are isolated; alert delivery never raises.
 
 ## Working on this repo
 
