@@ -155,30 +155,37 @@ This is the biggest delta vs modelbytes and the quietest failure surface.
 
 ## Phase 2 — clawbytes ops/alerting parity (P0/P1, no decision needed)
 
-### Task 2.1 — Slack fallback for admin ops DMs
-**Files:** `scripts/scheduler.py` (`_send_admin_dm`)
+### Task 2.1 — Slack fallback for admin ops DMs ✅
+**Files:** `scripts/scheduler.py` (`_send_admin_dm`, new `_send_admin_slack`)
 
-- [ ] After the Telegram DM attempt, if it failed AND `CLAWBYTES_OPS_SLACK_*`
+- [x] After the Telegram DM attempt, if it failed AND `CLAWBYTES_OPS_SLACK_*`
       env vars are set, post to a Slack ops channel in an isolated try-block.
       A Telegram outage must still be able to page the operator. Mirror
-      modelbytes' two-path isolation. No new env var without updating README +
-      CLAUDE.md.
+      modelbytes' two-path isolation. New env var `CLAWBYTES_OPS_SLACK_CHANNEL_ID`
+      documented in README + CLAUDE.md (distinct from the audience-mirror
+      `CLAWBYTES_SLACK_CHANNEL_ID`).
 
-### Task 2.2 — Isolate monitor execution in `run_monitors`
+### Task 2.2 — Isolate monitor execution in `run_monitors` ✅
 **Files:** `clawbytes_threads.py` (`run_monitors` ~L978)
 
-- [ ] Per-monitor `try/except` (catch `subprocess.TimeoutExpired` and
+- [x] Per-monitor `try/except` (catch `subprocess.TimeoutExpired` and
       `Exception`) so one bad/timeout source cannot starve the rest of the
       batch. Log the failure; continue.
-- [ ] Drop `shell=True`; use `cwd=WORKSPACE` + arg list (matches
-      `scheduler.py`'s already-correct pattern).
+- [x] Drop `shell=True`; use `cwd=WORKSPACE` + arg list (matches
+      `scheduler.py`'s already-correct pattern). Removed the now-unused
+      `shlex` import.
 
-### Task 2.3 — (optional) concurrent monitor execution
+### Task 2.3 — (optional) concurrent monitor execution ⏸ DEFERRED
 **Files:** `clawbytes_threads.py` (`run_monitors`)
 
-- [ ] Run the ~10 independent monitor subprocesses in a `ThreadPoolExecutor`
-      instead of sequentially. Cuts collect wall-time roughly N×. Only after
-      2.2 is in. Skip if the complexity isn't worth it for a 30-min cadence.
+- [~] Run the ~10 independent monitor subprocesses in a `ThreadPoolExecutor`
+      instead of sequentially. Cuts collect wall-time roughly N×. **Deferred**:
+      collect runs every 30 min and the sequential batch comfortably fits well
+      inside that window today; the isolation fix (2.2) was the load-bearing
+      change. Revisit if monitor count grows or wall-time becomes a problem.
+
+**Phase 2 result:** 90 passed (79 from Phase 1 + 11 new: 6 scheduler
+ops-routing + 5 run_monitors isolation), 0 regressions.
 
 ---
 

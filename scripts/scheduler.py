@@ -93,6 +93,39 @@ def discover() -> None:
 OPS_BANNER = "🔧 OPS REPORT — visible only to you, never posted to the channel.\n\n"
 
 
+def _send_admin_slack(text: str) -> bool:
+    """Slack fallback for ops alerts. Fires only when the Telegram DM could
+    not be delivered (Telegram is the thing that broke). Best-effort and
+    isolated: a Slack failure must never raise — if both paths are down the
+    alert is simply lost and the next health_check cycle will retry.
+
+    Mirrors modelbytes' two-path ops routing (Telegram-then-Slack in isolated
+    try-blocks) so a Telegram outage can still page the operator.
+    """
+    token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
+    channel = os.environ.get("CLAWBYTES_OPS_SLACK_CHANNEL_ID", "").strip()
+    if not token or not channel:
+        return False
+    try:
+        data = json.dumps({
+            "channel": channel,
+            "text": OPS_BANNER + text,
+            "unfurl_links": False,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://slack.com/api/chat.postMessage",
+            data=data,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return bool(json.loads(resp.read().decode("utf-8")).get("ok"))
+    except Exception:  # noqa: BLE001 - Slack fallback must never raise
+        return False
+
+
 def _send_admin_dm(label: str, text: str, *, html: bool = False) -> None:
     """Send an operational/status report to Sov as a Telegram DM.
 
@@ -101,31 +134,46 @@ def _send_admin_dm(label: str, text: str, *, html: bool = False) -> None:
     Every DM is prefixed with OPS_BANNER so an ops report can never be
     mistaken for channel content (same bot sends both). Falls back to a
     plain-text resend if Telegram rejects the HTML parse.
+
+    If the Telegram DM cannot be delivered (token unset, chat unreachable,
+    or a Telegram outage), the alert falls through to a Slack ops channel
+    (CLAWBYTES_OPS_SLACK_CHANNEL_ID + SLACK_BOT_TOKEN) when configured — so a
+    Telegram outage is still able to page the operator. Both paths are
+    isolated; this function never raises.
     """
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.environ.get("CLAWBYTES_ADMIN_CHAT_ID", "").strip()
-    if not token or not chat_id:
-        log.info("SKIP %s (admin_chat_set=%s token_set=%s)", label, bool(chat_id), bool(token))
-        return
     text = OPS_BANNER + text
 
-    def _post(payload: dict) -> bool:
-        data = urllib.parse.urlencode(payload).encode()
-        req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data)
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return bool(json.loads(resp.read().decode()).get("ok"))
-        except Exception:  # noqa: BLE001 - report delivery must not kill the scheduler
-            return False
+    tg_ok = False
+    if token and chat_id:
+        def _post(payload: dict) -> bool:
+            data = urllib.parse.urlencode(payload).encode()
+            req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data)
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return bool(json.loads(resp.read().decode()).get("ok"))
+            except Exception:  # noqa: BLE001 - report delivery must not kill the scheduler
+                return False
 
-    payload = {"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": "true"}
-    if html:
-        ok = _post({**payload, "parse_mode": "HTML"})
-        if not ok:
-            ok = _post(payload)
+        payload = {"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": "true"}
+        if html:
+            tg_ok = _post({**payload, "parse_mode": "HTML"})
+            if not tg_ok:
+                tg_ok = _post(payload)
+        else:
+            tg_ok = _post(payload)
+        log.info("DONE %s: telegram_ok=%s", label, tg_ok)
     else:
-        ok = _post(payload)
-    log.info("DONE %s: telegram_ok=%s", label, ok)
+        log.info("SKIP %s telegram (admin_chat_set=%s token_set=%s)",
+                 label, bool(chat_id), bool(token))
+
+    if not tg_ok:
+        slack_ok = _send_admin_slack(text)
+        if slack_ok:
+            log.info("DONE %s: delivered via Slack ops fallback (Telegram unavailable)", label)
+        else:
+            log.info("SKIP %s slack fallback (unconfigured or failed); alert not delivered", label)
 
 
 _PARSE_ISO_FAIL = object()

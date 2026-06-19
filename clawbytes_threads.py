@@ -20,7 +20,6 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 import time
@@ -978,29 +977,44 @@ def is_fresh(candidate: dict) -> bool:
 
 
 def run_monitors() -> None:
-    """Run source monitors to refresh state files before collecting."""
+    """Run source monitors to refresh state files before collecting.
+
+    Each monitor runs isolated: a timeout, a nonzero exit, or an unexpected
+    crash in ONE monitor must not starve the rest of the batch. (Previously a
+    single subprocess.TimeoutExpired raised out and skipped every later
+    monitor for that collect cycle.) Uses cwd= + arg list rather than
+    shell=True — same pattern scheduler.py already uses, and avoids
+    interpolated-shell command-injection risk.
+    """
     cmds = [
-        'python3 scripts/claw-rss-monitor.py',
-        'python3 scripts/claw-reddit-monitor.py',
-        'python3 scripts/claw-hn-monitor.py --quiet',
-        'python3 scripts/claw-moltbook-monitor.py',
-        'python3 scripts/claw-security-monitor.py --quiet',
-        'python3 scripts/claw-leaderboard-monitor.py --quiet',
-        'python3 scripts/claw-registry-monitor.py --quiet',
-        'python3 scripts/claw-pagewatch-monitor.py --quiet',
-        'python3 scripts/claw-bsky-monitor.py --quiet',
-        'bash scripts/claw-ecosystem-monitor.sh --mode check',
+        ["python3", "scripts/claw-rss-monitor.py"],
+        ["python3", "scripts/claw-reddit-monitor.py"],
+        ["python3", "scripts/claw-hn-monitor.py", "--quiet"],
+        ["python3", "scripts/claw-moltbook-monitor.py"],
+        ["python3", "scripts/claw-security-monitor.py", "--quiet"],
+        ["python3", "scripts/claw-leaderboard-monitor.py", "--quiet"],
+        ["python3", "scripts/claw-registry-monitor.py", "--quiet"],
+        ["python3", "scripts/claw-pagewatch-monitor.py", "--quiet"],
+        ["python3", "scripts/claw-bsky-monitor.py", "--quiet"],
+        ["bash", "scripts/claw-ecosystem-monitor.sh", "--mode", "check"],
     ]
     for cmd in cmds:
-        p = subprocess.run(
-            f'cd {shlex.quote(str(WORKSPACE))} && {cmd}',
-            shell=True,
-            text=True,
-            capture_output=True,
-            timeout=300,
-        )
+        try:
+            p = subprocess.run(
+                cmd,
+                cwd=str(WORKSPACE),
+                text=True,
+                capture_output=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"Monitor timed out after 300s: {' '.join(cmd)}", file=sys.stderr)
+            continue
+        except Exception as exc:  # noqa: BLE001 - one bad monitor must not starve the rest
+            print(f"Monitor crashed unexpectedly ({exc!r}): {' '.join(cmd)}", file=sys.stderr)
+            continue
         if p.returncode != 0:
-            print(f"Monitor returned non-zero: {cmd}", file=sys.stderr)
+            print(f"Monitor returned non-zero: {' '.join(cmd)}", file=sys.stderr)
             print(p.stderr, file=sys.stderr)
 
 
