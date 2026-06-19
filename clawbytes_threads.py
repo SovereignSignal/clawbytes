@@ -23,9 +23,11 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
@@ -1973,23 +1975,143 @@ def mirror_to_slack(message: str) -> None:
         pass
 
 
-def send_telegram(message: str) -> None:
+# --- Telegram send hardening -------------------------------------------------
+# A publish path that raises on a transient Telegram blip aborts the whole
+# autopublish loop and skips every later lane. These helpers make the send
+# fail-soft (bool, never raise), truncable (so an oversize bundle can't 400),
+# retryable (429/5xx honoring Retry-After), and gated (channel-harm content is
+# rejected before it can 400). Mirrors modelbytes' send_telegram_post. Slack
+# mirroring fires only on a successful Telegram send so the two audience
+# surfaces never desync.
+TELEGRAM_MAX_CHARS = 4096  # sendMessage hard limit (UTF-16 code units; char count is a safe lower bound)
+TELEGRAM_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+TELEGRAM_SEND_ATTEMPTS = 3
+TELEGRAM_SEND_BACKOFF_BASE = 1.0  # seconds × attempt, capped at 30
+
+
+def _truncate_for_telegram(message: str, limit: int = TELEGRAM_MAX_CHARS) -> str:
+    """Truncate at the last newline before Telegram's 4096-char limit, with a
+    marker. Without this an oversize lane bundle 400-fails and never lands."""
+    if len(message) <= limit:
+        return message
+    marker = "\n\n…[truncated]"
+    headroom = limit - len(marker)
+    cut = message.rfind("\n", 0, headroom)
+    if cut < headroom * 0.7:  # no good newline boundary; fall back to a char cut
+        cut = headroom
+    return message[:cut].rstrip() + marker
+
+
+def _telegram_retry_delay(err, attempt: int) -> float:
+    """Backoff for send retries. Honors Retry-After when Telegram sends it."""
+    retry_after = None
+    headers = getattr(err, "headers", None)
+    if headers is not None:
+        try:
+            retry_after = headers.get("Retry-After")
+        except Exception:
+            retry_after = None
+    if retry_after:
+        try:
+            return min(float(retry_after), 30.0)
+        except (TypeError, ValueError):
+            pass
+    return min(TELEGRAM_SEND_BACKOFF_BASE * attempt, 30.0)
+
+
+def validate_lane_for_publish(body: str) -> Tuple[bool, List[str]]:
+    """Channel-harm content gate. Returns (ok, errors). ERROR-only: things that
+    would make Telegram 400 (empty body, unbalanced markup). Format drift is
+    NOT blocked — the deterministic renderer has no fallback, so blocking it
+    would silence the lane. On (False, [...]) the caller must NOT send or
+    mark_posted; the lane retries next cycle.
+
+    Length is handled by _truncate_for_telegram inside send_telegram, not here.
+    """
+    stripped = (body or "").strip()
+    if not stripped:
+        return (False, ["empty body"])
+    errors: List[str] = []
+    open_stack: List[str] = []
+    # Only the tags we actually emit (see telegram_html_to_mrkdwn): <b>/<i>/<code>/<a href>.
+    # User content is html_escape()'d, so any literal '<' is an entity — the only
+    # '<...>' tokens here are our own tags.
+    token_re = re.compile(r"</?(b|i|code|a)(\s[^>]*)?>", re.IGNORECASE)
+    for m in token_re.finditer(stripped):
+        token = m.group(0)
+        tag = m.group(1).lower()
+        if token.startswith("</"):
+            if not open_stack or open_stack[-1] != tag:
+                errors.append(f"unbalanced closing </{tag}>")
+                break
+            open_stack.pop()
+        else:
+            open_stack.append(tag)
+    if not errors and open_stack:
+        errors.append(f"unclosed tag(s): <{'>, <'.join(open_stack)}>")
+    return (not errors, errors)
+
+
+def send_telegram(message: str) -> bool:
+    """Send one message to the @clawbytes channel; mirror to Slack on success.
+
+    Returns True on success, False on any failure — and never raises. A raising
+    send aborts the whole autopublish loop and skips later lanes; a False return
+    leaves the lane un-marked-posted so it retries next cycle. Retries transient
+    429/5xx (honoring Retry-After) and truncates to the 4096-char limit so an
+    oversize bundle can't 400. The Slack mirror fires only on a successful
+    Telegram send so the two audience surfaces never desync.
+    """
     token = cred("ClawBytes Channel", "Bot Token") or cred("Telegram Bots", "Bot Token")
     if not token:
-        raise RuntimeError("Telegram bot token not found")
-    req = Request(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        data=urlencode({
-            "chat_id": CHANNEL_ID,
-            "text": message,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": False,
-        }).encode("utf-8"),
-    )
-    with urlopen(req, timeout=20) as response:
-        json.loads(response.read().decode("utf-8"))
-    # Audience surfaces stay in sync: every channel post mirrors to Slack.
-    mirror_to_slack(message)
+        print("Telegram bot token not found", file=sys.stderr)
+        return False
+    if len(message) > TELEGRAM_MAX_CHARS:
+        original = len(message)
+        message = _truncate_for_telegram(message)
+        print(f"Telegram message {original} chars > {TELEGRAM_MAX_CHARS}; "
+              f"truncated to {len(message)}.", file=sys.stderr)
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    data = urlencode({
+        "chat_id": CHANNEL_ID,
+        "text": message,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": "false",
+    }).encode("utf-8")
+    for attempt in range(1, TELEGRAM_SEND_ATTEMPTS + 1):
+        try:
+            req = Request(url, data=data)
+            with urlopen(req, timeout=20) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            if payload.get("ok"):
+                mirror_to_slack(message)  # best-effort; never raises
+                return True
+            # ok:false is usually a content problem (malformed HTML); retrying
+            # won't help. Return False — the lane retries next cycle.
+            print(f"Telegram returned ok=false: {payload.get('description')}", file=sys.stderr)
+            return False
+        except HTTPError as e:
+            if e.code in TELEGRAM_RETRYABLE_STATUS and attempt < TELEGRAM_SEND_ATTEMPTS:
+                delay = _telegram_retry_delay(e, attempt)
+                print(f"Telegram HTTP {e.code}; retrying {attempt + 1}/{TELEGRAM_SEND_ATTEMPTS} "
+                      f"in {delay:.1f}s.", file=sys.stderr)
+                time.sleep(delay)
+                continue
+            print(f"Telegram HTTP {e.code}: {e.reason}", file=sys.stderr)
+            return False
+        except URLError as e:
+            if attempt < TELEGRAM_SEND_ATTEMPTS:  # network/timeout — retryable
+                delay = _telegram_retry_delay(None, attempt)
+                print(f"Telegram network error ({e.reason}); retrying "
+                      f"{attempt + 1}/{TELEGRAM_SEND_ATTEMPTS} in {delay:.1f}s.", file=sys.stderr)
+                time.sleep(delay)
+                continue
+            print(f"Telegram network error: {e.reason}", file=sys.stderr)
+            return False
+        except Exception as e:  # noqa: BLE001 - a send failure must never raise out
+            print(f"Telegram send error: {e!r}", file=sys.stderr)
+            return False
+    return False
 
 
 def mark_posted(category: str, limit: Optional[int] = None, posted_items: Optional[List[dict]] = None) -> List[dict]:
@@ -2058,10 +2180,17 @@ def _publish_lane(category: str, send: bool) -> tuple:
     """Publish one ready lane; return (sent, count).
 
     When the curator is enabled for the lane it runs the editorial pass and, on
-    success, sends the curated per-item messages. ANY curator failure, fallback,
-    or unconfigured state drops to the deterministic renderer — channel
-    reliability always wins over editorial purity. A curator that explicitly
-    declines to approve skips the lane this cycle (no send, no quota spent)."""
+    a successful curated result, sends the consolidated curated message. ANY
+    curator failure, fallback marker, or whole-lane decline falls through to the
+    deterministic renderer — channel reliability always wins over editorial
+    purity. A whole-lane decline does NOT silence the lane; it posts the
+    deterministic bundle (the curator can still drop weak individual items on
+    approved lanes).
+
+    Send failures (Telegram down, content-gate rejection) return (False, count)
+    WITHOUT marking the lane posted, so it retries on the next autopublish cycle.
+    Any unexpected crash here is also caught by autopublish() so it cannot abort
+    the whole lane loop."""
     if _curator_enabled_for(category):
         timeout = int(os.environ.get("CLAWBYTES_CURATOR_TIMEOUT", "300"))
         curated = run_curator_subprocess(curator_input_bundle(category), timeout=timeout)
@@ -2070,9 +2199,15 @@ def _publish_lane(category: str, send: bool) -> tuple:
             if not meta.get("fallback") and meta.get("approved", True):
                 items = curated.get("items") or []
                 if send and items:
-                    send_telegram(format_curated_html(curated, category))
-                    mark_posted(category, None, items)
-                    return (True, len(items))
+                    message = format_curated_html(curated, category)
+                    ok, errs = validate_lane_for_publish(message)
+                    if ok and send_telegram(message):
+                        mark_posted(category, None, items)
+                        return (True, len(items))
+                    if not ok:
+                        print(f"[autopublish] curated {category} rejected by gate: "
+                              f"{'; '.join(errs)}", file=sys.stderr)
+                    return (False, len(items))
                 return (False, len(items))
             if not meta.get("approved", True):
                 # Breadth over purity: a whole-lane decline falls back to the
@@ -2085,9 +2220,16 @@ def _publish_lane(category: str, send: bool) -> tuple:
     message = format_category_bundle(category)
     bundle = bundle_for_category(category)
     if send and bundle:
-        send_telegram(message)
-        mark_posted(category)
-        return (True, len(bundle))
+        ok, errs = validate_lane_for_publish(message)
+        if not ok:
+            print(f"[autopublish] {category} rejected by gate: {'; '.join(errs)}", file=sys.stderr)
+            return (False, len(bundle))
+        if send_telegram(message):
+            mark_posted(category)
+            return (True, len(bundle))
+        print(f"[autopublish] {category} Telegram send failed; not marked posted "
+              f"(will retry next cycle)", file=sys.stderr)
+        return (False, len(bundle))
     return (False, len(bundle))
 
 
@@ -2100,7 +2242,11 @@ def autopublish(send: bool = False) -> List[dict]:
         sent = False
         count = 0
         if ready["ready"]:
-            sent, count = _publish_lane(category, send)
+            try:
+                sent, count = _publish_lane(category, send)
+            except Exception as e:  # noqa: BLE001 - one lane must not abort the loop
+                print(f"[autopublish] {category} crashed: {e!r}", file=sys.stderr)
+                sent, count = False, 0
             if sent:
                 state = load_json(THREAD_STATE_FILE, {})
         results.append({"category": category, **ready, "sent": sent, "count": count})
@@ -2305,14 +2451,17 @@ def format_curated_messages(curated: dict, category: str) -> List[str]:
 
 
 def send_telegram_message_list(messages: List[str], pace_seconds: float = 1.5) -> int:
-    """Send a list of messages to the channel, pacing for readable order."""
-    import time as _time
+    """Send a list of messages to the channel, pacing for readable order.
+
+    Returns the count of messages successfully sent. A mid-list failure does
+    not raise (send_telegram is fail-soft); remaining messages are still
+    attempted so a single blip can't drop a whole multi-message post."""
     sent = 0
     for i, msg in enumerate(messages):
-        send_telegram(msg)
-        sent += 1
+        if send_telegram(msg):
+            sent += 1
         if i < len(messages) - 1:
-            _time.sleep(pace_seconds)
+            time.sleep(pace_seconds)
     return sent
 
 
@@ -2429,8 +2578,11 @@ def main() -> int:
                 print(message)
                 bundle = bundle_for_category(args.category, args.limit)
                 if args.send and bundle:
-                    send_telegram(message)
-                    mark_posted(args.category, args.limit)
+                    if send_telegram(message):
+                        mark_posted(args.category, args.limit)
+                    else:
+                        print("[publish] Telegram send failed; lane not marked posted", file=sys.stderr)
+                        return 1
                 return 0
             meta = curated.get("_curator", {})
             if meta.get("fallback"):
@@ -2440,8 +2592,11 @@ def main() -> int:
                 print(message)
                 bundle = bundle_for_category(args.category, args.limit)
                 if args.send and bundle:
-                    send_telegram(message)
-                    mark_posted(args.category, args.limit)
+                    if send_telegram(message):
+                        mark_posted(args.category, args.limit)
+                    else:
+                        print("[publish] Telegram send failed; lane not marked posted", file=sys.stderr)
+                        return 1
                 return 0
             if not meta.get("approved", True):
                 # Curator explicitly skipped
@@ -2455,17 +2610,23 @@ def main() -> int:
             print(json.dumps(meta, indent=2), file=sys.stderr)
             items = curated.get("items") or []
             if args.send and items:
-                send_telegram(message)
-                print(f"[publish] sent consolidated {args.category} post ({len(items)} items) to Telegram", file=sys.stderr)
-                mark_posted(args.category, args.limit, items)
+                if send_telegram(message):
+                    print(f"[publish] sent consolidated {args.category} post ({len(items)} items) to Telegram", file=sys.stderr)
+                    mark_posted(args.category, args.limit, items)
+                else:
+                    print("[publish] Telegram send failed; lane not marked posted", file=sys.stderr)
+                    return 1
             return 0
 
         message = format_category_bundle(args.category, args.limit)
         print(message)
         bundle = bundle_for_category(args.category, args.limit)
         if args.send and bundle:
-            send_telegram(message)
-            mark_posted(args.category, args.limit)
+            if send_telegram(message):
+                mark_posted(args.category, args.limit)
+            else:
+                print("[publish] Telegram send failed; lane not marked posted", file=sys.stderr)
+                return 1
         return 0
 
     return 0
