@@ -31,6 +31,17 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+from ss_publish import Publisher as _SsPublisher
+
+# Vendored shared publish core (ss_publish/). _publisher is constructed lazily
+# in _ensure_publisher() (creds come from cred() / env, resolved at call time,
+# not import time). send_telegram / mirror_to_slack / the scheduler's ops-alert
+# routing delegate to it. Config-driven so the core stays testable and this
+# channel keeps its own cred() resolution, ops banner, and disable_preview=False
+# (clawbytes wants link cards in the channel; modelbytes disables them).
+_publisher = None
+
+
 WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).resolve().parent)))
 MEMORY = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 CREDS = WORKSPACE / "CREDS.md"
@@ -241,6 +252,45 @@ def cred(section: str, key: str) -> str:
     pattern = rf"## {re.escape(section)}\n(?:.*\n)*?-\s*(?:\*\*)?{re.escape(key)}(?:\*\*)?:\s*([^\n]+)"
     m = re.search(pattern, text)
     return m.group(1).strip() if m else ""
+
+
+def _ensure_publisher():
+    """Lazily build the shared-core Publisher from this channel's creds.
+
+    creds come from cred() (env-first, CREDS.md fallback) which resolves at
+    call time, so the Publisher is built on first use rather than at import —
+    unlike modelbytes (which reads env at module load). Returns the cached
+    instance; reconstructs if env creds have changed under it (tests do this).
+    """
+    global _publisher
+    token = cred("ClawBytes Channel", "Bot Token") or cred("Telegram Bots", "Bot Token")
+    slack_token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
+    slack_channel = os.environ.get("CLAWBYTES_SLACK_CHANNEL_ID", "").strip()
+    ops_tg = os.environ.get("CLAWBYTES_ADMIN_CHAT_ID", "").strip()
+    ops_slack = os.environ.get("CLAWBYTES_OPS_SLACK_CHANNEL_ID", "").strip()
+    secret_values = tuple(s for s in (token, slack_token) if s)
+    cached = _publisher
+    if (cached is not None
+            and cached.telegram_token == token
+            and cached.telegram_channel_id == CHANNEL_ID
+            and cached.slack_token == slack_token
+            and cached.slack_channel_id == slack_channel
+            and cached.ops_telegram_chat_id == ops_tg
+            and cached.ops_slack_channel_id == ops_slack
+            and cached.secret_values == secret_values):
+        return cached
+    _publisher = _SsPublisher(
+        telegram_token=token,
+        telegram_channel_id=CHANNEL_ID,
+        slack_token=slack_token,
+        slack_channel_id=slack_channel,
+        ops_telegram_chat_id=ops_tg,
+        ops_slack_channel_id=ops_slack,
+        disable_preview=False,  # clawbytes: link cards are the point
+        ops_banner="🔧 OPS REPORT — visible only to you, never posted to the channel.",
+        secret_values=secret_values,
+    )
+    return _publisher
 
 
 def parse_dt(value: str) -> Optional[datetime]:
@@ -1964,29 +2014,11 @@ def mirror_to_slack(message: str) -> None:
     """Mirror a channel post to the Slack audience channel.
 
     Best-effort by contract: Slack being down or unconfigured must never
-    block or fail a Telegram publish, so this swallows everything.
+    block or fail a Telegram publish. Delegates the HTTP + mrkdwn conversion
+    to the shared publish core (which converts the same <b>/<i>/<code>/<a>
+    subset this channel emits).
     """
-    token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
-    channel = os.environ.get("CLAWBYTES_SLACK_CHANNEL_ID", "").strip()
-    if not token or not channel:
-        return
-    try:
-        req = Request(
-            "https://slack.com/api/chat.postMessage",
-            data=json.dumps({
-                "channel": channel,
-                "text": telegram_html_to_mrkdwn(message),
-                "unfurl_links": False,
-            }).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json; charset=utf-8",
-            },
-        )
-        with urlopen(req, timeout=20) as response:
-            json.loads(response.read().decode("utf-8"))
-    except Exception:
-        pass
+    _ensure_publisher().mirror_to_slack(message)
 
 
 # --- Telegram send hardening -------------------------------------------------
@@ -1997,40 +2029,15 @@ def mirror_to_slack(message: str) -> None:
 # rejected before it can 400). Mirrors modelbytes' send_telegram_post. Slack
 # mirroring fires only on a successful Telegram send so the two audience
 # surfaces never desync.
-TELEGRAM_MAX_CHARS = 4096  # sendMessage hard limit (UTF-16 code units; char count is a safe lower bound)
-TELEGRAM_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
-TELEGRAM_SEND_ATTEMPTS = 3
-TELEGRAM_SEND_BACKOFF_BASE = 1.0  # seconds × attempt, capped at 30
+TELEGRAM_MAX_CHARS = 4096  # re-exported from the shared core for tests/callers that read it
 
 
 def _truncate_for_telegram(message: str, limit: int = TELEGRAM_MAX_CHARS) -> str:
     """Truncate at the last newline before Telegram's 4096-char limit, with a
-    marker. Without this an oversize lane bundle 400-fails and never lands."""
-    if len(message) <= limit:
-        return message
-    marker = "\n\n…[truncated]"
-    headroom = limit - len(marker)
-    cut = message.rfind("\n", 0, headroom)
-    if cut < headroom * 0.7:  # no good newline boundary; fall back to a char cut
-        cut = headroom
-    return message[:cut].rstrip() + marker
-
-
-def _telegram_retry_delay(err, attempt: int) -> float:
-    """Backoff for send retries. Honors Retry-After when Telegram sends it."""
-    retry_after = None
-    headers = getattr(err, "headers", None)
-    if headers is not None:
-        try:
-            retry_after = headers.get("Retry-After")
-        except Exception:
-            retry_after = None
-    if retry_after:
-        try:
-            return min(float(retry_after), 30.0)
-        except (TypeError, ValueError):
-            pass
-    return min(TELEGRAM_SEND_BACKOFF_BASE * attempt, 30.0)
+    marker. Delegates to the shared publish core; kept as a module function so
+    existing callers and tests are unchanged."""
+    from ss_publish import truncate_for_telegram
+    return truncate_for_telegram(message, limit)
 
 
 def validate_lane_for_publish(body: str) -> Tuple[bool, List[str]]:
@@ -2071,61 +2078,24 @@ def send_telegram(message: str) -> bool:
 
     Returns True on success, False on any failure — and never raises. A raising
     send aborts the whole autopublish loop and skips later lanes; a False return
-    leaves the lane un-marked-posted so it retries next cycle. Retries transient
-    429/5xx (honoring Retry-After) and truncates to the 4096-char limit so an
-    oversize bundle can't 400. The Slack mirror fires only on a successful
-    Telegram send so the two audience surfaces never desync.
+    leaves the lane un-marked-posted so it retries next cycle. Delegates the
+    HTTP mechanics (truncate to 4096, retry 429/5xx honoring Retry-After,
+    fail-soft) to the shared publish core. The Slack mirror fires only on a
+    successful Telegram send so the two audience surfaces never desync.
     """
-    token = cred("ClawBytes Channel", "Bot Token") or cred("Telegram Bots", "Bot Token")
-    if not token:
+    global _publisher
+    if _publisher is None:
+        _publisher = _ensure_publisher()
+    pub = _publisher
+    if not pub.telegram_token:
         print("Telegram bot token not found", file=sys.stderr)
         return False
-    if len(message) > TELEGRAM_MAX_CHARS:
-        original = len(message)
-        message = _truncate_for_telegram(message)
-        print(f"Telegram message {original} chars > {TELEGRAM_MAX_CHARS}; "
-              f"truncated to {len(message)}.", file=sys.stderr)
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    data = urlencode({
-        "chat_id": CHANNEL_ID,
-        "text": message,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": "false",
-    }).encode("utf-8")
-    for attempt in range(1, TELEGRAM_SEND_ATTEMPTS + 1):
-        try:
-            req = Request(url, data=data)
-            with urlopen(req, timeout=20) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-            if payload.get("ok"):
-                mirror_to_slack(message)  # best-effort; never raises
-                return True
-            # ok:false is usually a content problem (malformed HTML); retrying
-            # won't help. Return False — the lane retries next cycle.
-            print(f"Telegram returned ok=false: {payload.get('description')}", file=sys.stderr)
-            return False
-        except HTTPError as e:
-            if e.code in TELEGRAM_RETRYABLE_STATUS and attempt < TELEGRAM_SEND_ATTEMPTS:
-                delay = _telegram_retry_delay(e, attempt)
-                print(f"Telegram HTTP {e.code}; retrying {attempt + 1}/{TELEGRAM_SEND_ATTEMPTS} "
-                      f"in {delay:.1f}s.", file=sys.stderr)
-                time.sleep(delay)
-                continue
-            print(f"Telegram HTTP {e.code}: {e.reason}", file=sys.stderr)
-            return False
-        except URLError as e:
-            if attempt < TELEGRAM_SEND_ATTEMPTS:  # network/timeout — retryable
-                delay = _telegram_retry_delay(None, attempt)
-                print(f"Telegram network error ({e.reason}); retrying "
-                      f"{attempt + 1}/{TELEGRAM_SEND_ATTEMPTS} in {delay:.1f}s.", file=sys.stderr)
-                time.sleep(delay)
-                continue
-            print(f"Telegram network error: {e.reason}", file=sys.stderr)
-            return False
-        except Exception as e:  # noqa: BLE001 - a send failure must never raise out
-            print(f"Telegram send error: {e!r}", file=sys.stderr)
-            return False
-    return False
+    result = pub.send_telegram(message)
+    if not result.ok:
+        from ss_publish import redact_secrets
+        print(redact_secrets(f"Telegram send error: {result.error}", pub.secret_values),
+              file=sys.stderr)
+    return result.ok
 
 
 def mark_posted(category: str, limit: Optional[int] = None, posted_items: Optional[List[dict]] = None) -> List[dict]:
