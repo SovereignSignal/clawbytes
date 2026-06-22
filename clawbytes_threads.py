@@ -470,6 +470,20 @@ def classify_rss(item: dict) -> Optional[dict]:
             return None
         vendor = re.sub(r"\s*status\s*$", "", feed, flags=re.IGNORECASE).strip() or feed
         score = 48 + age_score(dt, 96) / 8
+        # Canonical incident url: provider status feeds emit a NEW guid/link
+        # for every state update of one incident (Investigating → Identified →
+        # Resolved → Update). The raw `url`/`sourceId` drift each update, so the
+        # postedUrls / backlog_id dedup saw each state as a fresh incident and
+        # re-posted (2026-06-22: the Anthropic Opus 4.8 incident posted for
+        # every state change). Collapse state-variants onto one synthetic,
+        # vendor-scoped, state-stripped url so a single incident posts once.
+        incident = title
+        for prefix in ("investigating", "identified", "monitoring",
+                       "resolved", "update", "updated"):
+            incident = re.sub(rf"^\s*{prefix}\s*:\s*", "", incident, flags=re.IGNORECASE)
+        slug = re.sub(r"[^a-z0-9]+", "-", incident.lower()).strip("-") or "incident"
+        vendor_slug = re.sub(r"[^a-z0-9]+", "-", vendor.lower()).strip("-") or "provider"
+        canonical_url = f"https://status.local/{vendor_slug}/{slug}"
         return {
             "primaryCategory": "watch",
             "categories": ["watch"],
@@ -480,9 +494,12 @@ def classify_rss(item: dict) -> Optional[dict]:
             "publishedAt": dt,
             "sourceType": "rss",
             "sourceName": feed,
-            "sourceId": item.get("id", url),
-            "url": url,
+            "sourceId": canonical_url,
+            "url": canonical_url,
             "title": f"{vendor}: {title}",
+            # Keep the real upstream link for grounding/display, but the
+            # dedup-critical url is the canonical one above.
+            "sourceUrl": url,
         }
 
     if "release notes" in feed_low:
@@ -1579,6 +1596,10 @@ def grounding_for_item(category: str, item: dict) -> str:
     in the prompt.
     """
     url = item.get("url", "") or ""
+    # Status incidents keep the real upstream link in 'sourceUrl' (the 'url'
+    # field is the canonical dedup key, e.g. https://status.local/...). Fetch
+    # the real link when present so grounding gets actual page content.
+    url = item.get("sourceUrl") or url
     if not url or "reddit.com" in url:
         return ""
     if "github.com" in url and "/releases/tag/" in url:
@@ -1970,7 +1991,10 @@ def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: 
     
     for item in bundle:
         title = display_title(item)
-        url = item['url']
+        # Status incidents carry a canonical dedup url under 'url' (so repeated
+        # state updates of one incident collapse) but keep the real upstream
+        # link in 'sourceUrl' for display/grounding. Prefer the real link.
+        url = item.get('sourceUrl') or item['url']
         
         # Short summary: first sentence, max 80 chars
         # Truncate at a word boundary with an ellipsis — a hard [:80] slice
