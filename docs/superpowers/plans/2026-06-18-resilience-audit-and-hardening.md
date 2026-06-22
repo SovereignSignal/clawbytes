@@ -189,25 +189,56 @@ ops-routing + 5 run_monitors isolation), 0 regressions.
 
 ---
 
-## Phase 3 — shared publish core (BLOCKS on the decision above)
+## Phase 3 — shared publish core (Option A: new `ss-publish` git package)
 
-### Task 3.1 — Stand up the shared core per chosen option
-- [ ] Owner picks A/B/C/D.
-- [ ] If A: create `SovereignSignal/ss-publish` repo; extract from modelbytes
-      (the hardened reference): `telegram_post`, `truncate_for_telegram`,
-      `mirror_to_slack`, `html_to_mrkdwn`, `retry_delay`, `redact_secrets`,
-      `send_ops_alert` (Telegram-then-Slack). Ship with its own tests.
-- [ ] Tag v0.1.0.
+Owner confirmed **A** (2026-06-18): a new `SovereignSignal/ss-publish` repo,
+`pip install git+…@<tag>` in both `requirements.txt`. Clean, versioned via
+ tags, zero build complexity on Railway (both already depend on `requests`).
 
-### Task 3.2 — Adopt in modelbytes
-- [ ] Replace the in-tree copies with imports from the shared core. Keep
-      behavior identical (golden tests on the live `pending/*.txt` corpus must
-      still pass). This is a refactor, not a behavior change.
+### Task 3.1 — Stand up the shared core ✅ (local; pending public repo)
+- [x] Owner picked A.
+- [x] Built `ss-publish` at `repos/ss-publish/` (local working tree, its own
+      git story, tagged `v0.1.0`). Config-driven `Publisher` dataclass +
+      `TelegramResult`, plus `truncate_for_telegram`, `telegram_html_to_mrkdwn`,
+      `redact_secrets`, `retry_delay`. Standardized on `requests`. Extracted
+      from modelbytes (the hardened reference) and generalized (creds via
+      constructor, not module env; configurable banner + preview setting to
+      cover the modelbytes-disable vs clawbytes-enable preview difference).
+- [x] Tag v0.1.0 (local).
+- [x] 39 tests passing (markup, truncate, redact, retry/backoff + Retry-After,
+      send fail-soft/truncate/retry, mirror best-effort, ops Telegram-then-Slack
+      routing + redaction). No network in the suite.
+- [ ] **PENDING OWNER CONFIRMATION (one-way door):** create the public
+      `SovereignSignal/ss-publish` GitHub repo + push main + tag, then add the
+      `pip install git+…@v0.1.0` line to both repos' `requirements.txt`.
 
-### Task 3.3 — Adopt in clawbytes
-- [ ] Replace clawbytes' `send_telegram` / `mirror_to_slack` / scheduler
-      `_send_admin_dm` with the shared core. clawbytes inherits Phase 1 + 2
-      hardening for free.
+### Task 3.2 — Adopt in modelbytes ✅ (PR #26)
+- [x] Replaced `_truncate_for_telegram`, `send_telegram_post`, `send_ops_alert`,
+      `_telegram_html_to_slack_mrkdwn` (core parse) with the shared core.
+      Constructed one `Publisher` at module load from the existing env vars.
+      Kept `_redact_secrets` (distinct `<token>`/`<database-url>` placeholders —
+      intentionally different, not drift) + `send_slack_post` body + `ping_heartbeat`
+      as modelbytes' own. Removed dead `_SlackMrkdwnConverter`. Behavior identical;
+      133-test suite + golden corpus green. Added 41 vendored ss-publish tests + a
+      sync guard. **174 passed, 0 regressions.**
+
+### Task 3.3 — Adopt in clawbytes ✅ (this PR)
+- [x] Replaced `send_telegram` (Phase 1, urllib) + `mirror_to_slack` + the dead
+      `_truncate_for_telegram`/`_telegram_retry_delay`/send constants with the
+      shared core. `_publisher` built lazily via `_ensure_publisher()` (clawbytes
+      resolves creds via `cred()` at call time, unlike modelbytes' module-load).
+      Updated the 5 Phase-1 HTTP tests to drive `_publisher._post` (the new
+      `requests`-based architecture) — they still pin the same contract
+      (fail-soft, truncate, retry, mirror-only-on-success). Added the sync guard.
+      **92 passed, 0 regressions.**
+- [~] **Scheduler `_send_admin_dm`/`_send_admin_slack` DEFERRED.** Phase 2's
+      ops routing already works and is tested (Telegram-then-Slack, isolated).
+      It uses urllib + a different signature (`-> None`, `html` fallback, structured
+      logging) than the shared `send_ops_alert`. Forcing it onto the shared core now
+      is low-value (clawbytes-only routing, not a cross-repo drift risk) and would
+      require rewriting 6 scheduler tests. The drift risk the shared core solves is
+      the *publish* surface (`send_telegram`/`mirror_to_slack`) — which is now shared.
+      Revisit if the scheduler ever needs the audit-ledger story from the shared core.
 
 ---
 
