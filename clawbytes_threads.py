@@ -1453,12 +1453,49 @@ def _same_topic(item: dict, picked: List[dict]) -> bool:
     return any(sig & _topic_tokens(p.get("title", "")) for p in picked)
 
 
+# Per-vendor daily cap on provider-status incidents. The Watch lane otherwise
+# posts every provider status blip (2026-06-22: "for the 50th time" — Anthropic
+# incidents posted near-daily). Dedup collapses repeats of the SAME incident;
+# this cap throttles the firehose of DISTINCT incidents from one vendor.
+STATUS_POSTS_PER_VENDOR_PER_DAY = 1
+
+
+def _status_vendor(item: dict) -> Optional[str]:
+    """The vendor slug for a provider-status item, or None for non-status items.
+    Status items carry the canonical dedup url from classify_rss's status branch
+    (https://status.local/<vendor>/<slug>); that's the clean signal."""
+    url = item.get("url", "") or ""
+    if not url.startswith("https://status.local/"):
+        return None
+    rest = url[len("https://status.local/"):]
+    return rest.split("/", 1)[0] or None
+
+
+def _vendor_status_already_posted_today(item: dict, state: dict) -> bool:
+    """True if this vendor already has STATUS_POSTS_PER_VENDOR_PER_DAY provider
+    incidents recorded for the current local day."""
+    vendor = _status_vendor(item)
+    if not vendor:
+        return False
+    today = local_day_key()
+    posts = state.get("statusPosts", [])
+    return sum(1 for p in posts
+               if p.get("vendor") == vendor and p.get("day") == today
+               ) >= STATUS_POSTS_PER_VENDOR_PER_DAY
+
+
 def bundle_for_category(category: str, limit: Optional[int] = None) -> List[dict]:
     items = queue_for_category(category)
     target = limit or CATEGORY_META[category]["default_limit"]
+    state = load_json(THREAD_STATE_FILE, {})
     picked: List[dict] = []
     bucket_counts: Dict[str, int] = {}
     bucket_cap = 1 if category == "ship" else 2 if category == "watch" else 3
+    # Track vendor status posts as we pick (in addition to the persisted state),
+    # so two distinct Anthropic incidents in the SAME bundle don't both sneak in.
+    vendor_status_today: Dict[str, int] = {}
+    state_vendors = {p.get("vendor") for p in state.get("statusPosts", [])
+                     if p.get("day") == local_day_key()}
 
     for item in items:
         bucket = source_bucket(item)
@@ -1466,6 +1503,13 @@ def bundle_for_category(category: str, limit: Optional[int] = None) -> List[dict
             continue
         if category != "ship" and _same_topic(item, picked):
             continue
+        # Per-vendor daily cap on provider-status incidents (Watch noise throttle).
+        sv = _status_vendor(item)
+        if sv is not None and category == "watch":
+            already = (1 if sv in state_vendors else 0) + vendor_status_today.get(sv, 0)
+            if already >= STATUS_POSTS_PER_VENDOR_PER_DAY:
+                continue
+            vendor_status_today[sv] = vendor_status_today.get(sv, 0) + 1
         picked.append(item)
         bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
         if len(picked) >= target:
@@ -2151,6 +2195,17 @@ def mark_posted(category: str, limit: Optional[int] = None, posted_items: Option
         "count": len(bundle),
     })
     state["publishLog"] = publish_log[-500:]
+    # Record provider-status incidents posted today, keyed by vendor + day, so
+    # bundle_for_category can throttle to STATUS_POSTS_PER_VENDOR_PER_DAY.
+    today = local_day_key()
+    status_posts = [p for p in state.get("statusPosts", []) if p.get("day") == today]
+    posted_vendors_today = {p.get("vendor") for p in status_posts}
+    for item in bundle:
+        sv = _status_vendor(item)
+        if sv and sv not in posted_vendors_today:
+            status_posts.append({"vendor": sv, "day": today})
+            posted_vendors_today.add(sv)
+    state["statusPosts"] = (list(state.get("statusPosts", [])) + status_posts)[-2000:]
     save_json(BACKLOG_FILE, backlog)
     save_json(THREAD_STATE_FILE, state)
     return bundle
