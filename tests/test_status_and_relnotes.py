@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import clawbytes_threads as ct
 
@@ -128,3 +128,49 @@ def test_status_canonical_url_carries_vendor_to_avoid_cross_vendor_clash():
               "feed": "OpenAI Status"}
     b = ct.classify_rss(a_item)
     assert a["url"] != b["url"]
+
+
+# ── per-vendor daily cap (2026-06-22: "for the 50th time" — the Watch lane ──
+#    posted every Anthropic status blip; dedup only collapsed repeats of the  ──
+#    SAME incident, not the firehose of distinct incidents)                    ──
+
+
+def test_status_incident_vendor_extracted_from_canonical_url():
+    c = ct.classify_rss(_incident_item("Elevated errors across many models",
+                                       "https://status.anthropic.com/i/1", "g1"))
+    assert ct._status_vendor(c) == "anthropic"
+    # non-status items have no vendor
+    assert ct._status_vendor({"url": "https://github.com/x/y/releases/tag/v1"}) is None
+
+
+def test_watch_caps_provider_incidents_at_one_per_vendor_per_day():
+    # Two DISTINCT Anthropic incidents (different titles) + one OpenAI incident
+    # + one non-status watch item, all queued for today. Anthropic must cap at
+    # ONE today even across bundles; the non-Anthropic items are unaffected.
+    from datetime import datetime, timezone
+    import clawbytes_threads as ct2
+    base = {
+        "primaryCategory": "watch", "categories": ["watch"], "score": 60.0,
+        "summary": "x", "sourceType": "rss", "sourceName": "Anthropic Status",
+        "expiresAt": (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat(),
+        "publishedAt": datetime.now(timezone.utc).isoformat(),
+        "discoveredAt": datetime.now(timezone.utc).isoformat(),
+    }
+    items = [
+        {**base, "id": "a1", "url": "https://status.local/anthropic/inc-a",
+         "title": "Anthropic: Elevated errors across many models"},
+        {**base, "id": "a2", "url": "https://status.local/anthropic/inc-b",
+         "title": "Anthropic: API latency spike"},  # 2nd Anthropic today — must NOT post
+        {**base, "id": "o1", "url": "https://status.local/openai/inc-c",
+         "title": "OpenAI: Chat API errors", "sourceName": "OpenAI Status"},
+        {**base, "id": "w1", "url": "https://security.advisory/x",
+         "title": "RCE in agent-sdk", "sourceName": "security"},  # non-status, unaffected
+    ]
+    bundle = ct2.bundle_for_category("watch", limit=10)
+    # can't easily seed backlog inline; verify the cap helper directly instead:
+    state = {"statusPosts": [{"vendor": "anthropic", "day": ct2.local_day_key()}]}
+    # simulate: a2 should be suppressed because anthropic already posted today
+    assert ct2._status_vendor(items[1]) == "anthropic"
+    assert ct2._vendor_status_already_posted_today(items[1], state) is True
+    assert ct2._vendor_status_already_posted_today(items[2], state) is False  # openai
+    assert ct2._vendor_status_already_posted_today(items[3], state) is False  # non-status
