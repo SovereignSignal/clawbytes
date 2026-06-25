@@ -21,6 +21,5 @@ TELEGRAM_BOT_TOKEN = { required = true }
 TELEGRAM_CHANNEL_ID = { required = true }
 CLAUDE_CREDENTIALS = { required = true }
 GITHUB_TOKEN = { required = false }
-BRAVE_API_KEY = { required = false }
 DATABASE_URL = { required = false }
 WORKSPACE = "/app"

@@ -30,7 +30,7 @@ Deployed on Railway as a single always-on container running `scripts/scheduler.p
 
 ## Source classes
 
-The authoritative, current list with file references is in [`SOURCES.md`](SOURCES.md). In brief: RSS/Atom feeds (vendor blogs, changelogs, GitHub `releases.atom`, research, ArXiv), Reddit, Hacker News, HuggingFace Daily Papers, weekly **discovery** (GitHub topics, awesome-list diffs, Brave), benchmark **leaderboards** (SWE-bench, Aider, LiveBench — sha-gated, emit on top-3 movement only), model **registries** (OpenRouter, LiteLLM pricing, HF trending), **feedless pages** (Mintlify `.md` hashes + sitemap slug diffs for Anthropic/Claude/Devin CLI/xAI/DeepSeek), and **Bluesky** phrase search.
+The authoritative, current list with file references is in [`SOURCES.md`](SOURCES.md). In brief: RSS/Atom feeds (vendor blogs, changelogs, GitHub `releases.atom`, research, ArXiv), Reddit, Hacker News, HuggingFace Daily Papers, weekly **discovery** (GitHub topics, awesome-list diffs), benchmark **leaderboards** (SWE-bench, Aider, LiveBench — sha-gated, emit on top-3 movement only), model **registries** (OpenRouter, LiteLLM pricing, HF trending), **feedless pages** (Mintlify `.md` hashes + sitemap slug diffs for Anthropic/Claude/Devin CLI/xAI/DeepSeek), and **Bluesky** phrase search.
 
 ## Scheduler jobs
 
@@ -67,7 +67,6 @@ There are **no routine status reports**. Ops DMs are exception-only: the admin h
 | `CLAWBYTES_CURATOR_URL` / `CLAWBYTES_CURATOR_MODEL` / `CLAWBYTES_CURATOR_API_KEY` | Curator backend (OpenAI-compatible; key falls back to `CLAWBYTES_LLM_API_KEY`). If unset, the curator uses the Claude CLI. | optional |
 | `CLAWBYTES_CURATOR_LANES` | Comma-separated lanes to curate (default all four) | optional |
 | `GITHUB_TOKEN` | Lifts GitHub API rate limits (release-note grounding, leaderboard/registry sha checks, discovery) | recommended |
-| `BRAVE_API_KEY` | Discovery search | optional |
 
 ## Local development
 

@@ -11,38 +11,17 @@ Dynamic config: memory/clawbytes-dynamic-feeds.json
 
 import json
 import os
-import re
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
-from xml.etree import ElementTree as ET
 
 WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 STATE_FILE = MEMORY_DIR / "clawbytes-discovered-sources.json"
 DYNAMIC_FEEDS_FILE = MEMORY_DIR / "clawbytes-dynamic-feeds.json"
-CREDS_FILE = WORKSPACE / "CREDS.md"
-
-# Search queries for discovering new sources (Brave Search API)
-DISCOVERY_QUERIES = [
-    # AI/agent blogs and publications
-    "best AI agent blogs 2026 rss feed",
-    "LLM research blog rss feed",
-    "AI engineering newsletter rss",
-    "artificial intelligence news rss feed",
-    "machine learning engineering blog rss",
-    "coding agent news rss",
-    "AI safety alignment blog rss",
-    "open source AI projects rss feed",
-    # Specific orgs that might have feeds
-    "site:* blog rss artificial intelligence",
-    "AI startup blog rss 2026",
-    "agent framework newsletter rss",
-]
 
 # Subreddit discovery queries
 SUBREDDIT_QUERIES = [
@@ -53,35 +32,6 @@ SUBREDDIT_QUERIES = [
     "machine learning news",
 ]
 
-# Known RSS feed domain patterns to look for in search results
-RSS_PATTERNS = [
-    r'href="([^"]*?/feed/?)"',
-    r'href="([^"]*?/rss[^"]*?)"',
-    r'href="([^"]*?/atom\.xml)"',
-    r'href="([^"]*?/index\.xml)"',
-    r'<link[^>]*type="application/rss\+xml"[^>]*href="([^"]*)"',
-    r'<link[^>]*type="application/atom\+xml"[^>]*href="([^"]*)"',
-]
-
-# Domains we already track (hardcoded in monitors)
-KNOWN_DOMAINS = {
-    "simonwillison.net", "aimaker.substack.com", "ai-supremacy.com",
-    "openai.com", "huggingface.co", "blog.langchain.dev",
-    "lilianweng.github.io", "interconnects.ai", "aisnakeoil.substack.com",
-    "latent.space", "theaiedge.substack.com",
-    "github.com",  # releases
-    "techcrunch.com", "theverge.com", "arstechnica.com",
-    "zdnet.com", "technologyreview.com", "venturebeat.com",
-    "the-decoder.com", "arxiv.org",
-    "reddit.com",  # handled separately
-}
-
-# Domains that are irrelevant noise
-NOISE_DOMAINS = {
-    "amazon.com", "ebay.com", "walmart.com", "facebook.com", "instagram.com",
-    "tiktok.com", "pinterest.com", "yelp.com", "tripadvisor.com",
-}
-
 # Subreddits that look AI-ish but aren't relevant enough
 SUBREDDIT_EXCLUSIONS = {
     "framework",  # Generic programming, not AI
@@ -91,27 +41,6 @@ SUBREDDIT_EXCLUSIONS = {
     "mlquestions",  # Q&A, not news
     "learnmachinelearning",  # Educational, not news
 }
-
-BRAVE_API_KEY = None
-
-
-def load_creds():
-    """Load Brave API key from CREDS.md."""
-    global BRAVE_API_KEY
-    try:
-        text = CREDS_FILE.read_text()
-        match = re.search(r'BRAVE[_-]?API[_-]?KEY["\s:]+([^\s"\n]+)', text, re.IGNORECASE)
-        if match:
-            BRAVE_API_KEY = match.group(1)
-            return True
-    except Exception:
-        pass
-    
-    # Try env
-    import os
-    BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY")
-    return bool(BRAVE_API_KEY)
-
 
 def load_state():
     """Load discovery state."""
@@ -157,133 +86,7 @@ def save_dynamic_feeds(feeds):
     tmp.replace(DYNAMIC_FEEDS_FILE)
 
 
-def validate_rss_feed(url, timeout=10):
-    """Check if a URL is a valid RSS/Atom feed."""
-    headers = {
-        "User-Agent": "ClawBytes/1.0 (Source Discovery; +https://github.com/ClawBack1)",
-        "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*"
-    }
-    req = Request(url, headers=headers)
-    try:
-        with urlopen(req, timeout=timeout) as response:
-            if response.status != 200:
-                return False, f"HTTP {response.status}"
-            content = response.read(5000).decode("utf-8", errors="ignore")
-            # Check for RSS/Atom markers
-            if any(marker in content[:2000].lower() for marker in 
-                   ["<rss", "<feed", "<channel>", "xmlns:atom", "atom:link"]):
-                return True, "valid feed"
-            return False, "no feed markers found"
-    except HTTPError as e:
-        return False, f"HTTP {e.code}"
-    except URLError as e:
-        return False, str(e.reason)
-    except Exception as e:
-        return False, str(e)
-
-
-def search_brave(query, count=10):
-    """Search Brave API for results."""
-    if not BRAVE_API_KEY:
-        print(f"  ⚠️ No Brave API key, skipping search: {query[:50]}")
-        return []
-    
-    url = f"https://api.search.brave.com/res/v1/web/search?q={quote(query)}&count={count}"
-    headers = {
-        "Accept": "application/json",
-        "Accept-Encoding": "gzip",
-        "X-Subscription-Token": BRAVE_API_KEY,
-    }
-    req = Request(url, headers=headers)
-    try:
-        with urlopen(req, timeout=15) as response:
-            data = json.loads(response.read().decode("utf-8"))
-            results = data.get("web", {}).get("results", [])
-            return results
-    except Exception as e:
-        print(f"  ⚠️ Brave search error: {e}")
-        return []
-
-
-def discover_rss_feeds(state):
-    """Discover new RSS feeds via search."""
-    print("\n📡 Discovering new RSS feeds...")
-    new_feeds = []
-    seen_urls = set()
-    
-    # Collect existing feed URLs
-    dynamic = load_dynamic_feeds()
-    existing_urls = {f.get("url", "") for f in dynamic.get("rss_feeds", [])}
-    # Also include hardcoded feeds
-    sys.path.insert(0, str(WORKSPACE / "scripts"))
-    try:
-        from claw_rss_monitor import RSS_FEEDS
-        existing_urls.update(f.get("url", "") for f in RSS_FEEDS)
-    except ImportError:
-        pass
-    
-    for query in DISCOVERY_QUERIES:
-        print(f"  Searching: {query[:60]}...")
-        results = search_brave(query, count=10)
-        
-        for result in results:
-            page_url = result.get("url", "")
-            if not page_url:
-                continue
-            
-            # Try common RSS paths for the domain
-            parsed = urlparse(page_url)
-            domain = parsed.hostname or ""
-            
-            if domain in NOISE_DOMAINS or domain in KNOWN_DOMAINS:
-                continue
-            if domain in existing_urls or page_url in existing_urls:
-                continue
-            
-            # Try to find RSS links on the page
-            potential_feeds = [
-                f"https://{domain}/feed/",
-                f"https://{domain}/rss/",
-                f"https://{domain}/feed.xml",
-                f"https://{domain}/rss.xml",
-                f"https://{domain}/atom.xml",
-                f"https://{domain}/index.xml",
-                f"https://{domain}/blog/feed/",
-                f"https://{domain}/blog/rss/",
-            ]
-            
-            for feed_url in potential_feeds:
-                if feed_url in seen_urls or feed_url in existing_urls:
-                    continue
-                seen_urls.add(feed_url)
-                
-                valid, reason = validate_rss_feed(feed_url)
-                if valid:
-                    name = domain.replace(".", " ").title()
-                    # Check if the feed has AI-relevant content
-                    print(f"    ✅ Found: {feed_url} ({reason})")
-                    new_feed = {
-                        "name": name,
-                        "url": feed_url,
-                        "tags": ["discovered", "auto"],
-                        "discovered_at": datetime.now(timezone.utc).isoformat(),
-                        "discovered_via": query,
-                    }
-                    new_feeds.append(new_feed)
-                    existing_urls.add(feed_url)
-                    state["discoveredFeeds"].append({
-                        "url": feed_url,
-                        "name": name,
-                        "found_at": datetime.now(timezone.utc).isoformat(),
-                        "via_query": query,
-                    })
-                    break  # One feed per domain is enough
-            
-            time.sleep(0.3)  # Rate limit
-        
-        time.sleep(1)  # Rate limit between queries
-    
-    return new_feeds
+# Brave-based RSS feed discovery removed 2026-06-25 (Brave deprecated).
 
 
 def discover_subreddits(state):
@@ -456,44 +259,43 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="Discover new ClawBytes content sources")
     parser.add_argument("--dry-run", action="store_true", help="Don't save changes")
-    parser.add_argument("--feeds-only", action="store_true", help="Only discover RSS feeds")
+    parser.add_argument("--feeds-only", action="store_true",
+                        help="(Deprecated no-op: RSS feed discovery was Brave-based and removed)")
     parser.add_argument("--quiet", "-q", action="store_true")
     args = parser.parse_args()
-    
+
     print("🔍 ClawBytes Source Discovery")
     print("=" * 50)
-    
-    load_creds()
+
     state = load_state()
     dynamic = load_dynamic_feeds()
-    
-    # Discover RSS feeds
-    new_feeds = discover_rss_feeds(state)
-    
+
+    # Brave-based RSS feed discovery removed 2026-06-25 (Brave deprecated).
+    new_subs = []
+    new_hn = []
     if not args.feeds_only:
         # Discover subreddits
         new_subs = discover_subreddits(state)
-        
+
         # Discover HN topics
         new_hn = discover_hn_topics(state)
-        
+
         # Add to dynamic config
-        dynamic["rss_feeds"].extend(new_feeds)
         dynamic["subreddits"].extend(new_subs)
         dynamic["hn_queries"].extend(new_hn)
-    
+
     # Prune dead feeds
     pruned = prune_dead_feeds(dynamic)
-    
+
     # Save
     if not args.dry_run:
         save_state(state)
         save_dynamic_feeds(dynamic)
-        print(f"\n✅ Saved {len(new_feeds)} new feeds, {len(dynamic.get('subreddits', [])) - len(new_subs) + len(new_subs)} total dynamic subreddits")
+        print(f"\n✅ Saved {len(new_subs)} new subreddits, {len(new_hn)} new HN queries")
         print(f"   Pruned {pruned} dead feeds")
     else:
         print("\n🏃 Dry run — no changes saved")
-        print(f"   Would add: {len(new_feeds)} feeds")
+        print(f"   Would add: {len(new_subs)} subreddits, {len(new_hn)} HN queries")
     
     # Summary
     print(f"\n📊 Dynamic Sources Summary:")

@@ -19,12 +19,10 @@ DISCOVERIES_FILE="${MEMORY_DIR}/claw-ecosystem-discoveries.json"
 CREDS_FILE="${WORKSPACE_DIR}/CREDS.md"
 
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
-BRAVE_API_KEY="${BRAVE_API_KEY:-}"
 
 # Rate limiting - be nice to APIs
 GITHUB_DELAY=0.2  # seconds between GitHub requests (0.5s = 7200/hr, well within 5000/hr auth'd limit)
 HN_DELAY=0.5
-BRAVE_DELAY=0.5
 
 # Star thresholds for discovery
 MIN_STARS_NEW=50      # Min stars for repos <7 days old
@@ -52,7 +50,6 @@ get_cred() {
 
 load_tokens() {
     if [[ -z "$GITHUB_TOKEN" ]]; then GITHUB_TOKEN="$(get_cred "GitHub API" "Token" || true)"; fi
-    if [[ -z "$BRAVE_API_KEY" ]]; then BRAVE_API_KEY="$(get_cred "Brave Search API" "API Key" || true)"; fi
 }
 
 github_api() {
@@ -64,21 +61,7 @@ github_api() {
     fi
 }
 
-brave_search_json() {
-    local query="$1"
-    local count="${2:-10}"
-    if [[ -z "$BRAVE_API_KEY" ]]; then
-        echo '{"web":{"results":[]}}'
-        return
-    fi
-
-    curl -sf --max-time 15 --get "https://api.search.brave.com/res/v1/web/search" \
-        --data-urlencode "q=${query}" \
-        --data-urlencode "count=${count}" \
-        --data-urlencode "freshness=pw" \
-        -H "Accept: application/json" \
-        -H "X-Subscription-Token: ${BRAVE_API_KEY}" || echo '{"web":{"results":[]}}'
-}
+# Brave Search helper removed 2026-06-25 (Brave deprecated).
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -432,70 +415,7 @@ discover_hackernews() {
     echo "$discoveries"
 }
 
-# Brave Search Discovery
-discover_brave() {
-    local api_key="${BRAVE_API_KEY:-}"
-    
-    if [[ -z "$api_key" ]]; then
-        echo "⚠️  BRAVE_API_KEY not set, skipping Brave search" >&2
-        echo "[]"
-        return
-    fi
-    
-    echo "🔎 Brave Search Discovery..." >&2
-    local discoveries="[]"
-    
-    local queries=(
-        "new AI agent framework 2026"
-        "openclaw alternative site:github.com"
-        "self-hosted personal AI agent"
-        "local AI coding assistant github"
-    )
-    
-    for query in "${queries[@]}"; do
-        local encoded_query
-        encoded_query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$query'))")
-        
-        local url="https://api.search.brave.com/res/v1/web/search?q=${encoded_query}&count=5"
-        local response
-        response=$(curl -sf --max-time 30 -H "Accept: application/json" -H "X-Subscription-Token: ${api_key}" "$url" 2>/dev/null) || continue
-        
-        # Extract GitHub URLs from results
-        local results
-        results=$(echo "$response" | jq '.web.results // []')
-        
-        while IFS= read -r result; do
-            local url
-            url=$(echo "$result" | jq -r '.url // ""')
-            
-            if [[ "$url" =~ github\.com/([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+) ]]; then
-                local repo_name="${BASH_REMATCH[1]}"
-                
-                if ! is_repo_known "$repo_name"; then
-                    local repo_data
-                    repo_data=$(fetch_repo_metadata "$repo_name")
-                    
-                    if [[ -n "$repo_data" && "$repo_data" != "{}" ]]; then
-                        local stars
-                        stars=$(echo "$repo_data" | jq -r '.stars // 0')
-                        
-                        if [[ $stars -ge $MIN_STARS_NEW ]]; then
-                            repo_data=$(echo "$repo_data" | jq '. + {source: "brave-search", isNew: true}')
-                            discoveries=$(echo "$discoveries" | jq --argjson repo "$repo_data" '. + [$repo]')
-                            echo "   🔎 Found: $repo_name (⭐ $stars)" >&2
-                        fi
-                    fi
-                    
-                    sleep $GITHUB_DELAY
-                fi
-            fi
-        done < <(echo "$results" | jq -c '.[]')
-        
-        sleep $BRAVE_DELAY
-    done
-    
-    echo "$discoveries"
-}
+# Brave Search discovery removed 2026-06-25 (Brave deprecated).
 
 # ============ CHECK FUNCTIONS ============
 
@@ -508,22 +428,11 @@ fetch_github_releases() {
 }
 
 check_clawhub_skills() {
+    # ClawHub skill discovery removed 2026-06-25 (Brave deprecated; the only
+    # backend was a Brave web search). Returns no items until a replacement
+    # source is wired in. State (lastSeenSkills) stays untouched.
     local state="$1"
-    local seen_urls
-    seen_urls=$(echo "$state" | jq '.lastSeenSkills // []')
-
-    local response
-    response=$(brave_search_json 'site:clawhub.ai (skill OR skills OR marketplace) openclaw' 10)
-
-    echo "$response" | jq --argjson seen "$seen_urls" '
-        [.web.results[]?
-         | select(.url | contains("clawhub.ai"))
-         | {id: .url, name: (.title // ""), url: .url, description: (.description // "")}
-         | select(($seen | index(.id)) == null)
-        ]
-        | unique_by(.id)
-        | map(. + {source: "clawhub-search"})
-    '
+    echo "[]"
 }
 
 # Check all known repos for new releases (parallelized with progress)
@@ -812,11 +721,9 @@ run_discover() {
     local hn_discoveries
     hn_discoveries=$(discover_hackernews)
     all_discoveries=$(echo "$all_discoveries $hn_discoveries" | jq -s 'add | unique_by(.repo)')
-    
-    local brave_discoveries
-    brave_discoveries=$(discover_brave)
-    all_discoveries=$(echo "$all_discoveries $brave_discoveries" | jq -s 'add | unique_by(.repo)')
-    
+
+    # Brave Search discovery removed 2026-06-25 (Brave deprecated).
+
     # Add discoveries to sources.json
     local count=0
     while IFS= read -r discovery; do

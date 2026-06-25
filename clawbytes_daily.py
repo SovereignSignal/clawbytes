@@ -160,21 +160,7 @@ def github_json(url: str) -> dict | list:
         return json.loads(r.read().decode("utf-8"))
 
 
-def brave_search(query: str, count: int = 5) -> List[dict]:
-    key = cred("Brave Search API", "API Key") or cred("Brave Search", "API Key")
-    if not key:
-        return []
-    qs = urlencode({"q": query, "count": count, "freshness": "pd"})
-    req = Request(
-        f"https://api.search.brave.com/res/v1/web/search?{qs}",
-        headers={"Accept": "application/json", "X-Subscription-Token": key},
-    )
-    try:
-        with urlopen(req, timeout=20) as r:
-            data = json.loads(r.read().decode("utf-8"))
-        return data.get("web", {}).get("results", [])
-    except Exception:
-        return []
+# Brave Search removed: brave_search() helper and its Brave API cred were dropped.
 
 
 @dataclass
@@ -398,22 +384,9 @@ def select_security(security_state: dict) -> List[Candidate]:
 
 
 def select_clawhub() -> List[Candidate]:
-    results = brave_search('site:clawhub.ai (skill OR skills) openclaw', 5)
-    out = []
-    for r in results:
-        url = r.get('url','')
-        title = r.get('title','')
-        desc = r.get('description','')
-        if 'clawhub.ai' not in url:
-            continue
-        why = clawhub_summary(title, desc)
-        out.append(Candidate(title=title, url=url, why=why, score=28, category='clawhub'))
-    seen, dedup = set(), []
-    for c in out:
-        if c.url not in seen:
-            seen.add(c.url)
-            dedup.append(c)
-    return dedup[:1]
+    # Brave Search removed: this lane was sourced solely via brave_search().
+    # With no replacement source, ClawHub yields no candidates.
+    return []
 
 
 def select_momentum() -> List[Candidate]:
@@ -619,7 +592,7 @@ def run_monitors() -> None:
         'python3 scripts/claw-rss-monitor.py',
         'python3 scripts/claw-reddit-monitor.py',
         'python3 scripts/claw-moltbook-monitor.py',
-        'python3 scripts/claw-security-monitor.py --quiet',
+        # claw-security-monitor.py entry removed: that script was deleted.
         'bash scripts/claw-ecosystem-monitor.sh --mode check',
     ]
     for cmd in cmds:

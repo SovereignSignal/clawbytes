@@ -88,7 +88,6 @@ def secret_presence() -> dict:
     keys = [
         "TELEGRAM_BOT_TOKEN",
         "TELEGRAM_CHANNEL_ID",
-        "BRAVE_API_KEY",
         "GITHUB_TOKEN",
         "CLAUDE_CREDENTIALS",
         "SOV_DM_CHAT_ID",

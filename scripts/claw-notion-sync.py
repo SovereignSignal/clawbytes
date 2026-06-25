@@ -40,7 +40,6 @@ WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 SOURCES_FILE = WORKSPACE / "memory" / "claw-ecosystem-sources.json"
 NOTION_PAGES_FILE = WORKSPACE / "memory" / "claw-notion-pages.json"
 CACHE_FILE = WORKSPACE / "memory" / "claw-notion-cache.json"
-SECURITY_MONITOR = WORKSPACE / "scripts" / "claw-security-monitor.py"
 NOTION_PAGE_ID = "337000c0-d590-805d-af74-f27d19215184"
 
 # Notion API key (ClawBack integration)
@@ -316,41 +315,13 @@ def diff_and_apply(entries: list[dict], apply: bool = False) -> list[str]:
 
     if apply and (added_repos or updated_cats):
         save_sources(sources)
-        add_to_security_monitor([e["repo"] for e in added_repos if e.get("repo")])
+        # security-monitor sync removed 2026-06-25 (monitor retired).
         changes_made = True
 
     if not changes:
         changes.append("  ✅ No changes — Notion and local sources are in sync")
 
     return changes, closed_source, changes_made
-
-
-def add_to_security_monitor(repos: list[str]):
-    """Add repos to the security monitor's WATCHED_REPOS list."""
-    with open(SECURITY_MONITOR) as f:
-        content = f.read()
-
-    match = re.search(r'WATCHED_REPOS = \[(.*?)\]', content, re.DOTALL)
-    if not match:
-        return
-
-    current = match.group(1)
-    existing = set()
-    for line in current.strip().split('\n'):
-        line = line.strip().strip('"').strip("'").strip(',').strip()
-        if line and not line.startswith('#'):
-            existing.add(line)
-
-    new_lines = []
-    for repo in repos:
-        if repo not in existing:
-            new_lines.append(f'    "{repo}",')
-
-    if new_lines:
-        insert_idx = content.rfind(']', content.index('WATCHED_REPOS'))
-        content = content[:insert_idx] + '\n'.join(new_lines) + '\n' + content[insert_idx:]
-        with open(SECURITY_MONITOR, "w") as f:
-            f.write(content)
 
 
 # ─── Write-back: ClawBytes → Notion ───────────────────────────────────────

@@ -22,7 +22,6 @@ WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCES_FILE = os.path.join(WORKSPACE, "memory", "claw-ecosystem-sources.json")
 STATE_FILE = os.path.join(WORKSPACE, "memory", "claw-ecosystem-state.json")
 
-BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "")
 
@@ -34,12 +33,6 @@ GITHUB_QUERIES = [
     "openclaw+alternative+in:description&sort=stars",
     "personal+ai+agent+self-hosted&sort=stars",
     "openclaw+fork+in:description&sort=updated",
-]
-
-BRAVE_QUERIES = [
-    "new AI agent framework 2026 github",
-    "openclaw alternative self-hosted",
-    "personal AI assistant open source 2026",
 ]
 
 HEADERS = {"User-Agent": "ClawBytes-Monitor/1.0 (github.com/ClawBack1)"}
@@ -180,54 +173,6 @@ def discover_hn(known_repos):
     return found
 
 
-def discover_brave(known_repos):
-    """Use Brave Search to find new agent projects."""
-    if not BRAVE_API_KEY:
-        print("  ⚠️  BRAVE_API_KEY not set, skipping Brave discovery", file=sys.stderr)
-        return []
-
-    print("🦁 Brave Search discovery...", file=sys.stderr)
-    found = []
-    import re
-    github_pattern = re.compile(r'github\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)')
-
-    for query in BRAVE_QUERIES:
-        url = f"https://api.search.brave.com/res/v1/web/search?q={urllib.parse.quote(query)}&count=10"
-        try:
-            req = urllib.request.Request(url, headers={
-                **HEADERS,
-                "Accept": "application/json",
-                "Accept-Encoding": "gzip, deflate",
-                "X-Subscription-Token": BRAVE_API_KEY,
-            })
-            data = json.loads(urllib.request.urlopen(req, timeout=15).read())
-            for result in data.get("web", {}).get("results", []):
-                url_str = result.get("url", "")
-                match = github_pattern.search(url_str)
-                if match:
-                    repo = match.group(1).rstrip("/")
-                    if len(repo.split("/")) == 2 and repo.lower() not in known_repos:
-                        meta = fetch_github(f"https://api.github.com/repos/{repo}")
-                        if meta.get("stargazers_count", 0) >= MIN_STARS:
-                            found.append({
-                                "repo": repo,
-                                "name": meta.get("name", ""),
-                                "description": meta.get("description", ""),
-                                "stars": meta.get("stargazers_count", 0),
-                                "url": f"https://github.com/{repo}",
-                                "topics": meta.get("topics", []),
-                                "language": meta.get("language", ""),
-                                "source": "brave-search",
-                                "discoveredAt": datetime.now(timezone.utc).isoformat(),
-                            })
-                            print(f"  🦁 {repo} via Brave", file=sys.stderr)
-            time.sleep(1)
-        except Exception as e:
-            print(f"  ⚠️  Brave error: {e}", file=sys.stderr)
-
-    return found
-
-
 def format_telegram_post(discoveries):
     """Format new discoveries as a Telegram message."""
     if not discoveries:
@@ -283,7 +228,7 @@ def main():
     all_new = []
     all_new.extend(discover_github(known_repos))
 
-    # Update known after github discovery to avoid re-fetching in HN/Brave
+    # Update known after github discovery to avoid re-fetching in HN
     for r in all_new:
         known_repos.add(r["repo"].lower())
 
@@ -291,7 +236,7 @@ def main():
     for r in all_new:
         known_repos.add(r["repo"].lower())
 
-    all_new.extend(discover_brave(known_repos))
+    # Brave discovery removed 2026-06-25 (Brave deprecated).
 
     # Deduplicate final list
     seen = set()

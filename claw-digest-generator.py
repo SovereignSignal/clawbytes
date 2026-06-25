@@ -8,7 +8,6 @@ Usage:
     ./claw-digest-generator.py --mode discover [--channel-id ID] [--bot-token TOKEN] [--send]
 
 Environment variables:
-    BRAVE_API_KEY - Brave Search API key (required for weekly mode)
     TELEGRAM_BOT_TOKEN - Bot token (alternative to --bot-token)
     TELEGRAM_CHANNEL_ID - Channel ID (alternative to --channel-id)
 """
@@ -181,70 +180,8 @@ def summarize_security(security_state: dict):
     return {"label": label, "items": top}
 
 
-def brave_search(query: str, api_key: str, count: int = 5, freshness: str = "pw"):
-    """Search using Brave Search API.
-    
-    Args:
-        query: Search query
-        api_key: Brave API key
-        count: Number of results
-        freshness: Time filter (pd=day, pw=week, pm=month)
-    """
-    if not api_key:
-        print("⚠️  No Brave API key provided, skipping web search", file=sys.stderr)
-        return []
-    
-    url = "https://api.search.brave.com/res/v1/web/search"
-    params = urllib.parse.urlencode({
-        "q": query,
-        "count": count,
-        "freshness": freshness,
-        "text_decorations": "false"
-    })
-    
-    req = urllib.request.Request(
-        f"{url}?{params}",
-        headers={
-            "Accept": "application/json",
-            "X-Subscription-Token": api_key
-        }
-    )
-    
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = json.loads(response.read().decode())
-            return data.get("web", {}).get("results", [])
-    except Exception as e:
-        print(f"⚠️  Brave search error: {e}", file=sys.stderr)
-        return []
-
-
-def search_ecosystem_news(api_key: str):
-    """Search for recent news about the Claw ecosystem."""
-    queries = [
-        "openclaw AI agent",
-        "hermes agent NousResearch",
-        "claude code anthropic",
-        "AI coding agents 2026"
-    ]
-    
-    all_results = []
-    seen_urls = set()
-    
-    for query in queries:
-        results = brave_search(query, api_key, count=3, freshness="pw")
-        for r in results:
-            url = r.get("url", "")
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                all_results.append({
-                    "title": r.get("title", ""),
-                    "url": url,
-                    "description": r.get("description", ""),
-                    "age": r.get("age", "")
-                })
-    
-    return all_results[:10]  # Limit to 10 results
+# Brave Search removed: brave_search() and search_ecosystem_news() were the only
+# web-news source; ecosystem-news is now always empty (callers pass an empty list).
 
 
 def format_daily_digest(items: dict, news: list, security_state: dict) -> str:
@@ -493,8 +430,8 @@ def format_discovery_digest(discoveries: dict) -> str:
             source_emoji = {
                 "github-search": "🔍",
                 "awesome-list": "📚",
-                "hackernews": "🔶",
-                "brave-search": "🌐"
+                "hackernews": "🔶"
+                # Brave Search removed: "brave-search" mapping dropped
             }.get(source, "📦")
             
             lines.append(f"{star_str}{lang_str} · {source_emoji}")
@@ -764,16 +701,16 @@ def main():
     # Get credentials from args or env
     channel_id = args.channel_id or os.environ.get("TELEGRAM_CHANNEL_ID")
     bot_token = args.bot_token or os.environ.get("TELEGRAM_BOT_TOKEN")
-    brave_key = os.environ.get("BRAVE_API_KEY", "")
+    # Brave Search removed: ecosystem web-news is no longer fetched (always empty).
     security_state = load_security_state()
-    
+
     if args.mode == "daily":
         items = load_new_items()
-        news = search_ecosystem_news(brave_key)
+        news = []  # Brave Search removed: no web-news source
         message = format_daily_digest(items, news, security_state)
     elif args.mode == "weekly":
         items = load_new_items()
-        news = search_ecosystem_news(brave_key)
+        news = []  # Brave Search removed: no web-news source
         message = format_weekly_digest(items, news)
     elif args.mode == "discover":
         discoveries = load_discoveries()
@@ -786,7 +723,7 @@ def main():
     
     if args.mode == "weekly" and args.notion:
         items = load_new_items()
-        news = search_ecosystem_news(brave_key)
+        news = []  # Brave Search removed: no web-news source
         notion_page_id = create_weekly_notion_page(items, news)
         if notion_page_id:
             print(f"\n🔗 Notion page: https://sovs.notion.site/{notion_page_id.replace('-', '')}")
