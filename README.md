@@ -1,6 +1,6 @@
 # ClawBytes
 
-Signal aggregator for the AI coding-harness ecosystem. Collects from RSS/Atom feeds, vendor changelogs, provider status pages, Reddit, Hacker News, HuggingFace papers, security advisories, benchmark leaderboards, model registries, feedless vendor pages, and Bluesky — classifies every item into four editorial lanes, and publishes staggered lane bundles to the [@clawbytes](https://t.me/clawbytes) Telegram channel and a mirrored Slack channel.
+Signal aggregator for the AI coding-harness ecosystem. Collects from RSS/Atom feeds, vendor changelogs, Reddit, Hacker News, HuggingFace papers, benchmark leaderboards, model registries, feedless vendor pages, and Bluesky — classifies every item into four editorial lanes, and publishes staggered lane bundles to the [@clawbytes](https://t.me/clawbytes) Telegram channel and a mirrored Slack channel.
 
 Editorial scope lives in [`EDITORIAL_SCOPE.md`](EDITORIAL_SCOPE.md); the full source inventory and the candidate decision log live in [`SOURCES.md`](SOURCES.md).
 
@@ -9,7 +9,7 @@ Editorial scope lives in [`EDITORIAL_SCOPE.md`](EDITORIAL_SCOPE.md); the full so
 | Lane | Emoji | Carries |
 |------|-------|---------|
 | **Ship** | ⚙️ | New releases, changelog moves, model listings, capability shifts |
-| **Watch** | 🚨 | Security advisories, provider incidents, breakage, risk |
+| **Watch** | 🚨 | Breakage, risk, and security-relevant signals |
 | **Read** | 📚 | Substantive analysis, papers, deep dives worth the click |
 | **Community** | 💬 | What operators are actually discussing (Reddit, HN, Bluesky) |
 
@@ -30,7 +30,7 @@ Deployed on Railway as a single always-on container running `scripts/scheduler.p
 
 ## Source classes
 
-The authoritative, current list with file references is in [`SOURCES.md`](SOURCES.md). In brief: RSS/Atom feeds (vendor blogs, changelogs, GitHub `releases.atom`, research, ArXiv), provider **status** feeds, Reddit, Hacker News, HuggingFace Daily Papers, GitHub security advisories, weekly **discovery** (GitHub topics, awesome-list diffs, Brave), benchmark **leaderboards** (SWE-bench, Aider, LiveBench — sha-gated, emit on top-3 movement only), model **registries** (OpenRouter, LiteLLM pricing, HF trending), **feedless pages** (Mintlify `.md` hashes + sitemap slug diffs for Anthropic/Claude/Devin CLI/xAI/DeepSeek), and **Bluesky** phrase search.
+The authoritative, current list with file references is in [`SOURCES.md`](SOURCES.md). In brief: RSS/Atom feeds (vendor blogs, changelogs, GitHub `releases.atom`, research, ArXiv), Reddit, Hacker News, HuggingFace Daily Papers, weekly **discovery** (GitHub topics, awesome-list diffs, Brave), benchmark **leaderboards** (SWE-bench, Aider, LiveBench — sha-gated, emit on top-3 movement only), model **registries** (OpenRouter, LiteLLM pricing, HF trending), **feedless pages** (Mintlify `.md` hashes + sitemap slug diffs for Anthropic/Claude/Devin CLI/xAI/DeepSeek), and **Bluesky** phrase search.
 
 ## Scheduler jobs
 
@@ -91,7 +91,7 @@ Publishing requires `--send` and a live token; `preview` never posts.
 
 **Root:** `clawbytes_threads.py` (the live collector/classifier/publisher), `clawbytes_daily.py` + `claw-digest-generator.py` (legacy single-shot digest), `EDITORIAL_SCOPE.md`, `SOURCES.md`.
 
-**`scripts/` — scheduler + monitors:** `scheduler.py`; the monitors `run_monitors()` invokes directly — `claw-rss-monitor.py`, `claw-reddit-monitor.py`, `claw-hn-monitor.py`, `claw-security-monitor.py`, `claw-moltbook-monitor.py`, `claw-leaderboard-monitor.py`, `claw-registry-monitor.py`, `claw-pagewatch-monitor.py`, `claw-bsky-monitor.py`, and `claw-ecosystem-monitor.sh` (releases + discovery); `claw-hf-papers.py` (HF Daily Papers — run *inside* `claw-ecosystem-monitor.sh`, not standalone); `claw-source-discovery.py` (weekly discovery). (Notion/Proton/people-tracker scripts are legacy VM-era and not wired into the scheduler.)
+**`scripts/` — scheduler + monitors:** `scheduler.py`; the monitors `run_monitors()` invokes directly — `claw-rss-monitor.py`, `claw-reddit-monitor.py`, `claw-hn-monitor.py`, `claw-moltbook-monitor.py`, `claw-leaderboard-monitor.py`, `claw-registry-monitor.py`, `claw-pagewatch-monitor.py`, `claw-bsky-monitor.py`, and `claw-ecosystem-monitor.sh` (releases + discovery); `claw-hf-papers.py` (HF Daily Papers — run *inside* `claw-ecosystem-monitor.sh`, not standalone); `claw-source-discovery.py` (weekly discovery). (Notion/Proton/people-tracker scripts are legacy VM-era and not wired into the scheduler.)
 
 **`content-engine/` — Slack reporting helpers** (`send-clawbytes-report`, `send-clawbytes-audit`); pure stdlib, used on demand.
 

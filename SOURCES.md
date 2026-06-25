@@ -15,14 +15,12 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 | HF Daily Papers | huggingface.co/papers via `api/daily_papers`, keyword-scored into lanes | `scripts/claw-hf-papers.py` | 30 min |
 | Reddit | r/openclaw, r/ClaudeAI, r/ClaudeCode, r/cursor, r/ChatGPTCoding, r/AI_Agents, r/mcp + targeted searches in r/LocalLLaMA, r/selfhosted | `scripts/claw-reddit-monitor.py` (`SUBREDDITS`) | 30 min |
 | Hacker News | Algolia queries (harness/agent/MCP terms), 14-day window | `scripts/claw-hn-monitor.py`, `claw-ecosystem-monitor.sh` | 30 min |
-| Security advisories | GitHub advisories for ~28 watched repos + CVE search | `scripts/claw-security-monitor.py` | 30 min |
 | Moltbook | Community posts, HTML scrape | `scripts/claw-moltbook-monitor.py` | 30 min |
 | Discovery | GitHub topic/keyword search, awesome lists (awesome-ai-agents, awesome-agents, awesome-mcp-servers, awesome-claude-code, awesome-code-ai), Brave search | `claw-ecosystem-monitor.sh --mode discover`, `claw-source-discovery.py` | weekly (Mon 14:10 UTC) |
 | Leaderboards | SWE-bench (Verified, bash-only), Aider polyglot, LiveBench — emits only on top-3 movement, sha-gated fetches | `scripts/claw-leaderboard-monitor.py` (`BOARDS`) | 30 min |
 | Registries | OpenRouter model list (id diff = minutes-level new-model detection), LiteLLM pricing registry (sha-gated key diff), HF trending (weekly, coding/agent filter) | `scripts/claw-registry-monitor.py` | 30 min |
 | Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + sitemap slug diffs (Anthropic news/engineering, DeepSeek news) | `scripts/claw-pagewatch-monitor.py` | 30 min |
 | Bluesky | Phrase search ("claude code", "codex cli", "openclaw", "mcp server", "agent harness"), engagement-gated | `scripts/claw-bsky-monitor.py` | 30 min |
-| Status feeds | Provider incident feeds (Anthropic, OpenAI, Cursor, GitHub, HF, OpenRouter) → Watch lane with consumer/multi-product filters, 48h expiry | `claw-rss-monitor.py` feeds tagged `status` | 30 min |
 
 Discovered repos/feeds/subreddits land in `claw-ecosystem-sources.json` /
 `clawbytes-dynamic-feeds.json` on the volume and are merged automatically —
@@ -82,6 +80,17 @@ r/aipromptprogramming, r/AgentsOfAI (consumer/showcase/dead); dev.to/t/ai
 
 **Borderline, revisit on audit evidence** — r/LLMDevs (~25% in-scope),
 AICodeKing YouTube (fast but clickbait/daily).
+
+**Retired** — 2026-06-24 · the six provider **status feeds** (Anthropic,
+OpenAI, Cursor, GitHub, HF, OpenRouter) and the **security-advisory monitor**
+(`claw-security-monitor.py`; GitHub advisories + Brave CVE search). Provider
+status incidents were operational weather, not editorial signal — even capped
+at 1/vendor/day they read as the same alert repeating, and they carried no
+`EDITORIAL_SCOPE.md` mandate. The security monitor emitted nothing in
+production (its Brave key was unset, which short-circuited both halves before
+the GitHub pass, and that pass read the wrong REST fields anyway) and Brave is
+being deprecated. Security-relevant items still reach Watch/Read via the
+`SECURITY_TERMS` keyword routing on the RSS/Reddit/HN feeds.
 
 ## How to propose a source
 

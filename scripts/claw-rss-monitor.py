@@ -96,13 +96,10 @@ RSS_FEEDS = [
     {"name": "anthropic-sdk-typescript Releases", "url": "https://github.com/anthropics/anthropic-sdk-typescript/releases.atom", "tags": ["releases", "agent-sdk"]},
     {"name": "openai-python Releases", "url": "https://github.com/openai/openai-python/releases.atom", "tags": ["releases", "agent-sdk"]},
     {"name": "python-genai Releases", "url": "https://github.com/googleapis/python-genai/releases.atom", "tags": ["releases", "agent-sdk"]},
-    # Provider status feeds — incident signal for the Watch lane
-    {"name": "Anthropic Status", "url": "https://status.claude.com/history.atom", "tags": ["status"]},
-    {"name": "OpenAI Status", "url": "https://status.openai.com/history.atom", "tags": ["status"]},
-    {"name": "Cursor Status", "url": "https://status.cursor.com/history.atom", "tags": ["status"]},
-    {"name": "GitHub Status", "url": "https://www.githubstatus.com/history.atom", "tags": ["status"]},
-    {"name": "Hugging Face Status", "url": "https://status.huggingface.co/feed.rss", "tags": ["status"]},
-    {"name": "OpenRouter Status", "url": "https://status.openrouter.ai/incidents.rss", "tags": ["status"]},
+    # Provider status feeds removed 2026-06-24: provider-status incidents are
+    # retired from the Watch lane (operational weather, not editorial signal —
+    # they read as the same alert repeating). classify_rss drops the status
+    # branch; this is the source side of that retirement.
 ]
 
 # Keywords for relevance filtering (lowercase)
@@ -274,10 +271,11 @@ def parse_feed(xml_text):
 
 def is_relevant(entry, feed_name):
     """Check if entry is relevant to OpenClaw ecosystem."""
-    # Release, release-notes, and status feeds are always relevant: their
-    # entry titles are versions/dates/incidents that carry no keywords.
+    # Release and release-notes feeds are always relevant: their entry titles
+    # are versions/dates that carry no keywords. (Provider status feeds were
+    # retired 2026-06-24, so "status" is no longer a relevance marker.)
     low_name = feed_name.lower()
-    if any(marker in low_name for marker in ("releases", "release notes", "status")):
+    if any(marker in low_name for marker in ("releases", "release notes")):
         return True
     
     # Check title and summary for keywords

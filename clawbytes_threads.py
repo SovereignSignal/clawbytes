@@ -460,47 +460,16 @@ def classify_rss(item: dict) -> Optional[dict]:
     feed_low = feed.lower()
 
     if "status" in feed_low:
-        # Provider incident feeds → Watch. Multi-product status pages get a
-        # relevance gate so all-of-GitHub / ChatGPT-consumer noise stays out.
-        if "github" in feed_low and not any(
-            t in low for t in ["copilot", "actions", "api", "codespaces", "git operations", "models"]
-        ):
-            return None
-        if "openai" in feed_low and any(t in low for t in ["free and go", "chatgpt", "sora"]):
-            return None
-        vendor = re.sub(r"\s*status\s*$", "", feed, flags=re.IGNORECASE).strip() or feed
-        score = 48 + age_score(dt, 96) / 8
-        # Canonical incident url: provider status feeds emit a NEW guid/link
-        # for every state update of one incident (Investigating → Identified →
-        # Resolved → Update). The raw `url`/`sourceId` drift each update, so the
-        # postedUrls / backlog_id dedup saw each state as a fresh incident and
-        # re-posted (2026-06-22: the Anthropic Opus 4.8 incident posted for
-        # every state change). Collapse state-variants onto one synthetic,
-        # vendor-scoped, state-stripped url so a single incident posts once.
-        incident = title
-        for prefix in ("investigating", "identified", "monitoring",
-                       "resolved", "update", "updated"):
-            incident = re.sub(rf"^\s*{prefix}\s*:\s*", "", incident, flags=re.IGNORECASE)
-        slug = re.sub(r"[^a-z0-9]+", "-", incident.lower()).strip("-") or "incident"
-        vendor_slug = re.sub(r"[^a-z0-9]+", "-", vendor.lower()).strip("-") or "provider"
-        canonical_url = f"https://status.local/{vendor_slug}/{slug}"
-        return {
-            "primaryCategory": "watch",
-            "categories": ["watch"],
-            "score": round(score, 2),
-            "summary": "Provider incident",
-            # Incidents go stale fast — don't let week-old outages linger.
-            "expiresAt": (dt or now_utc()) + timedelta(hours=48),
-            "publishedAt": dt,
-            "sourceType": "rss",
-            "sourceName": feed,
-            "sourceId": canonical_url,
-            "url": canonical_url,
-            "title": f"{vendor}: {title}",
-            # Keep the real upstream link for grounding/display, but the
-            # dedup-critical url is the canonical one above.
-            "sourceUrl": url,
-        }
+        # Provider status incidents (e.g. "Anthropic: Elevated errors on Opus
+        # 4.8 Fast") are operational weather, not editorial signal for a
+        # harness-builder audience: they have no EDITORIAL_SCOPE mandate, ship a
+        # generic blurb, and — even after the #10 same-incident dedup and #11
+        # per-vendor/day cap — still read as the same alert repeating (a vendor
+        # files distinctly-titled incidents daily, each taking the one slot).
+        # Dropped entirely (2026-06-24). The explicit return is load-bearing: a
+        # status title like "...Opus 4.8..." contains the READ_TERM "opus 4", so
+        # falling through (instead of returning here) would misroute it to Read.
+        return None
 
     if "release notes" in feed_low:
         # Mintlify-style changelogs title entries by date ("June 10, 2026") —
@@ -710,38 +679,6 @@ def richer_community_summary(item: dict) -> str:
     if "security" in title or "unsafe" in title:
         return "Risk discussion"
     return "User attention signal"
-
-
-def classify_security(item: dict) -> Optional[dict]:
-    url = item.get("url", "")
-    title = item.get("title", "") or "Security Advisory"
-    if not url:
-        return None
-    advisory_id = item.get("advisory_id") or ""
-    if (not advisory_id) and "api.github.com/repos/" in url:
-        return None
-    dt = parse_dt(item.get("found_at", ""))
-    severity = (item.get("severity", "WATCHING") or "WATCHING").upper()
-    sev_bonus = {"CRITICAL": 100, "HIGH": 80, "WATCHING": 55, "MEDIUM": 40}.get(severity, 40)
-    summary = {
-        "CRITICAL": "Critical advisory in the watched ecosystem; this is immediate-stop-and-check material.",
-        "HIGH": "High-severity advisory in the watched ecosystem; read impact and remediation before copying the pattern.",
-        "WATCHING": "Tracked security issue in the ecosystem; worth watching even if it is not today’s top risk.",
-    }.get(severity, "Tracked security issue in the ecosystem; worth a quick review.")
-    ttl = 120 if severity in {"CRITICAL", "HIGH"} else 72
-    return {
-        "primaryCategory": "watch",
-        "categories": ["watch"],
-        "score": round(sev_bonus + age_score(dt, ttl) / 8, 2),
-        "summary": summary,
-        "expiresAt": (dt or now_utc()) + timedelta(hours=ttl),
-        "publishedAt": dt,
-        "sourceType": "security",
-        "sourceName": item.get("repo", "security"),
-        "sourceId": advisory_id or item.get("url"),
-        "url": url,
-        "title": title,
-    }
 
 
 def classify_hackernews(item: dict) -> Optional[dict]:
@@ -1058,7 +995,6 @@ def run_monitors() -> None:
         ["python3", "scripts/claw-reddit-monitor.py"],
         ["python3", "scripts/claw-hn-monitor.py", "--quiet"],
         ["python3", "scripts/claw-moltbook-monitor.py"],
-        ["python3", "scripts/claw-security-monitor.py", "--quiet"],
         ["python3", "scripts/claw-leaderboard-monitor.py", "--quiet"],
         ["python3", "scripts/claw-registry-monitor.py", "--quiet"],
         ["python3", "scripts/claw-pagewatch-monitor.py", "--quiet"],
@@ -1100,7 +1036,6 @@ def _unique_items(items: List[dict], key_fields: tuple[str, ...] = ("id", "url",
 def collect_candidates() -> Dict[str, List[dict]]:
     rss = load_json(MEMORY / "claw-rss-state.json", {}).get("foundItems", [])
     reddit = load_json(MEMORY / "claw-reddit-state.json", {}).get("foundItems", [])
-    security = load_json(MEMORY / "claw-security-state.json", {}).get("alerts", [])
     moltbook = load_json(MEMORY / "claw-moltbook-state.json", {}).get("foundItems", [])
     hackernews = load_json(MEMORY / "claw-hn-state.json", {}).get("foundItems", [])
     hf_papers = load_json(MEMORY / "claw-hf-state.json", {}).get("foundItems", [])
@@ -1117,7 +1052,6 @@ def collect_candidates() -> Dict[str, List[dict]]:
     return {
         "rss": rss,
         "reddit": reddit,
-        "security": security,
         "moltbook": moltbook,
         "hackernews": hackernews,
         "hf_papers": hf_papers,
@@ -1134,8 +1068,6 @@ def classify_source_candidate(kind: str, item: dict) -> Optional[dict]:
         return classify_rss(item)
     if kind == "reddit":
         return classify_reddit(item)
-    if kind == "security":
-        return classify_security(item)
     if kind == "moltbook":
         return classify_moltbook(item)
     if kind == "hackernews":
@@ -1160,8 +1092,6 @@ def raw_source_label(kind: str, item: dict) -> str:
         return item.get("feed", "rss")
     if kind == "reddit":
         return item.get("subreddit", "reddit")
-    if kind == "security":
-        return item.get("repo", "security")
     if kind == "hf_papers":
         return "HF Daily Papers"
     if kind == "leaderboard":
@@ -1405,6 +1335,11 @@ def queue_for_category(category: str) -> List[dict]:
             continue
         if item.get("sourceType") == "notion":
             continue
+        # Provider-status incidents are retired (classify_rss drops them); also
+        # drop any leftover backlog residue (their synthetic status.local url) so
+        # the cutover is immediate instead of waiting out the 48h TTL.
+        if (item.get("url") or "").startswith("https://status.local/"):
+            continue
         if category not in item.get("categories", []):
             continue
         if item.get("url") in posted_urls:
@@ -1423,8 +1358,6 @@ def queue_for_category(category: str) -> List[dict]:
 def source_bucket(item: dict) -> str:
     if item.get("sourceType") == "rss" and item.get("primaryCategory") == "ship":
         return repo_name_from_feed(item.get("sourceName", ""))
-    if item.get("sourceType") == "security":
-        return item.get("sourceName", "security")
     return item.get("sourceName", item.get("sourceType", "misc"))
 
 
@@ -1453,49 +1386,12 @@ def _same_topic(item: dict, picked: List[dict]) -> bool:
     return any(sig & _topic_tokens(p.get("title", "")) for p in picked)
 
 
-# Per-vendor daily cap on provider-status incidents. The Watch lane otherwise
-# posts every provider status blip (2026-06-22: "for the 50th time" — Anthropic
-# incidents posted near-daily). Dedup collapses repeats of the SAME incident;
-# this cap throttles the firehose of DISTINCT incidents from one vendor.
-STATUS_POSTS_PER_VENDOR_PER_DAY = 1
-
-
-def _status_vendor(item: dict) -> Optional[str]:
-    """The vendor slug for a provider-status item, or None for non-status items.
-    Status items carry the canonical dedup url from classify_rss's status branch
-    (https://status.local/<vendor>/<slug>); that's the clean signal."""
-    url = item.get("url", "") or ""
-    if not url.startswith("https://status.local/"):
-        return None
-    rest = url[len("https://status.local/"):]
-    return rest.split("/", 1)[0] or None
-
-
-def _vendor_status_already_posted_today(item: dict, state: dict) -> bool:
-    """True if this vendor already has STATUS_POSTS_PER_VENDOR_PER_DAY provider
-    incidents recorded for the current local day."""
-    vendor = _status_vendor(item)
-    if not vendor:
-        return False
-    today = local_day_key()
-    posts = state.get("statusPosts", [])
-    return sum(1 for p in posts
-               if p.get("vendor") == vendor and p.get("day") == today
-               ) >= STATUS_POSTS_PER_VENDOR_PER_DAY
-
-
 def bundle_for_category(category: str, limit: Optional[int] = None) -> List[dict]:
     items = queue_for_category(category)
     target = limit or CATEGORY_META[category]["default_limit"]
-    state = load_json(THREAD_STATE_FILE, {})
     picked: List[dict] = []
     bucket_counts: Dict[str, int] = {}
     bucket_cap = 1 if category == "ship" else 2 if category == "watch" else 3
-    # Track vendor status posts as we pick (in addition to the persisted state),
-    # so two distinct Anthropic incidents in the SAME bundle don't both sneak in.
-    vendor_status_today: Dict[str, int] = {}
-    state_vendors = {p.get("vendor") for p in state.get("statusPosts", [])
-                     if p.get("day") == local_day_key()}
 
     for item in items:
         bucket = source_bucket(item)
@@ -1503,13 +1399,6 @@ def bundle_for_category(category: str, limit: Optional[int] = None) -> List[dict
             continue
         if category != "ship" and _same_topic(item, picked):
             continue
-        # Per-vendor daily cap on provider-status incidents (Watch noise throttle).
-        sv = _status_vendor(item)
-        if sv is not None and category == "watch":
-            already = (1 if sv in state_vendors else 0) + vendor_status_today.get(sv, 0)
-            if already >= STATUS_POSTS_PER_VENDOR_PER_DAY:
-                continue
-            vendor_status_today[sv] = vendor_status_today.get(sv, 0) + 1
         picked.append(item)
         bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
         if len(picked) >= target:
@@ -1640,10 +1529,6 @@ def grounding_for_item(category: str, item: dict) -> str:
     in the prompt.
     """
     url = item.get("url", "") or ""
-    # Status incidents keep the real upstream link in 'sourceUrl' (the 'url'
-    # field is the canonical dedup key, e.g. https://status.local/...). Fetch
-    # the real link when present so grounding gets actual page content.
-    url = item.get("sourceUrl") or url
     if not url or "reddit.com" in url:
         return ""
     if "github.com" in url and "/releases/tag/" in url:
@@ -1898,23 +1783,6 @@ def compress_community_bundle(items: List[dict]) -> List[dict]:
     return non_reddit + merged
 
 
-def compress_watch_bundle(items: List[dict]) -> List[dict]:
-    advisories = [i for i in items if i.get("sourceType") == "security"]
-    non_advisories = [i for i in items if i.get("sourceType") != "security"]
-
-    if len(advisories) >= 2:
-        repo = advisories[0].get("sourceName", "watched repo")
-        repo_label = repo.split("/")[-1]
-        repo_label = display_repo_name(repo_label)
-        top = sorted(advisories, key=lambda x: -(x.get("score") or 0))
-        grouped = dict(top[0])
-        grouped["title"] = f"{repo_label} high-severity advisories ({len(advisories)})"
-        grouped["summary"] = f"Multiple high-severity advisories are active for {repo_label}; treat this as a review-now risk cluster instead of reading GHSA IDs one by one."
-        return [grouped] + non_advisories[: max(0, len(items) - 1)]
-
-    return items
-
-
 def category_take(category: str, items: List[dict]) -> str:
     if not items:
         return "No fresh backlog for this lane right now."
@@ -1931,8 +1799,6 @@ def source_badge(item: dict) -> str:
     source_type = item.get("sourceType")
     if source_type == "rss":
         return "release" if item.get("primaryCategory") == "ship" else "read"
-    if source_type == "security":
-        return "advisory"
     if source_type == "reddit":
         return "discussion"
     if source_type == "moltbook":
@@ -2011,9 +1877,7 @@ def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: 
     meta = CATEGORY_META[category]
     bundle = [hydrate_item(item) for item in bundle_for_category(category, limit)]
     
-    if category == "watch":
-        bundle = compress_watch_bundle(bundle)
-    elif category == "ship":
+    if category == "ship":
         bundle = compress_ship_bundle(bundle)
     elif category == "community":
         bundle = compress_community_bundle(bundle)
@@ -2035,10 +1899,7 @@ def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: 
     
     for item in bundle:
         title = display_title(item)
-        # Status incidents carry a canonical dedup url under 'url' (so repeated
-        # state updates of one incident collapse) but keep the real upstream
-        # link in 'sourceUrl' for display/grounding. Prefer the real link.
-        url = item.get('sourceUrl') or item['url']
+        url = item['url']
         
         # Short summary: first sentence, max 80 chars
         # Truncate at a word boundary with an ellipsis — a hard [:80] slice
@@ -2195,17 +2056,6 @@ def mark_posted(category: str, limit: Optional[int] = None, posted_items: Option
         "count": len(bundle),
     })
     state["publishLog"] = publish_log[-500:]
-    # Record provider-status incidents posted today, keyed by vendor + day, so
-    # bundle_for_category can throttle to STATUS_POSTS_PER_VENDOR_PER_DAY.
-    today = local_day_key()
-    status_posts = [p for p in state.get("statusPosts", []) if p.get("day") == today]
-    posted_vendors_today = {p.get("vendor") for p in status_posts}
-    for item in bundle:
-        sv = _status_vendor(item)
-        if sv and sv not in posted_vendors_today:
-            status_posts.append({"vendor": sv, "day": today})
-            posted_vendors_today.add(sv)
-    state["statusPosts"] = (list(state.get("statusPosts", [])) + status_posts)[-2000:]
     save_json(BACKLOG_FILE, backlog)
     save_json(THREAD_STATE_FILE, state)
     return bundle
@@ -2379,9 +2229,7 @@ def curator_input_bundle(category: str, limit: Optional[int] = None) -> dict:
     effective_limit = limit if limit is not None else CURATOR_INPUT_LIMIT
     raw_items = [hydrate_item(item) for item in bundle_for_category(category, effective_limit)]
 
-    if category == "watch":
-        raw_items = compress_watch_bundle(raw_items)
-    elif category == "ship":
+    if category == "ship":
         raw_items = compress_ship_bundle(raw_items)
     elif category == "community":
         raw_items = compress_community_bundle(raw_items)

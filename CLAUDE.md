@@ -1,6 +1,6 @@
 # ClawBytes — agent working notes
 
-ClawBytes is a signal aggregator for the AI coding-harness ecosystem. It collects from ~10 monitor classes, classifies every item into four editorial lanes (Ship / Watch / Read / Community), and publishes staggered lane bundles to the @clawbytes Telegram channel + a mirrored Slack channel. Read `README.md` for the public overview, `EDITORIAL_SCOPE.md` for what's in/out of scope, and `SOURCES.md` for the live source inventory + candidate decision log.
+ClawBytes is a signal aggregator for the AI coding-harness ecosystem. It collects from ~9 monitor classes, classifies every item into four editorial lanes (Ship / Watch / Read / Community), and publishes staggered lane bundles to the @clawbytes Telegram channel + a mirrored Slack channel. Read `README.md` for the public overview, `EDITORIAL_SCOPE.md` for what's in/out of scope, and `SOURCES.md` for the live source inventory + candidate decision log.
 
 ## Architecture in one breath
 
@@ -11,7 +11,7 @@ The split is the point: adding a source and tuning how items are routed are inde
 ## Hard invariants — break these and the channel breaks quietly
 
 1. **`repo_name_from_feed()` matches `REPO_PRIORITY` keys as substrings in dict-insertion order.** More-specific keys must precede more-general ones (`"claude agent sdk"` and `"claude code action"` before `"claude"`). Adding a substring-overlapping key in the wrong position silently mis-prioritizes releases.
-2. **Release / release-notes / status feeds bypass the keyword relevance gate** (`is_relevant()` in `claw-rss-monitor.py`): their titles are versions/dates/incidents with no keywords. The gate keys on `"releases"`, `"release notes"`, `"status"` in the feed name — name new feeds accordingly.
+2. **Release / release-notes feeds bypass the keyword relevance gate** (`is_relevant()` in `claw-rss-monitor.py`): their titles are versions/dates with no keywords. The gate keys on `"releases"`, `"release notes"` in the feed name — name new feeds accordingly. (Provider **status** feeds were retired 2026-06-24: `classify_rss` drops the status branch and the feeds were removed from `claw-rss-monitor.py`.)
 3. **Substring keyword traps.** `READ_TERMS`/`RELEVANCE_KEYWORDS` are substring-matched. Never add bare tokens that live inside common words (`"opus"`⊂corpus, `"droid"`⊂android, `"augment"`⊂augmentation, `"amp"`⊂example). Use anchored compounds (`"opus 4"`, `"augment code"`, `"amp news"`).
 4. **Per-item-unique URLs for diff-style sources** (leaderboards, registries, pagewatch). The publish dedup keys on URL via `postedUrls`; a bare page URL means the first movement posts and every future one is swallowed. Encode the change (date/leader/sha) into the id and url.
 5. **New monitors must baseline silently.** First sighting records state and emits nothing; only post-baseline diffs become items. Otherwise a new source dumps its entire backlog as "news" on first run.
