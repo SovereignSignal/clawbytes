@@ -67,6 +67,8 @@ There are **no routine status reports**. Ops DMs are exception-only: the admin h
 | `CLAWBYTES_CURATOR_URL` / `CLAWBYTES_CURATOR_MODEL` / `CLAWBYTES_CURATOR_API_KEY` | Curator backend (OpenAI-compatible; key falls back to `CLAWBYTES_LLM_API_KEY`). If unset, the curator uses the Claude CLI. | optional |
 | `CLAWBYTES_CURATOR_LANES` | Comma-separated lanes to curate (default all four) | optional |
 | `GITHUB_TOKEN` | Lifts GitHub API rate limits (release-note grounding, leaderboard/registry sha checks, discovery) | recommended |
+| `CLAWBYTES_NORMALIZE_SCORES` | `1` to rank a lane by within-source percentile (top-of-each-source is comparable) instead of raw score. Off = current behavior. | optional (A/B) |
+| `CLAWBYTES_RELEASE_DIFF` | `1` to add "changes since `<prev tag>`" context to GitHub release grounding, falling back to compare-endpoint commit subjects when notes are thin. Costs 1-2 extra API calls/ship item (wants `GITHUB_TOKEN`). Off = current behavior. | optional (A/B) |
 
 ## Local development
 
