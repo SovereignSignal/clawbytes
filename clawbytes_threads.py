@@ -1323,6 +1323,71 @@ def collect_into_backlog() -> dict:
     return {"added": len(added), "counts": counts, "items": added}
 
 
+def _flag_on(name: str) -> bool:
+    """Truthy env flag check, matching the scheduler's CLAWBYTES_PUBLISH gate."""
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _normalize_scores_enabled() -> bool:
+    """Opt-in (CLAWBYTES_NORMALIZE_SCORES) within-source score normalization.
+
+    Off by default so the live channel's ranking is unchanged until explicitly
+    enabled for an A/B."""
+    return _flag_on("CLAWBYTES_NORMALIZE_SCORES")
+
+
+def _norm_source_group(item: dict) -> str:
+    """Group items for normalization by source *type* — that's where the raw
+    score scales diverge (HN uses points ~0-600, ship uses REPO_PRIORITY bases
+    ~50-110, registries a flat ~58). Within a type the formula is shared, so
+    scores are already comparable."""
+    return item.get("sourceType") or "misc"
+
+
+def _percentile_ranks(scores: List[float]) -> List[float]:
+    """Map raw scores to within-group percentile in [0.0, 1.0].
+
+    Top score -> 1.0, bottom -> 0.0, ties share the mean of their positions.
+    A lone item -> 1.0: it is the top of its source, and the lane's per-source
+    bucket caps in bundle_for_category still stop one source from dominating —
+    this is the "bias toward a real move from a smaller harness" rule.
+    """
+    n = len(scores)
+    if n == 0:
+        return []
+    if n == 1:
+        return [1.0]
+    order = sorted(range(n), key=lambda i: scores[i])
+    ranks = [0.0] * n
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and scores[order[j + 1]] == scores[order[i]]:
+            j += 1
+        pr = ((i + j) / 2.0) / (n - 1)
+        for k in range(i, j + 1):
+            ranks[order[k]] = pr
+        i = j + 1
+    return ranks
+
+
+def apply_normalized_scores(items: List[dict]) -> List[dict]:
+    """Annotate each item with normScore = within-source percentile of its raw
+    score, so 'top of its source' is comparable across sources. Non-destructive:
+    the raw 'score' (used by min_top_score gates) is left untouched.
+    """
+    from collections import defaultdict
+
+    groups: Dict[str, List[dict]] = defaultdict(list)
+    for it in items:
+        groups[_norm_source_group(it)].append(it)
+    for grp in groups.values():
+        prs = _percentile_ranks([float(it.get("score") or 0) for it in grp])
+        for it, pr in zip(grp, prs):
+            it["normScore"] = round(pr, 4)
+    return items
+
+
 def queue_for_category(category: str) -> List[dict]:
     ensure_files()
     backlog = load_json(BACKLOG_FILE, {"items": []})
@@ -1352,6 +1417,13 @@ def queue_for_category(category: str) -> List[dict]:
     # so fall back to discoveredAt and order newest-first (stable two-pass sort).
     out.sort(key=lambda x: x.get("publishedAt") or x.get("discoveredAt") or "", reverse=True)
     out.sort(key=lambda x: -(x.get("score") or 0))
+    # Optional within-source normalization: promote each source's best item so a
+    # top-decile release ranks alongside a top-decile HN thread instead of losing
+    # to its raw point count. Applied as the primary key (raw score stays the
+    # tie-break) only when CLAWBYTES_NORMALIZE_SCORES is set.
+    if _normalize_scores_enabled():
+        apply_normalized_scores(out)
+        out.sort(key=lambda x: -(x.get("normScore") or 0))
     return out
 
 
@@ -1435,6 +1507,109 @@ def clean_release_notes(body: str) -> str:
     return "\n".join(lines)
 
 
+def _release_diff_enabled() -> bool:
+    """Opt-in (CLAWBYTES_RELEASE_DIFF) changelog diffing. Off by default: it
+    costs 1-2 extra GitHub API calls per ship item at publish time, so it wants
+    GITHUB_TOKEN and an explicit A/B before it touches the live channel."""
+    return _flag_on("CLAWBYTES_RELEASE_DIFF")
+
+
+def _github_get_json(api_url: str, headers: dict, timeout: int = 10):
+    """GET + JSON-decode a GitHub API URL. Raises on any transport/parse error;
+    callers degrade gracefully."""
+    req = Request(api_url, headers=headers)
+    with urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+def _previous_release_tag(releases: list, current_tag: str) -> Optional[str]:
+    """Given GitHub's newest-first releases list, return the published release
+    immediately preceding current_tag (skipping drafts/prereleases), or None."""
+    tags = [
+        r.get("tag_name")
+        for r in (releases or [])
+        if isinstance(r, dict) and r.get("tag_name") and not r.get("draft") and not r.get("prerelease")
+    ]
+    try:
+        idx = tags.index(current_tag)
+    except ValueError:
+        return None
+    return tags[idx + 1] if idx + 1 < len(tags) else None
+
+
+# Release-plumbing commit subjects that carry no operator-facing signal. Mirrors
+# the ship classifier's chore/ci/build title filtering, plus release-bot churn
+# (version-bump commits and their reverts) that dominates auto-published tags.
+_COMMIT_NOISE = re.compile(
+    r"^(?:revert\b|merge\b|chore\(release\)|chore\(deps\)|chore:|ci:|build:|"
+    r"bump |release version|version bump)",
+    re.IGNORECASE,
+)
+
+
+def _compare_commit_lines(compare_json: dict, limit: int = 8) -> str:
+    """Distill a GitHub compare response into de-duped commit subject bullets.
+
+    Used when a release ships with thin/empty notes: the commit subjects between
+    the two tags are the only substance available. Drops merges, release-bot
+    churn, and the same boilerplate clean_release_notes strips; trims trailing
+    "(#123)" refs."""
+    commits = compare_json.get("commits") or []
+    lines: List[str] = []
+    for c in commits:
+        if not isinstance(c, dict):
+            continue
+        msg = ((c.get("commit") or {}).get("message") or "").strip()
+        if not msg:
+            continue
+        subject = msg.splitlines()[0].strip()
+        if not subject or _COMMIT_NOISE.search(subject) or RELEASE_NOTE_NOISE.search(subject):
+            continue
+        subject = re.sub(r"\s*\(#\d+\)\s*$", "", subject).strip()
+        if subject and subject not in lines:
+            lines.append(subject)
+        if len(lines) >= limit:
+            break
+    return "\n".join(f"- {ln}" for ln in lines)
+
+
+def _compose_release_diff(body: str, prev_tag: str, commit_block: str) -> str:
+    """Assemble diff-aware grounding: a 'changes since <prev>' header, the
+    cleaned release body when present, and commit bullets when the body was
+    thin. Bounded to the same ~900 char budget fetch_release_body uses."""
+    parts = [f"(changes since {prev_tag})"]
+    if body:
+        parts.append(body)
+    if commit_block:
+        parts.append(f"Commits since {prev_tag}:\n{commit_block}")
+    out = "\n".join(parts).strip()
+    return out[:900]
+
+
+def _augment_with_release_diff(owner: str, repo: str, tag: str, body: str, headers: dict) -> str:
+    """Add previous-version context to a release body. Returns body unchanged on
+    any failure so ship grounding never regresses below the non-diff path."""
+    try:
+        releases = _github_get_json(
+            f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=30", headers
+        )
+    except Exception:
+        return body
+    prev_tag = _previous_release_tag(releases, tag)
+    if not prev_tag:
+        return body
+    commit_block = ""
+    if len(body) < 80:  # thin/empty notes → pull commit subjects for substance
+        try:
+            comp = _github_get_json(
+                f"https://api.github.com/repos/{owner}/{repo}/compare/{prev_tag}...{tag}", headers
+            )
+            commit_block = _compare_commit_lines(comp)
+        except Exception:
+            commit_block = ""
+    return _compose_release_diff(body, prev_tag, commit_block)
+
+
 def fetch_release_body(url: str) -> str:
     """Fetch and distill GitHub release notes for LLM grounding."""
     # https://github.com/owner/repo/releases/tag/v1.0 -> https://api.github.com/repos/owner/repo/releases/tags/v1.0
@@ -1450,12 +1625,11 @@ def fetch_release_body(url: str) -> str:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
-        req = Request(api_url, headers=headers)
-        with urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-        body = clean_release_notes((data.get("body") or "").strip())
+        body = clean_release_notes((_github_get_json(api_url, headers).get("body") or "").strip())
         if len(body) > 900:
             body = body[:897] + "..."
+        if _release_diff_enabled():
+            body = _augment_with_release_diff(owner, repo, tag, body, headers)
         return body
     except Exception:
         return ""
