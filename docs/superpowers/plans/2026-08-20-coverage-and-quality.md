@@ -339,7 +339,7 @@ The actual coverage expansion for sources we already fetch.
       and ACP next to MCP. Curator picks this up with no other change.
 - [x] `SOURCES.md`: mark Windsurf blog stale; log this research round.
 
-### PR B — Ops flags + yield snapshot (config + tiny code)
+### PR B — Ops flags + yield snapshot (config + tiny code) — merged #15
 
 - [ ] Enable `CLAWBYTES_NORMALIZE_SCORES=1` and
       `CLAWBYTES_RELEASE_DIFF=1` on Railway after a local
@@ -352,12 +352,12 @@ The actual coverage expansion for sources we already fetch.
 
 ### PR C — New sources that have a machine URL today
 
-- [ ] ACP `releases.atom` with alpha-filter (C3). Validate it does
+- [x] ACP `releases.atom` with alpha-filter (C3). Validate it does
       not dump 3 crate bumps/week into Ship; if it does, keep only
       `Schema v1.*` titles or raise it to Read.
-- [ ] Antigravity pagewatch (C2). Prefer `.md`; else heading hash.
+- [x] Antigravity pagewatch (C2). Prefer `.md`; else heading hash.
       Silent baseline.
-- [ ] Terminal-Bench 2.1 leaderboard if a sha-gateable file exists
+- [x] Terminal-Bench 2.1 leaderboard if a sha-gateable file exists
       (C4). Else note "still passed — no file" in `SOURCES.md`.
 
 ### PR D — Watch rebuild

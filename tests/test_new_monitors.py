@@ -83,6 +83,52 @@ def test_rss_relevance_bypasses_coding_agent_changelogs():
     assert not rss.is_relevant(entry, "GitHub Changelog", tags=["developer-tools", "official"])
 
 
+def test_acp_release_feed_is_wired_and_bypasses_keyword_gate():
+    names = {f["name"]: f for f in rss.RSS_FEEDS}
+    assert "Agent Client Protocol Releases" in names
+    assert names["Agent Client Protocol Releases"]["url"].endswith(
+        "agent-client-protocol/releases.atom"
+    )
+    # Version-only titles must still enter the backlog (invariant 2).
+    assert rss.is_relevant({"title": "Schema v1.20.0", "summary": ""}, "Agent Client Protocol Releases")
+
+
+def test_antigravity_html_watch_is_wired():
+    keys = {w["key"] for w in pw.HTML_WATCHES}
+    assert "antigravity-changelog" in keys
+    watch = next(w for w in pw.HTML_WATCHES if w["key"] == "antigravity-changelog")
+    assert watch["fingerprint"] == "headings"
+    assert watch["html"] == "https://antigravity.google/changelog"
+
+
+def test_html_heading_fingerprint_ignores_bundle_hash(tmp_path, monkeypatch):
+    # Full-page hash would fire on every Astro redeploy. Hash headings only.
+    monkeypatch.setattr(pw, "STATE_FILE", tmp_path / "pw-state.json")
+    monkeypatch.setattr(pw, "MD_WATCHES", [])
+    monkeypatch.setattr(pw, "SITEMAP_WATCHES", [])
+    monkeypatch.setattr(pw, "HTML_WATCHES", [{
+        "key": "ag", "label": "Google Antigravity",
+        "html": "https://antigravity.google/changelog",
+        "page": "https://antigravity.google/changelog",
+        "heading": r"<h3[^>]*>([^<]+)</h3>",
+        "fingerprint": "headings",
+        "lane": "ship",
+    }])
+    pages = [
+        '<script src="/_astro/a.js"></script><h3>Alpha</h3>',
+        '<script src="/_astro/b.js"></script><h3>Alpha</h3>',
+        '<script src="/_astro/c.js"></script><h3>Beta</h3>',
+    ]
+    it = iter(pages)
+    monkeypatch.setattr(pw, "fetch_text", lambda url, timeout=30: next(it))
+    assert pw.check_pages(verbose=False) == []          # baseline
+    assert pw.check_pages(verbose=False) == []          # bundle hash changed, headings did not
+    items = pw.check_pages(verbose=False)
+    assert len(items) == 1
+    assert "Beta" in items[0]["title"]
+    assert items[0]["url"].startswith("https://antigravity.google/changelog#updated-")
+
+
 def _found(extra):
     base = {"found_at": datetime.now(timezone.utc).isoformat()}
     base.update(extra)
@@ -124,6 +170,7 @@ def test_pagewatch_md_url_unique_per_change(tmp_path, monkeypatch):
         "key": "fake", "label": "Fake", "md": "https://x/y.md",
         "page": "https://x/y", "heading": r"^##\s+(.+)$", "lane": "ship",
     }])
+    monkeypatch.setattr(pw, "HTML_WATCHES", [])
     monkeypatch.setattr(pw, "SITEMAP_WATCHES", [])
     contents = iter(["## v1\nbody", "## v2\nbody2", "## v3\nbody3"])
     monkeypatch.setattr(pw, "fetch_text", lambda url, timeout=30: next(contents))

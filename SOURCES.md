@@ -10,16 +10,16 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 
 | Class | What | Defined in | Cadence |
 |---|---|---|---|
-| RSS/Atom feeds | ~54 feeds: vendor blogs, changelogs (Cursor, GitHub/Copilot, Zed), GitHub `releases.atom` for harnesses/SDKs/frameworks, research blogs, ArXiv cs.AI/cs.CL | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
+| RSS/Atom feeds | ~55 feeds: vendor blogs, changelogs (Cursor, GitHub/Copilot, Zed), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol), research blogs, ArXiv cs.AI/cs.CL | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
 | GitHub releases (API) | Curated + auto-discovered repos, merged via `claw-ecosystem-sources.json` | `scripts/claw-ecosystem-monitor.sh` | 30 min |
 | HF Daily Papers | huggingface.co/papers via `api/daily_papers`, keyword-scored into lanes | `scripts/claw-hf-papers.py` | 30 min |
 | Reddit | r/openclaw, r/ClaudeAI, r/ClaudeCode, r/cursor, r/ChatGPTCoding, r/AI_Agents, r/mcp + targeted searches in r/LocalLLaMA, r/selfhosted | `scripts/claw-reddit-monitor.py` (`SUBREDDITS`) | 30 min |
 | Hacker News | Algolia queries (harness/agent/MCP terms), 14-day window | `scripts/claw-hn-monitor.py`, `claw-ecosystem-monitor.sh` | 30 min |
 | Moltbook | Community posts, HTML scrape | `scripts/claw-moltbook-monitor.py` | 30 min |
 | Discovery | GitHub topic/keyword search, awesome lists (awesome-ai-agents, awesome-agents, awesome-mcp-servers, awesome-claude-code, awesome-code-ai); subreddit/HN discovery queries are harness-scoped (no "machine learning news") | `claw-ecosystem-monitor.sh --mode discover`, `claw-source-discovery.py` | weekly (Mon 14:10 UTC) |
-| Leaderboards | SWE-bench (Verified, bash-only), Aider polyglot, LiveBench — emits only on top-3 movement, sha-gated fetches | `scripts/claw-leaderboard-monitor.py` (`BOARDS`) | 30 min |
+| Leaderboards | SWE-bench (Verified, bash-only), Aider polyglot, LiveBench, Terminal-Bench 2.1 — emits only on top-3 movement, sha-gated fetches | `scripts/claw-leaderboard-monitor.py` (`BOARDS`) | 30 min |
 | Registries | OpenRouter model list (id diff = minutes-level new-model detection), LiteLLM pricing registry (sha-gated key diff), HF trending (weekly, coding/agent filter) | `scripts/claw-registry-monitor.py` | 30 min |
-| Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + sitemap slug diffs (Anthropic news/engineering, DeepSeek news) | `scripts/claw-pagewatch-monitor.py` | 30 min |
+| Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + Antigravity HTML heading-hash + sitemap slug diffs (Anthropic news/engineering, DeepSeek news) | `scripts/claw-pagewatch-monitor.py` | 30 min |
 | Bluesky | Phrase search ("claude code", "codex cli", "openclaw", "mcp server", "agent harness"), engagement-gated | `scripts/claw-bsky-monitor.py` | 30 min |
 
 Discovered repos/feeds/subreddits land in `claw-ecosystem-sources.json` /
@@ -63,8 +63,9 @@ release notes (.md hash); Anthropic sitemap (news/engineering); Devin CLI
 changelog (.md); xAI release notes (.md); DeepSeek news sitemap; Bluesky
 search (api.bsky.app, engagement-gated).
 
-**Passed** — Terminal-Bench (data behind private Supabase RPC; revisit if
-they publish); LMArena (no machine source since the HF space went stale);
+**Passed** — Terminal-Bench (data behind private Supabase RPC; **reopened
+2026-08-20** — submissions now live in `harbor-framework/terminal-bench-2-1`,
+see below); LMArena (no machine source since the HF space went stale);
 SWE-bench Pro / MCPMark / Windsurf changelog (data embedded in page JS —
 needs an RSC-extractor class; deferred); OSWorld (xlsx-only, needs openpyxl);
 GAIA (near-saturated benchmark); BigCodeBench + llm-stats (dead repos); METR
@@ -93,10 +94,11 @@ or `"release notes"`, so Cursor Changelog / Amp News / Copilot Changelog
 work (routing, `REPO_PRIORITY`, tutorial-term contradiction, GHSA Watch
 rebuild, enable `#12` flags) before adding more feeds.
 
-**Added (proposed, not yet in code)** — Agent Client Protocol
-`releases.atom` (HTTP 200; filter alphas / crate-churn); Google
-Antigravity changelog (SPA, no RSS — pagewatch); Terminal-Bench 2.1
-revisit (public board + `harbor-framework/terminal-bench-2-1`).
+**Added** — Agent Client Protocol `releases.atom` (Schema v1.* only; rust
+crate bumps and v2 alphas dropped); Google Antigravity changelog (HTML
+heading-hash pagewatch, silent baseline — no `.md` sibling); Terminal-Bench
+2.1 (`harbor-framework/terminal-bench-2-1` submissions dir, sha-gated,
+emit on top-3 movement).
 
 **Covered, but misrouted or stale** — Cursor Changelog, Amp News, Copilot
 Changelog, Warp/Replit/Augment/JetBrains blogs were misrouted to Read
@@ -111,7 +113,9 @@ the 2026-06-02 Devin Desktop rebrand).
 harness queries (`coding agent`, `claude code`, `mcp server`,
 `agent harness`) and the live HN query for Antigravity / Devin Desktop /
 ACP. Dropped generic-ML subs stay excluded so they cannot be re-added.
-(429 on this probe — don't add; release-notes RSS is enough);
+
+**Passed** — Antigravity `/blog/rss.xml` (404); Devin blog `/blog/rss.xml`
+(429 on an earlier probe — don't add; release-notes RSS is enough);
 MCP registry firehose, X/Discord, provider status, HF Spaces — unchanged.
 r/Devin still passed pending an operator-grade sub after the rebrand.
 

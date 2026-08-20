@@ -30,7 +30,7 @@ Deployed on Railway as a single always-on container running `scripts/scheduler.p
 
 ## Source classes
 
-The authoritative, current list with file references is in [`SOURCES.md`](SOURCES.md). In brief: RSS/Atom feeds (vendor blogs, changelogs, GitHub `releases.atom`, research, ArXiv), Reddit, Hacker News, HuggingFace Daily Papers, weekly **discovery** (GitHub topics, awesome-list diffs), benchmark **leaderboards** (SWE-bench, Aider, LiveBench — sha-gated, emit on top-3 movement only), model **registries** (OpenRouter, LiteLLM pricing, HF trending), **feedless pages** (Mintlify `.md` hashes + sitemap slug diffs for Anthropic/Claude/Devin CLI/xAI/DeepSeek), and **Bluesky** phrase search.
+The authoritative, current list with file references is in [`SOURCES.md`](SOURCES.md). In brief: RSS/Atom feeds (vendor blogs, changelogs, GitHub `releases.atom`, research, ArXiv), Reddit, Hacker News, HuggingFace Daily Papers, weekly **discovery** (GitHub topics, awesome-list diffs), benchmark **leaderboards** (SWE-bench, Aider, LiveBench, Terminal-Bench 2.1 — sha-gated, emit on top-3 movement only), model **registries** (OpenRouter, LiteLLM pricing, HF trending), **feedless pages** (Mintlify `.md` hashes, Antigravity HTML heading-hash, sitemap slug diffs for Anthropic/Claude/Devin CLI/xAI/DeepSeek), and **Bluesky** phrase search.
 
 ## Scheduler jobs
 
