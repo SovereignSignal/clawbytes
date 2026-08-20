@@ -17,6 +17,8 @@ def _load(name, filename):
 reg = _load("claw_registry_monitor", "claw-registry-monitor.py")
 pw = _load("claw_pagewatch_monitor", "claw-pagewatch-monitor.py")
 bsky = _load("claw_bsky_monitor", "claw-bsky-monitor.py")
+rss = _load("claw_rss_monitor", "claw-rss-monitor.py")
+hn = _load("claw_hn_monitor", "claw-hn-monitor.py")
 
 
 def test_registry_diff_baseline_is_silent():
@@ -57,6 +59,28 @@ def test_bsky_engagement_gate_and_url():
     assert not bsky.passes_engagement({"likeCount": 5, "repostCount": 2})
     post = {"author": {"handle": "dev.bsky.social"}, "uri": "at://did:plc:x/app.bsky.feed.post/3kabc"}
     assert bsky.post_web_url(post) == "https://bsky.app/profile/dev.bsky.social/post/3kabc"
+
+
+def test_bsky_queries_cover_2026_harness_names():
+    blob = " ".join(bsky.QUERIES).lower()
+    for phrase in ("cursor", "devin desktop", "antigravity", "agent client protocol"):
+        assert phrase in blob, f"Bluesky queries missing {phrase!r}"
+
+
+def test_hn_queries_cover_2026_harness_names():
+    blob = " ".join(q["query"] for q in hn.HN_QUERIES).lower()
+    for phrase in ("antigravity", "devin desktop", "agent client protocol"):
+        assert phrase in blob, f"HN queries missing {phrase!r}"
+
+
+def test_rss_relevance_bypasses_coding_agent_changelogs():
+    # Changelog titles are often feature names with no ecosystem keywords
+    # ("Origin Code Hosting"). Without a bypass they never reach classify_rss.
+    entry = {"title": "Origin Code Hosting", "summary": ""}
+    assert rss.is_relevant(entry, "Cursor Changelog", tags=["coding-agent", "official"])
+    assert rss.is_relevant(entry, "Amp News", tags=["coding-agent", "official"])
+    # Generic GitHub changelog stays keyword-gated.
+    assert not rss.is_relevant(entry, "GitHub Changelog", tags=["developer-tools", "official"])
 
 
 def _found(extra):

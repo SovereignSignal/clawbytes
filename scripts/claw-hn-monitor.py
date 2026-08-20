@@ -31,6 +31,7 @@ HN_QUERIES = [
     {"query": "MCP model context protocol", "tags": "story", "min_points": 5},
     {"query": "AI assistant local self-hosted", "tags": "story", "min_points": 10},
     {"query": "claude code OR cursor OR windsurf OR copilot", "tags": "story", "min_points": 15},
+    {"query": "antigravity OR \"devin desktop\" OR \"agent client protocol\"", "tags": "story", "min_points": 10},
     # Security/watch
     {"query": "AI agent security vulnerability", "tags": "story", "min_points": 5},
     {"query": "LLM prompt injection exploit", "tags": "story", "min_points": 5},
