@@ -81,6 +81,38 @@ r/aipromptprogramming, r/AgentsOfAI (consumer/showcase/dead); dev.to/t/ai
 **Borderline, revisit on audit evidence** — r/LLMDevs (~25% in-scope),
 AICodeKing YouTube (fast but clickbait/daily).
 
+### 2026-08-20 coverage/quality research
+
+Full ranking and PR sequence:
+`docs/superpowers/plans/2026-08-20-coverage-and-quality.md`.
+
+Headline: the June widening already fetched the important closed-source
+harnesses; `classify_rss` only Ships feed names containing `"releases"`
+or `"release notes"`, so Cursor Changelog / Amp News / Copilot Changelog
+(all HTTP 200, Cursor posting as of 2026-08-19) land in **Read**. Quality
+work (routing, `REPO_PRIORITY`, tutorial-term contradiction, GHSA Watch
+rebuild, enable `#12` flags) before adding more feeds.
+
+**Added (proposed, not yet in code)** — Agent Client Protocol
+`releases.atom` (HTTP 200; filter alphas / crate-churn); Google
+Antigravity changelog (SPA, no RSS — pagewatch); Terminal-Bench 2.1
+revisit (public board + `harbor-framework/terminal-bench-2-1`).
+
+**Covered, but misrouted or stale** — Cursor Changelog, Amp News, Copilot
+Changelog, Warp/Replit/Augment/JetBrains blogs (misrouted to Read);
+Devin Release Notes RSS is the live Cognition changelog (through
+2026-08-19); `windsurf.com/feed.xml` last item 2026-05-12 (stale after
+the 2026-06-02 Devin Desktop rebrand).
+
+**Passed** — Antigravity `/blog/rss.xml` (404); Devin blog `/blog/rss.xml`
+(429 on this probe — don't add; release-notes RSS is enough);
+MCP registry firehose, X/Discord, provider status, HF Spaces — unchanged.
+r/Devin still passed pending an operator-grade sub after the rebrand.
+
+**Retired line-item** — scheduled Monday 15:45 ingestion-audit DM. The
+`audit` CLI and `send-clawbytes-audit` still exist for on-demand use;
+`scheduler.py` does not run them (ops DMs stay exception-only).
+
 **Retired** — 2026-06-24 · the six provider **status feeds** (Anthropic,
 OpenAI, Cursor, GitHub, HF, OpenRouter) and the **security-advisory monitor**
 (`claw-security-monitor.py`; GitHub advisories + Brave CVE search). Provider
