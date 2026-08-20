@@ -99,7 +99,9 @@ Antigravity changelog (SPA, no RSS — pagewatch); Terminal-Bench 2.1
 revisit (public board + `harbor-framework/terminal-bench-2-1`).
 
 **Covered, but misrouted or stale** — Cursor Changelog, Amp News, Copilot
-Changelog, Warp/Replit/Augment/JetBrains blogs (misrouted to Read);
+Changelog, Warp/Replit/Augment/JetBrains blogs were misrouted to Read
+until the 2026-08-20 routing PR (`classify_rss` now Ships coding-agent
+changelog/news/blog feeds; `REPO_PRIORITY` includes Devin/Amp/Copilot/…).
 Devin Release Notes RSS is the live Cognition changelog (through
 2026-08-19); `windsurf.com/feed.xml` last item 2026-05-12 (stale after
 the 2026-06-02 Devin Desktop rebrand).

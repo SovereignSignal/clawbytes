@@ -143,6 +143,7 @@ RELEVANCE_KEYWORDS = [
     "opus 4", "opus 5", "devin", "junie", "mellum", "codestral",
     "replit agent", "agent mode", "augment code", "amp news",
     "warp blog", "jetbrains", "sourcegraph",
+    "devin desktop", "antigravity", "agent client protocol",
 ]
 
 def load_state():
@@ -269,13 +270,24 @@ def parse_feed(xml_text):
             entries = parse_rss(xml_text)
         return entries
 
-def is_relevant(entry, feed_name):
+def is_relevant(entry, feed_name, tags=None):
     """Check if entry is relevant to OpenClaw ecosystem."""
-    # Release and release-notes feeds are always relevant: their entry titles
-    # are versions/dates that carry no keywords. (Provider status feeds were
-    # retired 2026-06-24, so "status" is no longer a relevance marker.)
+    # Release, release-notes, and coding-agent changelog/news feeds are always
+    # relevant: their entry titles are versions, dates, or feature names that
+    # often carry no keywords. (Provider status feeds were retired 2026-06-24.)
+    # Do NOT bypass the generic "GitHub Changelog" — only Cursor/Copilot
+    # changelogs and coding-agent-tagged news/changelog feeds.
     low_name = feed_name.lower()
+    tagset = {str(t).lower() for t in (tags or [])}
     if any(marker in low_name for marker in ("releases", "release notes")):
+        return True
+    if "coding-agent" in tagset and (
+        "changelog" in low_name or low_name.endswith(" news") or " news" in f" {low_name}"
+    ):
+        return True
+    if "changelog" in low_name and any(v in low_name for v in ("cursor", "copilot")):
+        return True
+    if low_name == "amp news":
         return True
     
     # Check title and summary for keywords
@@ -337,7 +349,7 @@ def check_feeds(filter_relevant=True, verbose=True):
                 continue
             
             # Check relevance
-            if filter_relevant and not is_relevant(entry, name):
+            if filter_relevant and not is_relevant(entry, name, tags):
                 continue
             
             new_items.append({

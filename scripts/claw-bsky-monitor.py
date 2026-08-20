@@ -22,7 +22,10 @@ MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory
 STATE_FILE = MEMORY_DIR / "claw-bsky-state.json"
 
 HOSTS = ["https://api.bsky.app", "https://public.api.bsky.app"]
-QUERIES = ['"claude code"', '"codex cli"', '"openclaw"', '"mcp server"', '"agent harness"']
+QUERIES = [
+    '"claude code"', '"codex cli"', '"openclaw"', '"mcp server"', '"agent harness"',
+    '"cursor"', '"devin desktop"', '"antigravity"', '"agent client protocol"',
+]
 
 MIN_LIKES = 20
 MIN_REPOSTS = 10

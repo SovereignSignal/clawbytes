@@ -37,3 +37,17 @@ def test_round2_subreddits_are_allowed():
         assert sub in ct.ALLOWED_SUBREDDITS, f"{sub} missing"
     candidate = ct.classify_reddit(_item("GithubCopilot", title="Copilot usage-based billing changes"))
     assert candidate is not None
+
+
+def test_tutorial_reddit_stays_community_not_read():
+    # EDITORIAL_SCOPE excludes tutorials/explainers. "how to"/"tutorial"/"guide"
+    # used to match READ_REDDIT_TERMS and misroute pedagogy into Read.
+    candidate = ct.classify_reddit(_item(
+        "mcp",
+        title="How to build your first MCP server tutorial guide",
+        score=80,
+        comments=20,
+    ))
+    assert candidate is not None
+    assert candidate["primaryCategory"] == "community"
+    assert "read" not in candidate["categories"]

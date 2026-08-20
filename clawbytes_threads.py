@@ -115,12 +115,23 @@ REPO_PRIORITY = {
     "claude code action": 67,
     "claude": 66,
     "cursor": 64,
+    "copilot": 64,
+    "devin desktop": 64,  # before "devin"
+    "devin": 64,
+    "antigravity": 64,
+    "amp news": 64,  # compound — bare "amp" is a substring trap
     "gemini": 62,
+    "factory": 62,
+    "windsurf": 62,
     "opencode": 60,
     "openai-agents": 60,
+    "agent client protocol": 60,  # compound — not bare "acp"
     "openhands": 58,
     "aider": 58,
     "mcp": 58,
+    "warp blog": 58,
+    "replit": 58,
+    "augment code": 58,
     "cline": 56,
     "vercel-ai": 56,
     "roo code": 55,
@@ -128,6 +139,8 @@ REPO_PRIORITY = {
     "goose": 54,
     "qwen code": 54,
     "smolagents": 54,
+    "junie": 56,  # before "jetbrains"
+    "jetbrains": 56,
     "e2b": 52,
     "crush": 50,
     "anthropic-sdk": 58,
@@ -135,6 +148,22 @@ REPO_PRIORITY = {
     "python-genai": 54,
     "agent framework": 54,
 }
+
+# Vendor changelogs/blogs whose feed names are not "releases"/"release notes".
+# Exact feed-name match covers backlog items that landed without tags;
+# the coding-agent tag path covers new feeds without editing this tuple.
+CHANGELOG_SHIP_FEED_NAMES = (
+    "cursor changelog",
+    "github copilot changelog",
+    "amp news",
+    "windsurf blog",
+    "warp blog",
+    "replit blog",
+    "augment code blog",
+    "jetbrains ai blog",
+    "jetbrains junie blog",
+    "zed blog",
+)
 
 def _load_dynamic_subreddits():
     """Load dynamically discovered subreddits."""
@@ -158,9 +187,10 @@ ALLOWED_SUBREDDITS = {
     "codex", "anthropic", "githubcopilot", "windsurf",
 } | _load_dynamic_subreddits()
 
-# Reddit topics that belong in Read, not Community
+# Reddit topics that belong in Read, not Community.
+# Do NOT include "how to"/"tutorial"/"guide" — EDITORIAL_SCOPE excludes pedagogy.
 READ_REDDIT_TERMS = [
-    "how to", "tutorial", "guide", "workflow", "setup", "config",
+    "workflow", "setup", "config",
     "comparison", "vs", "benchmark", "review", "deep dive",
     "architecture", "internals", "explained", "behind the",
     "what i learned", "lessons", "experience report",
@@ -193,9 +223,9 @@ READ_TERMS = [
     # Round 2 (2026-06-12): vendor-blog vocabulary. Substring-matched — use
     # anchored compounds for trap tokens ("opus" is in "corpus", "droid" in
     # "android", "augment" in "augmentation").
-    "opus 4", "opus 5", "devin", "junie", "codestral", "mistral",
+    "opus 4", "opus 5", "devin desktop", "devin", "junie", "codestral", "mistral",
     "replit", "augment code", "amp news", "warp blog", "jetbrains",
-    "sourcegraph",
+    "sourcegraph", "antigravity", "agent client protocol",
 ]
 
 
@@ -375,6 +405,19 @@ def display_repo_name(repo: str) -> str:
         "openai-python": "OpenAI SDK",
         "python-genai": "Google GenAI SDK",
         "agent framework": "MS Agent Framework",
+        "copilot": "Copilot",
+        "devin desktop": "Devin Desktop",
+        "devin": "Devin",
+        "antigravity": "Antigravity",
+        "amp news": "Amp",
+        "factory": "Factory",
+        "windsurf": "Windsurf",
+        "warp blog": "Warp",
+        "replit": "Replit",
+        "augment code": "Augment Code",
+        "junie": "Junie",
+        "jetbrains": "JetBrains",
+        "agent client protocol": "ACP",
     }.get(repo, repo.title())
 
 
@@ -449,6 +492,24 @@ def is_minor_release(title: str) -> bool:
     return False
 
 
+def is_coding_agent_changelog(item: dict) -> bool:
+    """True when this RSS item is a closed-source harness changelog/news/blog.
+
+    `classify_rss` only special-cased feed names containing "releases" /
+    "release notes", so Cursor Changelog / Amp News / Copilot Changelog were
+    falling through to Read. Tags are the real signal — a bare "blog" must not
+    Ship LangChain/Mistral. The name tuple covers backlog items that landed
+    without tags.
+    """
+    feed = (item.get("feed") or "").lower().strip()
+    if feed in CHANGELOG_SHIP_FEED_NAMES:
+        return True
+    tags = {str(t).lower() for t in (item.get("tags") or [])}
+    if "coding-agent" not in tags:
+        return False
+    return "changelog" in feed or "blog" in feed or feed.endswith(" news") or " news" in f" {feed}"
+
+
 def classify_rss(item: dict) -> Optional[dict]:
     feed = item.get("feed", "")
     title = item.get("title", "")
@@ -471,24 +532,37 @@ def classify_rss(item: dict) -> Optional[dict]:
         # falling through (instead of returning here) would misroute it to Read.
         return None
 
-    if "release notes" in feed_low:
-        # Mintlify-style changelogs title entries by date ("June 10, 2026") —
-        # prefix the vendor so the line is meaningful; grounding fetches the
-        # page content for the enrichment pass.
-        vendor = re.sub(r"\s*release notes\s*$", "", feed, flags=re.IGNORECASE).strip() or feed
-        score = 55 + age_score(dt, 96) / 8
+    if "release notes" in feed_low or is_coding_agent_changelog(item):
+        # Mintlify-style changelogs title entries by date ("June 10, 2026")
+        # and vendor blogs title by feature — prefix the vendor when it's not
+        # already in the title. Score from REPO_PRIORITY so Cursor/Devin/Amp
+        # clear Ship window 1 (58) without leaning on the age bonus.
+        repo = repo_name_from_feed(feed)
+        vendor = display_repo_name(repo)
+        if repo not in REPO_PRIORITY:
+            stripped = re.sub(
+                r"\s*(release notes|changelog|blog|news)\s*$",
+                "",
+                feed,
+                flags=re.IGNORECASE,
+            ).strip()
+            vendor = stripped or feed
+        base_score = REPO_PRIORITY.get(repo, 55)
+        score = base_score + age_score(dt, 96) / 8
+        display_title = title if vendor.lower() in (title or "").lower() else f"{vendor}: {title}"
+        kind = "release notes update" if "release notes" in feed_low else "changelog update"
         return {
             "primaryCategory": "ship",
             "categories": ["ship"],
             "score": round(score, 2),
-            "summary": f"{vendor} release notes update",
+            "summary": f"{vendor} {kind}",
             "expiresAt": (dt or now_utc()) + timedelta(hours=CATEGORY_META["ship"]["ttl_hours"]),
             "publishedAt": dt,
             "sourceType": "rss",
             "sourceName": feed,
             "sourceId": item.get("id", url),
             "url": url,
-            "title": f"{vendor}: {title}",
+            "title": display_title,
         }
 
     if "releases" in feed_low:
