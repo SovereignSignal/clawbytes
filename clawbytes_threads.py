@@ -1305,10 +1305,75 @@ def audit_sources(category: Optional[str] = None, limit: int = 40) -> dict:
         "reasonCounts": reason_counts,
         "sourceCounts": source_counts,
         "laneCounts": lane_counts,
+        "bySourceName": rollup_by_source_name(rows),
         "currentBundles": {cat: [{"title": item.get("title"), "score": item.get("score"), "source": item.get("sourceName")} for item in bundle_for_category(cat)] for cat in CATEGORY_META},
         "unconsumedStateFiles": unconsumed_state_report(),
         "items": rows[:limit],
     }
+
+
+YIELD_HISTORY_LIMIT = 8
+SOURCE_YIELD_FILE = MEMORY / "claw-source-yield.json"
+
+
+def rollup_by_source_name(rows: list) -> Dict[str, dict]:
+    """Per-feed/subreddit counts from a full audit row list (before item limit)."""
+    out: Dict[str, dict] = {}
+    for row in rows:
+        name = row.get("sourceName") or "(unnamed)"
+        bucket = out.get(name)
+        if bucket is None:
+            bucket = {
+                "sourceType": row.get("sourceType") or "",
+                "total": 0,
+                "would_add": 0,
+                "skipped": 0,
+                "rejected": 0,
+            }
+            out[name] = bucket
+        bucket["total"] += 1
+        status = row.get("status")
+        if status in ("would_add", "skipped", "rejected"):
+            bucket[status] += 1
+        lane = row.get("primaryCategory")
+        if lane and status in {"would_add", "skipped"}:
+            lanes = bucket.setdefault("lanes", {})
+            lanes[lane] = lanes.get(lane, 0) + 1
+    return out
+
+
+def source_yield_snapshot(report: dict, *, written_at: Optional[str] = None) -> dict:
+    """Compact audit rollup — no per-item payload, never meant to be posted."""
+    return {
+        "writtenAt": written_at or now_utc().isoformat(),
+        "lastCollectedAt": report.get("lastCollectedAt"),
+        "rawItems": report.get("rawItems", 0),
+        "statusCounts": report.get("statusCounts") or {},
+        "reasonCounts": report.get("reasonCounts") or {},
+        "sourceCounts": report.get("sourceCounts") or {},
+        "laneCounts": report.get("laneCounts") or {},
+        "bySourceName": report.get("bySourceName") or {},
+        "unconsumedStateFiles": report.get("unconsumedStateFiles") or [],
+    }
+
+
+def write_source_yield(report: Optional[dict] = None, *, written_at: Optional[str] = None) -> dict:
+    """Persist a weekly yield snapshot. Success is silent: no DM, no Slack.
+
+    Keeps the last YIELD_HISTORY_LIMIT snapshots in `history` so a coverage
+    round can compare weeks without scraping Railway logs.
+    """
+    if report is None:
+        report = audit_sources(limit=0)
+    snapshot = source_yield_snapshot(report, written_at=written_at)
+    existing = load_json(SOURCE_YIELD_FILE, {"latest": None, "history": []})
+    history = list(existing.get("history") or [])
+    prev = existing.get("latest")
+    if prev:
+        history.append(prev)
+    payload = {"latest": snapshot, "history": history[-YIELD_HISTORY_LIMIT:]}
+    save_json(SOURCE_YIELD_FILE, payload)
+    return payload
 
 
 def print_audit(report: dict) -> None:
@@ -2640,6 +2705,7 @@ def main() -> int:
     p_audit.add_argument("--category", choices=list(CATEGORY_META.keys()), help="Only show decisions for one lane")
     p_audit.add_argument("--limit", type=int, default=40, help="Maximum source-item decisions to print")
     p_audit.add_argument("--json", action="store_true", help="Print machine-readable audit JSON")
+    sub.add_parser("yield-snapshot", help="Write compact per-source yield JSON (no notify)")
     p_auto = sub.add_parser("autopublish")
     p_auto.add_argument("--send", action="store_true")
 
@@ -2685,6 +2751,11 @@ def main() -> int:
             print(json.dumps(report, indent=2))
         else:
             print_audit(report)
+        return 0
+
+    if args.cmd == "yield-snapshot":
+        payload = write_source_yield()
+        print(json.dumps(payload["latest"], indent=2))
         return 0
 
     if args.cmd == "autopublish":

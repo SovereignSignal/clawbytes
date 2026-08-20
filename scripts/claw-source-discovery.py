@@ -13,7 +13,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -23,16 +23,29 @@ MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory
 STATE_FILE = MEMORY_DIR / "clawbytes-discovered-sources.json"
 DYNAMIC_FEEDS_FILE = MEMORY_DIR / "clawbytes-dynamic-feeds.json"
 
-# Subreddit discovery queries
+# Subreddit discovery queries — harness-builder, not generic ML news.
 SUBREDDIT_QUERIES = [
     "ai agent",
     "llm framework",
     "coding assistant",
     "local ai",
-    "machine learning news",
+    "coding agent",
+    "claude code",
+    "mcp server",
+    "agent harness",
 ]
 
-# Subreddits that look AI-ish but aren't relevant enough
+# Live allowlist (must match clawbytes_threads.ALLOWED_SUBREDDITS hardcoded set).
+# Marked known so discovery does not re-propose subs we already poll.
+KNOWN_SUBREDDITS = {
+    "openclaw", "selfhosted", "localllama",
+    "claudeai", "claudecode", "cursor", "chatgptcoding", "ai_agents", "mcp",
+    "codex", "anthropic", "githubcopilot", "windsurf",
+}
+
+# Subreddits that look AI-ish but aren't relevant enough — plus the
+# generic-ML subs dropped from the live allowlist in the 2026-06 widening,
+# so discovery cannot re-add them.
 SUBREDDIT_EXCLUSIONS = {
     "framework",  # Generic programming, not AI
     "homeassistant",  # Smart home, not AI agents
@@ -40,6 +53,56 @@ SUBREDDIT_EXCLUSIONS = {
     "machinelearningcollab",  # Collaboration, not news
     "mlquestions",  # Q&A, not news
     "learnmachinelearning",  # Educational, not news
+    "homelab",
+    "singularity",
+    "machinelearning",
+    "artificial",
+}
+
+# Topic extractor for HN discovery. Keys are substring-matched in titles —
+# no bare "amp"/"opus"/"acp"/"augment"/"droid". Dropped "diffusion" /
+# "transformer" (generic ML, out of editorial scope).
+HN_TOPIC_KEYWORDS = {
+    "gpt": "GPT",
+    "claude": "Claude",
+    "gemini": "Gemini",
+    "llama": "Llama",
+    "deepseek": "DeepSeek",
+    "mistral": "Mistral",
+    "antigravity": "Antigravity",
+    "cursor": "Cursor",
+    "coding agent": "coding agent",
+    "claude code": "Claude Code",
+    "devin desktop": "Devin Desktop",
+    "agent client protocol": "Agent Client Protocol",
+    "mcp": "MCP",
+    "reasoning": "reasoning model",
+    "agentic": "agentic AI",
+    "safety": "AI safety",
+    "alignment": "AI alignment",
+    "open source ai": "open source AI",
+}
+
+# Must stay a superset of scripts/claw-hn-monitor.py HN_QUERIES so discovery
+# does not re-propose queries the live monitor already runs.
+EXISTING_HN_QUERIES = {
+    "openclaw OR claw agent",
+    "AI agent framework",
+    "coding agent autonomous",
+    "AI agent",
+    "LLM agent tool use",
+    "MCP model context protocol",
+    "AI assistant local self-hosted",
+    "claude code OR cursor OR windsurf OR copilot",
+    'antigravity OR "devin desktop" OR "agent client protocol"',
+    "AI agent security vulnerability",
+    "LLM prompt injection exploit",
+    "AI agent safety risk",
+    "LLM agent architecture",
+    "new LLM model release",
+    "open source LLM weights",
+    "GPT OR Claude OR Gemini OR Llama OR Mistral",
+    "reasoning model AI",
 }
 
 def load_state():
@@ -92,10 +155,7 @@ def save_dynamic_feeds(feeds):
 def discover_subreddits(state):
     """Discover new relevant subreddits."""
     print("\n🔴 Discovering new subreddits...")
-    known_subs = {
-        "openclaw", "selfhosted", "localllama", "homelab", "singularity",
-        "machinelearning", "artificial"
-    }
+    known_subs = set(KNOWN_SUBREDDITS)
     dynamic = load_dynamic_feeds()
     known_subs.update(f.get("name", "").lower() for f in dynamic.get("subreddits", []))
     
@@ -167,25 +227,7 @@ def discover_hn_topics(state):
                         story = json.loads(sresp.read().decode("utf-8"))
                         title = story.get("title", "").lower()
                         
-                        # Extract notable AI/tech topics
-                        ai_keywords = {
-                            "gpt": "GPT",
-                            "claude": "Claude",
-                            "gemini": "Gemini",
-                            "llama": "Llama",
-                            "deepseek": "DeepSeek",
-                            "mistral": "Mistral",
-                            "diffusion": "diffusion model",
-                            "transformer": "transformer architecture",
-                            "reasoning": "reasoning model",
-                            "agentic": "agentic AI",
-                            "coding agent": "coding agent",
-                            "safety": "AI safety",
-                            "alignment": "AI alignment",
-                            "open source ai": "open source AI",
-                        }
-                        
-                        for keyword, label in ai_keywords.items():
+                        for keyword, label in HN_TOPIC_KEYWORDS.items():
                             if keyword in title:
                                 new_queries.append(label)
                 except Exception:
@@ -199,11 +241,11 @@ def discover_hn_topics(state):
         try:
             backlog = json.loads(backlog_file.read_text())
             items = backlog.get("items", [])
-            recent = [i for i in items 
-                      if i.get("discoveredAt", "") > (datetime.now(timezone.utc).isoformat()[:10] - "T00:00:00")]
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+            recent = [i for i in items if (i.get("discoveredAt") or "") > cutoff]
             for item in recent[-50:]:
                 title = item.get("title", "").lower()
-                for keyword, label in ai_keywords.items():
+                for keyword, label in HN_TOPIC_KEYWORDS.items():
                     if keyword in title:
                         new_queries.append(label)
         except Exception:
@@ -212,19 +254,11 @@ def discover_hn_topics(state):
     # Deduplicate and create queries
     unique_topics = list(set(new_queries))[:10]
     new_hn_queries = []
-    existing_queries = {
-        "openclaw OR claw agent", "AI agent framework", "coding agent autonomous",
-        "AI agent", "LLM agent tool use", "MCP model context protocol",
-        "AI assistant local self-hosted", "claude code OR cursor OR windsurf OR copilot",
-        "AI agent security vulnerability", "LLM prompt injection exploit",
-        "AI agent safety risk", "LLM agent architecture",
-        "new LLM model release", "open source LLM weights",
-        "GPT OR Claude OR Gemini OR Llama OR Mistral", "reasoning model AI",
-    }
-    
+    existing_lower = {q.lower() for q in EXISTING_HN_QUERIES}
+
     for topic in unique_topics:
         query = f"{topic} AI"
-        if query.lower() not in {q.lower() for q in existing_queries}:
+        if query.lower() not in existing_lower:
             new_hn_queries.append({
                 "query": query,
                 "tags": "story",

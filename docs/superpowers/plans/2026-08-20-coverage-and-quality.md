@@ -322,31 +322,33 @@ exists.
 Four small PRs. Stop after 1–2 if the channel already feels fuller;
 do not land C5's eval/observability set until Q7 has a week of yield.
 
-### PR A — Routing and vocabulary (code, tests)
+### PR A — Routing and vocabulary (code, tests) — merged #14
 
 The actual coverage expansion for sources we already fetch.
 
-- [ ] Changelog/news/blog + `coding-agent` tag → Ship (Q1), with tests
+- [x] Changelog/news/blog + `coding-agent` tag → Ship (Q1), with tests
       for Cursor Changelog and Amp News.
-- [ ] `REPO_PRIORITY` + `display_repo_name` for Devin, Amp (compound),
+- [x] `REPO_PRIORITY` + `display_repo_name` for Devin, Amp (compound),
       Factory, Copilot, Antigravity, ACP (Q2). Respect dict-order
       invariant.
-- [ ] Drop tutorial terms from `READ_REDDIT_TERMS` (Q3).
-- [ ] `READ_TERMS` / `RELEVANCE_KEYWORDS` / Bluesky+HN queries:
+- [x] Drop tutorial terms from `READ_REDDIT_TERMS` (Q3).
+- [x] `READ_TERMS` / `RELEVANCE_KEYWORDS` / Bluesky+HN queries:
       `"devin desktop"`, `"antigravity"`, `"agent client protocol"`
       (C1, C2, C3, C7).
-- [ ] `EDITORIAL_SCOPE.md`: Windsurf → Devin Desktop; add Antigravity
+- [x] `EDITORIAL_SCOPE.md`: Windsurf → Devin Desktop; add Antigravity
       and ACP next to MCP. Curator picks this up with no other change.
-- [ ] `SOURCES.md`: mark Windsurf blog stale; log this research round.
+- [x] `SOURCES.md`: mark Windsurf blog stale; log this research round.
 
 ### PR B — Ops flags + yield snapshot (config + tiny code)
 
 - [ ] Enable `CLAWBYTES_NORMALIZE_SCORES=1` and
       `CLAWBYTES_RELEASE_DIFF=1` on Railway after a local
-      `preview --category ship` / `community` A/B (Q5).
-- [ ] Weekly job: write `audit --json` summary to
-      `memory/claw-source-yield.json`. No DM, no Slack (Q7).
-- [ ] Tighten `claw-source-discovery.py` queries (Q8).
+      `preview --category ship` / `community` A/B (Q5). Code defaults
+      stay off (revert-by-unset).
+- [x] Weekly job: write compact `audit` rollup to
+      `memory/claw-source-yield.json` (`yield-snapshot`, Mon 15:45 UTC).
+      No DM, no Slack (Q7).
+- [x] Tighten `claw-source-discovery.py` queries (Q8).
 
 ### PR C — New sources that have a machine URL today
 

@@ -26,14 +26,14 @@ The split is the point: adding a source and tuning how items are routed are inde
 - **The repo is PUBLIC** (`github.com/SovereignSignal/clawbytes`, default branch `main`). Anything committed is immediately visible. No secrets, channel IDs, personal emails, or internal infra (IPs/hostnames) in code, docs, or commit messages — all of that was scrubbed and git history was rewritten on 2026-06-12. Secrets come from env vars only; `.gitignore` blocks `CREDS.md` and `.env.*`.
 - **Local testing: always `export CLAWBYTES_MEMORY_DIR=/tmp/cb-dev`** before running anything. The module resolves `MEMORY`, `ALLOWED_SUBREDDITS`, and dynamic feeds at import time; without the override you read/write the repo's tracked `memory/`. Tests do this in `tests/conftest.py`.
 - **TDD.** Every classifier branch and monitor has tests under `tests/` (46 currently). Run `python3 -m pytest tests/ content-engine/tests/ -q`. When adding a feed, verify the URL fetches valid XML/JSON before committing — several "covered" feeds had silently rotted (LangChain post-Webflow, a DeepMind feed that served corporate PR).
-- **Verify, don't assume.** `python3 clawbytes_threads.py audit` shows where every raw item dies (rejected/skipped/would_add + reason). `preview --category <lane>` renders a lane with live enrichment and never posts. Use `railway run` to render with production tokens/grounding without publishing.
+- **Verify, don't assume.** `python3 clawbytes_threads.py audit` shows where every raw item dies (rejected/skipped/would_add + reason). `yield-snapshot` writes a compact per-source rollup to `memory/claw-source-yield.json` (no notify). `preview --category <lane>` renders a lane with live enrichment and never posts. Use `railway run` to render with production tokens/grounding without publishing.
 - **Commit identity:** SovereignSignal. End commits with the `Co-Authored-By: Claude` trailer.
 
 ## Deploy & ops
 
 Railway project `9b6a552c-…`, service `78e92a76-…` (`clawbytes`), env `d82d0b1e-…`, branch `main`. Push to `main` → auto-deploy. Operate via the **railway-ops** skill (the MCP tools are often Unauthorized; the skill's CLI+token path works). Reach the container, deploy status, and logs through that skill. `CLAWBYTES_PUBLISH=1` is the live-posting gate; `GITHUB_TOKEN` (set) lifts API limits for release-note grounding, leaderboard/registry sha checks, and discovery.
 
-Scheduler jobs (UTC): `collect` every :00/:30, `autopublish` hourly :05, `health_check` hourly :20 (alert-only), `discover` Mon 14:10.
+Scheduler jobs (UTC): `collect` every :00/:30, `autopublish` hourly :05, `health_check` hourly :20 (alert-only), `discover` Mon 14:10, `yield_snapshot` Mon 15:45 (writes `memory/claw-source-yield.json`, no DM).
 
 ## Watch out for
 
