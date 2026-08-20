@@ -90,6 +90,30 @@ def discover() -> None:
     )
 
 
+def yield_snapshot() -> None:
+    """Weekly per-source yield file. Success is silent (no DM, no Slack).
+
+    Writes memory/claw-source-yield.json via clawbytes_threads.py yield-snapshot.
+    _run_cmd still pages the admin on a *nonzero* exit — that is breakage, not
+    a healthy-path report.
+    """
+    _run("yield_snapshot", ["yield-snapshot"])
+
+
+def schedule_jobs(scheduler) -> None:
+    # collect every 30 minutes (VM: OnCalendar=*:0/30)
+    scheduler.add_job(collect, "cron", minute="0,30", id="collect")
+    # autopublish hourly at :05 (VM: OnCalendar=*-*-* *:05:00)
+    scheduler.add_job(autopublish, "cron", minute=5, id="autopublish")
+    # hourly health check at :20 — silent when healthy, DMs the admin only on breakage
+    scheduler.add_job(health_check, "cron", minute=20, id="health_check")
+    # weekly source discovery, Mondays 14:10 UTC (before the day's collects pick it up)
+    scheduler.add_job(discover, "cron", day_of_week="mon", hour=14, minute=10, id="discover")
+    # weekly yield snapshot, Mondays 15:45 UTC (after discover + :00/:30 collects).
+    # File only — do not resurrect a scheduled audit DM.
+    scheduler.add_job(yield_snapshot, "cron", day_of_week="mon", hour=15, minute=45, id="yield_snapshot")
+
+
 OPS_BANNER = "🔧 OPS REPORT — visible only to you, never posted to the channel.\n\n"
 
 
@@ -260,16 +284,12 @@ def main() -> int:
         timezone="UTC",
         job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
     )
-    # collect every 30 minutes (VM: OnCalendar=*:0/30)
-    scheduler.add_job(collect, "cron", minute="0,30", id="collect")
-    # autopublish hourly at :05 (VM: OnCalendar=*-*-* *:05:00)
-    scheduler.add_job(autopublish, "cron", minute=5, id="autopublish")
-    # hourly health check at :20 — silent when healthy, DMs the admin only on breakage
-    scheduler.add_job(health_check, "cron", minute=20, id="health_check")
-    # weekly source discovery, Mondays 14:10 UTC (before the day's collects pick it up)
-    scheduler.add_job(discover, "cron", day_of_week="mon", hour=14, minute=10, id="discover")
+    schedule_jobs(scheduler)
 
-    log.info("Scheduled: collect=*:00,30  autopublish=*:05  health_check=*:20 (alert-only)  discover=Mon 14:10 (UTC). Waiting for triggers.")
+    log.info(
+        "Scheduled: collect=*:00,30  autopublish=*:05  health_check=*:20 (alert-only)  "
+        "discover=Mon 14:10  yield_snapshot=Mon 15:45 (file only) (UTC). Waiting for triggers."
+    )
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):

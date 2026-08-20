@@ -16,7 +16,7 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 | Reddit | r/openclaw, r/ClaudeAI, r/ClaudeCode, r/cursor, r/ChatGPTCoding, r/AI_Agents, r/mcp + targeted searches in r/LocalLLaMA, r/selfhosted | `scripts/claw-reddit-monitor.py` (`SUBREDDITS`) | 30 min |
 | Hacker News | Algolia queries (harness/agent/MCP terms), 14-day window | `scripts/claw-hn-monitor.py`, `claw-ecosystem-monitor.sh` | 30 min |
 | Moltbook | Community posts, HTML scrape | `scripts/claw-moltbook-monitor.py` | 30 min |
-| Discovery | GitHub topic/keyword search, awesome lists (awesome-ai-agents, awesome-agents, awesome-mcp-servers, awesome-claude-code, awesome-code-ai) | `claw-ecosystem-monitor.sh --mode discover`, `claw-source-discovery.py` | weekly (Mon 14:10 UTC) |
+| Discovery | GitHub topic/keyword search, awesome lists (awesome-ai-agents, awesome-agents, awesome-mcp-servers, awesome-claude-code, awesome-code-ai); subreddit/HN discovery queries are harness-scoped (no "machine learning news") | `claw-ecosystem-monitor.sh --mode discover`, `claw-source-discovery.py` | weekly (Mon 14:10 UTC) |
 | Leaderboards | SWE-bench (Verified, bash-only), Aider polyglot, LiveBench — emits only on top-3 movement, sha-gated fetches | `scripts/claw-leaderboard-monitor.py` (`BOARDS`) | 30 min |
 | Registries | OpenRouter model list (id diff = minutes-level new-model detection), LiteLLM pricing registry (sha-gated key diff), HF trending (weekly, coding/agent filter) | `scripts/claw-registry-monitor.py` | 30 min |
 | Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + sitemap slug diffs (Anthropic news/engineering, DeepSeek news) | `scripts/claw-pagewatch-monitor.py` | 30 min |
@@ -106,14 +106,20 @@ Devin Release Notes RSS is the live Cognition changelog (through
 2026-08-19); `windsurf.com/feed.xml` last item 2026-05-12 (stale after
 the 2026-06-02 Devin Desktop rebrand).
 
-**Passed** — Antigravity `/blog/rss.xml` (404); Devin blog `/blog/rss.xml`
+**Discovery (2026-08-20)** — `claw-source-discovery.py` dropped
+`"machine learning news"` / `"diffusion"` / `"transformer"`; added
+harness queries (`coding agent`, `claude code`, `mcp server`,
+`agent harness`) and the live HN query for Antigravity / Devin Desktop /
+ACP. Dropped generic-ML subs stay excluded so they cannot be re-added.
 (429 on this probe — don't add; release-notes RSS is enough);
 MCP registry firehose, X/Discord, provider status, HF Spaces — unchanged.
 r/Devin still passed pending an operator-grade sub after the rebrand.
 
 **Retired line-item** — scheduled Monday 15:45 ingestion-audit DM. The
 `audit` CLI and `send-clawbytes-audit` still exist for on-demand use;
-`scheduler.py` does not run them (ops DMs stay exception-only).
+`scheduler.py` does not DM them (ops DMs stay exception-only). Mondays
+15:45 UTC now write `memory/claw-source-yield.json` (`yield-snapshot`) —
+per-source would_add/rejected counts, last 8 weeks, no notify.
 
 **Retired** — 2026-06-24 · the six provider **status feeds** (Anthropic,
 OpenAI, Cursor, GitHub, HF, OpenRouter) and the **security-advisory monitor**
@@ -136,5 +142,6 @@ Drop a URL on Sov's channel of choice. Whoever evaluates it:
 3. If skipped: note it here as **passed** with the reason, so it isn't
    re-evaluated from scratch next time.
 
-The weekly ingestion-audit DM (Mondays 15:45 UTC) reports per-source yield —
-the evidence for pruning sources that never produce.
+The weekly yield snapshot (`memory/claw-source-yield.json`, Mondays 15:45 UTC)
+is the evidence for pruning sources that never produce. On-demand `audit` is
+the human-readable path.
