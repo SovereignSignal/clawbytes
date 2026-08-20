@@ -78,3 +78,23 @@ def test_github_changelog_does_not_auto_ship():
     candidate = ct.classify_rss(item)
     assert candidate is not None
     assert candidate["primaryCategory"] == "read"
+
+
+def test_acp_schema_v1_ships():
+    item = _rss_item("Agent Client Protocol Releases", "Schema v1.20.0")
+    candidate = ct.classify_rss(item)
+    assert candidate is not None
+    assert candidate["primaryCategory"] == "ship"
+    assert candidate["score"] >= 58
+    assert ct.repo_name_from_feed(item["feed"]) == "agent client protocol"
+
+
+def test_acp_rust_crate_is_dropped():
+    # Monorepo ships Schema + crate in lockstep; crate bumps are not operator news.
+    item = _rss_item("Agent Client Protocol Releases", "Rust Crate v1.6.0")
+    assert ct.classify_rss(item) is None
+
+
+def test_acp_schema_v2_alpha_is_dropped():
+    item = _rss_item("Agent Client Protocol Releases", "Schema v2.0.0-alpha.2")
+    assert ct.classify_rss(item) is None

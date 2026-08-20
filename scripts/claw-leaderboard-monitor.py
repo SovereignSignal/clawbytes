@@ -2,8 +2,9 @@
 """
 ClawBytes Leaderboard Monitor
 Watches coding-agent benchmark leaderboards and emits an item when the top
-of a board actually moves. Boards: SWE-bench (swebench.com) and the Aider
-polyglot leaderboard (aider.chat/docs/leaderboards).
+of a board actually moves. Boards: SWE-bench (swebench.com), the Aider
+polyglot leaderboard (aider.chat/docs/leaderboards), LiveBench, and
+Terminal-Bench 2.1 (harbor-framework/terminal-bench-2-1 submissions).
 
 Cheap by design: each board's backing file lives in a GitHub repo, so we
 poll the file's git sha via the contents API (tiny call) and only download
@@ -14,6 +15,7 @@ State file: memory/claw-leaderboard-state.json
 """
 
 import csv
+import hashlib
 import io
 import json
 import os
@@ -72,6 +74,17 @@ BOARDS = [
         "ref": "main",
         "parser": "livebench",
     },
+    {
+        # Harbor publishes one JSON per accepted submission. Sha-gate the
+        # directory listing (name+blob sha); download bodies only on change.
+        "key": "terminal-bench-2-1",
+        "label": "Terminal-Bench 2.1",
+        "page": "https://www.tbench.ai/leaderboard",
+        "repo": "harbor-framework/terminal-bench-2-1",
+        "dir": "leaderboard/submissions",
+        "ref": "main",
+        "parser": "terminal_bench",
+    },
 ]
 
 
@@ -81,6 +94,30 @@ def _github_headers():
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return headers
+
+
+def github_contents(repo, path, ref):
+    """Directory listing from the contents API. None on failure."""
+    url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={ref}"
+    try:
+        req = Request(url, headers=_github_headers())
+        with urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode())
+        return data if isinstance(data, list) else None
+    except Exception:
+        return None
+
+
+def submissions_listing_sha(listing):
+    """Stable digest of a submissions dir: json filename + blob sha pairs."""
+    files = sorted(
+        (f.get("name") or "", f.get("sha") or "")
+        for f in (listing or [])
+        if str(f.get("name") or "").endswith(".json")
+    )
+    if not files:
+        return ""
+    return hashlib.sha256(json.dumps(files).encode()).hexdigest()
 
 
 def github_file_sha(repo, path, ref):
@@ -170,6 +207,30 @@ def parse_livebench(text, top_n=TOP_N):
     return entries[:top_n]
 
 
+def parse_terminal_bench_submissions(payloads, top_n=TOP_N):
+    """Top entries from Harbor Terminal-Bench 2.1 submission JSON blobs.
+
+    Rank by metrics.accuracy. Label is 'Model + Agent' from metadata displays.
+    """
+    entries = []
+    for data in payloads:
+        if not isinstance(data, dict):
+            continue
+        meta = data.get("metadata") or {}
+        metrics = data.get("metrics") or {}
+        agent = ((meta.get("agent_display") or {}).get("label") or "").strip()
+        model = ((meta.get("model_display") or {}).get("label") or "").strip()
+        try:
+            score = float(metrics.get("accuracy"))
+        except (TypeError, ValueError):
+            continue
+        name = " + ".join(part for part in (model, agent) if part)
+        if name:
+            entries.append((name, round(score, 2)))
+    entries.sort(key=lambda pair: -pair[1])
+    return entries[:top_n]
+
+
 def parse_aider_polyglot(text, top_n=TOP_N):
     """Top entries from aider's polyglot_leaderboard.yml without a yaml dep.
 
@@ -245,7 +306,16 @@ def check_boards(verbose=True):
     raw_cache = {}
 
     for board in BOARDS:
-        if "pattern" in board:
+        listing = None
+        if board.get("parser") == "terminal_bench":
+            listing = github_contents(board["repo"], board["dir"], board["ref"])
+            if not listing:
+                if verbose:
+                    print(f"  ! {board['label']}: could not list submissions")
+                continue
+            path = board["dir"]
+            sha = submissions_listing_sha(listing)
+        elif "pattern" in board:
             resolved = resolve_dynamic_path(board)
             if not resolved:
                 if verbose:
@@ -261,20 +331,34 @@ def check_boards(verbose=True):
                 print(f"  = {board['label']}: unchanged (sha match)")
             continue
 
-        if file_key not in raw_cache:
-            raw_cache[file_key] = fetch_raw(board["repo"], path, board["ref"])
-        text = raw_cache[file_key]
-        if not text:
-            if verbose:
-                print(f"  ! {board['label']}: fetch failed")
-            continue
-
-        if board["parser"] == "swebench":
-            tops = parse_swebench(text, board["board_name"])
-        elif board["parser"] == "livebench":
-            tops = parse_livebench(text)
+        if board.get("parser") == "terminal_bench":
+            payloads = []
+            for entry in listing:
+                name = entry.get("name") or ""
+                if not name.endswith(".json"):
+                    continue
+                raw = fetch_raw(board["repo"], f"{board['dir']}/{name}", board["ref"])
+                if not raw:
+                    continue
+                try:
+                    payloads.append(json.loads(raw))
+                except json.JSONDecodeError:
+                    continue
+            tops = parse_terminal_bench_submissions(payloads)
         else:
-            tops = parse_aider_polyglot(text)
+            if file_key not in raw_cache:
+                raw_cache[file_key] = fetch_raw(board["repo"], path, board["ref"])
+            text = raw_cache[file_key]
+            if not text:
+                if verbose:
+                    print(f"  ! {board['label']}: fetch failed")
+                continue
+            if board["parser"] == "swebench":
+                tops = parse_swebench(text, board["board_name"])
+            elif board["parser"] == "livebench":
+                tops = parse_livebench(text)
+            else:
+                tops = parse_aider_polyglot(text)
         if not tops:
             if verbose:
                 print(f"  ! {board['label']}: no entries parsed")

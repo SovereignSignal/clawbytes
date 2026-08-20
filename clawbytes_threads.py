@@ -466,6 +466,17 @@ def age_score(dt: Optional[datetime], max_hours: int) -> float:
     return max(0.0, max_hours - hours)
 
 
+def is_acp_crate_churn(feed: str, title: str) -> bool:
+    """ACP's GitHub atom mixes Schema tags with Rust crate bumps.
+
+    The monorepo ships both on the same day (3–4 crate/schema pairs a week).
+    Keep stable Schema v1.* only — v2 alphas and rust-crate titles are churn.
+    """
+    if "agent client protocol" not in (feed or "").lower():
+        return False
+    return not re.search(r"\bschema\s+v?1\.", (title or "").lower())
+
+
 def is_minor_release(title: str) -> bool:
     """Check if a release is minor (alpha, patch, hotfix, etc)."""
     low = title.lower()
@@ -576,6 +587,8 @@ def classify_rss(item: dict) -> Optional[dict]:
             return None
         # Skip chore/ci/internal/dependency release titles
         if any(x in low for x in ["chore:", "ci:", "build:", "internal", "rusty-v8", "dependency"]):
+            return None
+        if is_acp_crate_churn(feed, title):
             return None
         repo = repo_name_from_feed(feed)
         display_title = normalize_release_title(repo, title)

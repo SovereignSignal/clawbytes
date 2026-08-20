@@ -96,6 +96,7 @@ RSS_FEEDS = [
     {"name": "anthropic-sdk-typescript Releases", "url": "https://github.com/anthropics/anthropic-sdk-typescript/releases.atom", "tags": ["releases", "agent-sdk"]},
     {"name": "openai-python Releases", "url": "https://github.com/openai/openai-python/releases.atom", "tags": ["releases", "agent-sdk"]},
     {"name": "python-genai Releases", "url": "https://github.com/googleapis/python-genai/releases.atom", "tags": ["releases", "agent-sdk"]},
+    {"name": "Agent Client Protocol Releases", "url": "https://github.com/agentclientprotocol/agent-client-protocol/releases.atom", "tags": ["releases", "agent-sdk"]},
     # Provider status feeds removed 2026-06-24: provider-status incidents are
     # retired from the Watch lane (operational weather, not editorial signal —
     # they read as the same alert repeating). classify_rss drops the status

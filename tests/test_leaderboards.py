@@ -87,3 +87,76 @@ def test_parse_livebench_means_numeric_columns():
 def test_pick_latest_table_is_lexical():
     names = ["table_2025_06_01.csv", "table_2026_01_08.csv", "categories_2026_01_08.json", "table_2026_01_08.csv.bak"]
     assert lb.pick_latest_table(names, "table_", ".csv") == "table_2026_01_08.csv"
+
+
+def _tb_row(model, agent, accuracy):
+    return {
+        "metadata": {
+            "model_display": {"label": model},
+            "agent_display": {"label": agent},
+        },
+        "metrics": {"accuracy": accuracy},
+    }
+
+
+def test_parse_terminal_bench_ranks_accuracy():
+    tops = lb.parse_terminal_bench_submissions([
+        _tb_row("GPT-5.5", "Codex", 70.1),
+        _tb_row("GPT-5.6 Sol", "Codex", 76.18),
+        _tb_row("Claude Opus 4.8", "Claude Code", "71.5"),
+        {"metadata": {"model_display": {"label": "broken"}}, "metrics": {}},
+    ])
+    assert tops[0] == ("GPT-5.6 Sol + Codex", 76.18)
+    assert [name for name, _ in tops] == [
+        "GPT-5.6 Sol + Codex",
+        "Claude Opus 4.8 + Claude Code",
+        "GPT-5.5 + Codex",
+    ]
+
+
+def test_submissions_listing_sha_is_order_independent_and_moves_on_add():
+    a = [{"name": "x.json", "sha": "aaa"}, {"name": ".gitkeep", "sha": "bbb"}]
+    b = [{"name": ".gitkeep", "sha": "bbb"}, {"name": "x.json", "sha": "aaa"}]
+    c = a + [{"name": "y.json", "sha": "ccc"}]
+    assert lb.submissions_listing_sha(a) == lb.submissions_listing_sha(b)
+    assert lb.submissions_listing_sha(a) != lb.submissions_listing_sha(c)
+
+
+def test_terminal_bench_board_is_wired_and_url_unique_per_movement():
+    board = next(b for b in lb.BOARDS if b["key"] == "terminal-bench-2-1")
+    assert board["repo"] == "harbor-framework/terminal-bench-2-1"
+    item = lb.build_item(
+        board,
+        "new_leader",
+        [("GPT-5.6 Sol + Codex", 76.18), ("Claude Opus 4.8 + Claude Code", 71.5)],
+        "2026-08-20T16:00:00+00:00",
+    )
+    candidate = ct.classify_leaderboard(item)
+    assert candidate is not None
+    assert candidate["primaryCategory"] == "ship"
+    assert "#terminal-bench-2-1-20260820" in candidate["url"]
+
+
+def test_terminal_bench_check_boards_baselines_then_emits_on_new_leader(tmp_path, monkeypatch):
+    monkeypatch.setattr(lb, "STATE_FILE", tmp_path / "lb.json")
+    board = next(b for b in lb.BOARDS if b["key"] == "terminal-bench-2-1")
+    monkeypatch.setattr(lb, "BOARDS", [board])
+    listings = [
+        [{"name": "a.json", "sha": "1"}],
+        [{"name": "a.json", "sha": "1"}],
+        [{"name": "a.json", "sha": "1"}, {"name": "b.json", "sha": "2"}],
+    ]
+    monkeypatch.setattr(lb, "github_contents", lambda *a, **k: listings.pop(0))
+
+    def _raw(repo, path, ref):
+        if path.endswith("b.json"):
+            return json.dumps(_tb_row("NewModel", "Codex", 90.0))
+        return json.dumps(_tb_row("OldModel", "CLI", 70.0))
+
+    monkeypatch.setattr(lb, "fetch_raw", _raw)
+    assert lb.check_boards(verbose=False) == []          # baseline
+    assert lb.check_boards(verbose=False) == []          # sha match
+    items = lb.check_boards(verbose=False)
+    assert len(items) == 1
+    assert items[0]["change"] == "new_leader"
+    assert "NewModel" in items[0]["title"]

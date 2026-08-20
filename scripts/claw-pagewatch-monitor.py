@@ -6,6 +6,8 @@ Covers vendors that publish real signal but expose no feed:
 - Mintlify-style docs serve raw markdown at <page>.md — hash-watch it and
   emit one item per change (Claude platform release notes, Devin CLI
   changelog, xAI API release notes).
+- HTML SPAs with no markdown sibling (Google Antigravity changelog) —
+  hash the heading set, not the full page (bundle hashes change on deploys).
 - Sites with sitemaps but no RSS (anthropic.com, api-docs.deepseek.com) —
   diff the sitemap slug set and emit one item per new news/engineering URL.
 
@@ -56,6 +58,21 @@ MD_WATCHES = [
     },
 ]
 
+# Feedless HTML SPAs — hash the heading set, not the full page (Astro/Next
+# bundle hashes change on unrelated deploys). First sighting is silent.
+HTML_WATCHES = [
+    {
+        "key": "antigravity-changelog",
+        "label": "Google Antigravity",
+        "html": "https://antigravity.google/changelog",
+        "page": "https://antigravity.google/changelog",
+        "heading": r"<h3[^>]*>([^<]+)</h3>",
+        "fingerprint": "headings",
+        "lane": "ship",
+    },
+]
+
+
 SITEMAP_WATCHES = [
     {
         "key": "anthropic",
@@ -72,6 +89,20 @@ SITEMAP_WATCHES = [
 ]
 
 
+def watch_fetch_url(watch):
+    return watch.get("md") or watch.get("html")
+
+
+def watch_fingerprint(text, watch):
+    """Stable content for hashing. Heading-only for HTML SPAs."""
+    if watch.get("fingerprint") == "headings":
+        pattern = watch.get("heading") or ""
+        found = re.findall(pattern, text, re.MULTILINE | re.IGNORECASE)
+        cleaned = [re.sub(r"<[^>]+>", "", h).strip() for h in found]
+        return "\n".join(c for c in cleaned if c)
+    return text
+
+
 def fetch_text(url, timeout=30):
     req = Request(url, headers={"User-Agent": "ClawBytes/1.0"})
     with urlopen(req, timeout=timeout) as resp:
@@ -79,8 +110,10 @@ def fetch_text(url, timeout=30):
 
 
 def first_heading(text, pattern):
-    m = re.search(pattern, text, re.MULTILINE)
-    return m.group(1).strip() if m else ""
+    m = re.search(pattern, text, re.MULTILINE | re.IGNORECASE)
+    if not m:
+        return ""
+    return re.sub(r"<[^>]+>", "", m.group(1)).strip()
 
 
 def sitemap_slugs(xml_text, prefixes):
@@ -121,14 +154,15 @@ def check_pages(verbose=True):
     now_iso = datetime.now(timezone.utc).isoformat()
     new_items = []
 
-    for watch in MD_WATCHES:
+    for watch in MD_WATCHES + HTML_WATCHES:
+        url = watch_fetch_url(watch)
         try:
-            text = fetch_text(watch["md"])
+            text = fetch_text(url)
         except Exception as e:
             if verbose:
                 print(f"  ! {watch['label']}: fetch failed ({e})")
             continue
-        digest = hashlib.sha256(text.encode()).hexdigest()
+        digest = hashlib.sha256(watch_fingerprint(text, watch).encode()).hexdigest()
         old_digest = state["hashes"].get(watch["key"])
         heading = first_heading(text, watch["heading"])
         if old_digest and digest != old_digest:
