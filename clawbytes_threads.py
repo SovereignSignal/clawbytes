@@ -127,6 +127,7 @@ REPO_PRIORITY = {
     "grok build": 62,  # vocab for HN/Reddit; GitHub atom is empty (2026-09)
     "opencode": 60,
     "pi coding": 60,  # never bare "pi" — ⊂ picoclaw, api
+    "oh my pi": 60,  # OMP (can1357/oh-my-pi). Never bare "omp" — ⊂ compile/complete
     "openai-agents": 60,
     "agent client protocol": 60,  # compound — not bare "acp"
     "openhands": 58,
@@ -240,7 +241,8 @@ READ_TERMS = [
     "sourcegraph", "antigravity", "agent client protocol",
     # 2026-09 widening. Compounds only — see REPO_PRIORITY traps.
     "kiro", "kilo code", "kimi code", "mistral vibe", "grok build",
-    "pi coding", "open interpreter", "deep agents", "codewhale",
+    "pi coding", "oh-my-pi", "oh my pi", "omp.sh",
+    "open interpreter", "deep agents", "codewhale",
     "mimo code", "agno-agi", "tau coding",
 ]
 
@@ -436,6 +438,7 @@ def display_repo_name(repo: str) -> str:
         "agent client protocol": "ACP",
         "kiro": "Kiro",
         "pi coding": "Pi",
+        "oh my pi": "OMP",
         "kilo code": "Kilo Code",
         "kimi code": "Kimi Code",
         "grok build": "Grok Build",

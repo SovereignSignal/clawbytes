@@ -9,12 +9,12 @@ def test_new_harness_repos_have_priorities():
                  "devin desktop", "devin", "antigravity", "amp news",
                  "factory", "copilot", "warp blog", "windsurf", "replit",
                  "augment code", "junie", "jetbrains", "agent client protocol",
-                 "kiro", "pi coding", "kilo code", "kimi code", "grok build",
+                 "kiro", "pi coding", "oh my pi", "kilo code", "kimi code", "grok build",
                  "open interpreter", "deep agents", "mistral vibe",
                  "codewhale", "mimo code", "agno-agi", "tau coding"]:
         assert repo in ct.REPO_PRIORITY, f"{repo} missing from REPO_PRIORITY"
     # Substring traps: bare tokens that live inside common words stay out.
-    for trap in ("amp", "acp", "opus", "augment", "pi", "kilo", "tau", "vibe", "agno"):
+    for trap in ("amp", "acp", "opus", "augment", "pi", "kilo", "tau", "vibe", "agno", "omp"):
         assert trap not in ct.REPO_PRIORITY, f"bare {trap!r} is a substring trap"
 
 
@@ -39,6 +39,21 @@ def test_picoclaw_still_wins_over_pi_coding():
     # "pi" is inside "picoclaw"; the compound key must not steal Claw derivatives.
     assert ct.repo_name_from_feed("PicoClaw Releases") == "picoclaw"
     assert ct.repo_name_from_feed("Pi Coding Agent Releases") == "pi coding"
+
+
+def test_oh_my_pi_release_routes_to_ship():
+    assert ct.repo_name_from_feed("Oh My Pi Releases") == "oh my pi"
+    item = {
+        "feed": "Oh My Pi Releases",
+        "title": "v18.3.0",
+        "link": "https://github.com/can1357/oh-my-pi/releases/tag/v18.3.0",
+        "published": datetime.now(timezone.utc).isoformat(),
+    }
+    candidate = ct.classify_rss(item)
+    assert candidate is not None
+    assert candidate["primaryCategory"] == "ship"
+    assert candidate["score"] >= ct.REPO_PRIORITY["oh my pi"]
+    assert "OMP" in candidate["title"] or "Oh My Pi" in candidate["title"] or candidate["title"].startswith("v18")
 
 
 def test_pi_release_routes_to_ship():

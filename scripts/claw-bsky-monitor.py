@@ -26,6 +26,7 @@ QUERIES = [
     '"claude code"', '"codex cli"', '"openclaw"', '"mcp server"', '"agent harness"',
     '"cursor"', '"devin desktop"', '"antigravity"', '"agent client protocol"',
     '"kiro"', '"kilo code"', '"kimi code"', '"grok build"', '"mistral vibe"',
+    '"oh-my-pi"', '"oh my pi"',
 ]
 
 MIN_LIKES = 20
