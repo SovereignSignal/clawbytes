@@ -98,3 +98,30 @@ def test_acp_rust_crate_is_dropped():
 def test_acp_schema_v2_alpha_is_dropped():
     item = _rss_item("Agent Client Protocol Releases", "Schema v2.0.0-alpha.2")
     assert ct.classify_rss(item) is None
+
+
+def test_deepagents_code_ships_and_sidecars_drop():
+    code = _rss_item("Deep Agents Releases", "deepagents-code==0.2.0")
+    sdk = _rss_item("Deep Agents Releases", "deepagents==0.8.0")
+    acp = _rss_item("Deep Agents Releases", "deepagents-acp==0.0.12")
+    talon = _rss_item("Deep Agents Releases", "deepagents-talon==0.0.8")
+    for item in (code, sdk):
+        candidate = ct.classify_rss(item)
+        assert candidate is not None
+        assert candidate["primaryCategory"] == "ship"
+        assert ct.repo_name_from_feed(item["feed"]) == "deep agents"
+    assert ct.classify_rss(acp) is None
+    assert ct.classify_rss(talon) is None
+
+
+def test_kilo_prerelease_is_dropped():
+    item = _rss_item("Kilo Code Releases", "v7.7.0 (pre-release)")
+    assert ct.classify_rss(item) is None
+
+
+def test_kimi_code_minor_release_ships():
+    item = _rss_item("Kimi Code Releases", "@moonshot-ai/kimi-code@2.0.0")
+    candidate = ct.classify_rss(item)
+    assert candidate is not None
+    assert candidate["primaryCategory"] == "ship"
+    assert ct.repo_name_from_feed(item["feed"]) == "kimi code"

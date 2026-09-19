@@ -8,10 +8,13 @@ def test_new_harness_repos_have_priorities():
                  "roo code", "goose", "qwen code", "smolagents", "crush",
                  "devin desktop", "devin", "antigravity", "amp news",
                  "factory", "copilot", "warp blog", "windsurf", "replit",
-                 "augment code", "junie", "jetbrains", "agent client protocol"]:
+                 "augment code", "junie", "jetbrains", "agent client protocol",
+                 "kiro", "pi coding", "kilo code", "kimi code", "grok build",
+                 "open interpreter", "deep agents", "mistral vibe",
+                 "codewhale", "mimo code", "agno-agi", "tau coding"]:
         assert repo in ct.REPO_PRIORITY, f"{repo} missing from REPO_PRIORITY"
     # Substring traps: bare tokens that live inside common words stay out.
-    for trap in ("amp", "acp", "opus", "augment"):
+    for trap in ("amp", "acp", "opus", "augment", "pi", "kilo", "tau", "vibe", "agno"):
         assert trap not in ct.REPO_PRIORITY, f"bare {trap!r} is a substring trap"
 
 
@@ -30,6 +33,25 @@ def test_devin_desktop_precedes_devin_in_matching():
 def test_junie_precedes_jetbrains_in_matching():
     assert ct.repo_name_from_feed("JetBrains Junie Blog") == "junie"
     assert ct.repo_name_from_feed("JetBrains AI Blog") == "jetbrains"
+
+
+def test_picoclaw_still_wins_over_pi_coding():
+    # "pi" is inside "picoclaw"; the compound key must not steal Claw derivatives.
+    assert ct.repo_name_from_feed("PicoClaw Releases") == "picoclaw"
+    assert ct.repo_name_from_feed("Pi Coding Agent Releases") == "pi coding"
+
+
+def test_pi_release_routes_to_ship():
+    item = {
+        "feed": "Pi Coding Agent Releases",
+        "title": "v0.86.0",
+        "link": "https://github.com/earendil-works/pi/releases/tag/v0.86.0",
+        "published": datetime.now(timezone.utc).isoformat(),
+    }
+    candidate = ct.classify_rss(item)
+    assert candidate is not None
+    assert candidate["primaryCategory"] == "ship"
+    assert candidate["score"] >= ct.REPO_PRIORITY["pi coding"]
 
 
 def test_aider_release_routes_to_ship():

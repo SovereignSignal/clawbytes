@@ -120,10 +120,13 @@ REPO_PRIORITY = {
     "devin": 64,
     "antigravity": 64,
     "amp news": 64,  # compound — bare "amp" is a substring trap
+    "kiro": 64,
     "gemini": 62,
     "factory": 62,
     "windsurf": 62,
+    "grok build": 62,  # vocab for HN/Reddit; GitHub atom is empty (2026-09)
     "opencode": 60,
+    "pi coding": 60,  # never bare "pi" — ⊂ picoclaw, api
     "openai-agents": 60,
     "agent client protocol": 60,  # compound — not bare "acp"
     "openhands": 58,
@@ -133,7 +136,16 @@ REPO_PRIORITY = {
     "replit": 58,
     "augment code": 58,
     "cline": 56,
+    "kilo code": 58,
+    "kimi code": 58,
+    "open interpreter": 56,
+    "deep agents": 56,
+    "mistral vibe": 56,
     "vercel-ai": 56,
+    "codewhale": 54,
+    "mimo code": 54,
+    "agno-agi": 54,  # never bare "agno" — ⊂ agnostic
+    "tau coding": 52,  # never bare "tau"
     "roo code": 55,
     "continue": 54,
     "goose": 54,
@@ -226,6 +238,10 @@ READ_TERMS = [
     "opus 4", "opus 5", "devin desktop", "devin", "junie", "codestral", "mistral",
     "replit", "augment code", "amp news", "warp blog", "jetbrains",
     "sourcegraph", "antigravity", "agent client protocol",
+    # 2026-09 widening. Compounds only — see REPO_PRIORITY traps.
+    "kiro", "kilo code", "kimi code", "mistral vibe", "grok build",
+    "pi coding", "open interpreter", "deep agents", "codewhale",
+    "mimo code", "agno-agi", "tau coding",
 ]
 
 
@@ -418,6 +434,18 @@ def display_repo_name(repo: str) -> str:
         "junie": "Junie",
         "jetbrains": "JetBrains",
         "agent client protocol": "ACP",
+        "kiro": "Kiro",
+        "pi coding": "Pi",
+        "kilo code": "Kilo Code",
+        "kimi code": "Kimi Code",
+        "grok build": "Grok Build",
+        "open interpreter": "Open Interpreter",
+        "deep agents": "Deep Agents",
+        "mistral vibe": "Mistral Vibe",
+        "codewhale": "Codewhale",
+        "mimo code": "MiMo Code",
+        "agno-agi": "AGNO",
+        "tau coding": "Tau",
     }.get(repo, repo.title())
 
 
@@ -475,6 +503,17 @@ def is_acp_crate_churn(feed: str, title: str) -> bool:
     if "agent client protocol" not in (feed or "").lower():
         return False
     return not re.search(r"\bschema\s+v?1\.", (title or "").lower())
+
+
+def is_deepagents_sidecar_churn(feed: str, title: str) -> bool:
+    """LangChain Deep Agents atom mixes the coding CLI with ACP/talon packages.
+
+    Keep `deepagents-code` and the core `deepagents==` SDK; drop sidecar bumps.
+    """
+    if "deep agents" not in (feed or "").lower():
+        return False
+    low = (title or "").lower()
+    return "deepagents-acp" in low or "deepagents-talon" in low
 
 
 def is_minor_release(title: str) -> bool:
@@ -577,7 +616,7 @@ def classify_rss(item: dict) -> Optional[dict]:
         }
 
     if "releases" in feed_low:
-        if any(x in low for x in ["beta", "nightly", "staging", "alpha"]):
+        if any(x in low for x in ["beta", "nightly", "staging", "alpha", "pre-release", "prerelease"]):
             return None
         if re.search(r"(?:^|[-_\s])v?\d+\.\d+\.\d+(?:a|b|rc)\d+\b", low):
             return None
@@ -589,6 +628,8 @@ def classify_rss(item: dict) -> Optional[dict]:
         if any(x in low for x in ["chore:", "ci:", "build:", "internal", "rusty-v8", "dependency"]):
             return None
         if is_acp_crate_churn(feed, title):
+            return None
+        if is_deepagents_sidecar_churn(feed, title):
             return None
         repo = repo_name_from_feed(feed)
         display_title = normalize_release_title(repo, title)

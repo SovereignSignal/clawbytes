@@ -10,17 +10,17 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 
 | Class | What | Defined in | Cadence |
 |---|---|---|---|
-| RSS/Atom feeds | ~55 feeds: vendor blogs, changelogs (Cursor, GitHub/Copilot, Zed), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol), research blogs, ArXiv cs.AI/cs.CL | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
+| RSS/Atom feeds | 78 feeds: vendor blogs, changelogs (Cursor, GitHub/Copilot, Zed), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau), research blogs, ArXiv cs.AI/cs.CL | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
 | GitHub releases (API) | Curated + auto-discovered repos, merged via `claw-ecosystem-sources.json` | `scripts/claw-ecosystem-monitor.sh` | 30 min |
 | HF Daily Papers | huggingface.co/papers via `api/daily_papers`, keyword-scored into lanes | `scripts/claw-hf-papers.py` | 30 min |
 | Reddit | r/openclaw, r/ClaudeAI, r/ClaudeCode, r/cursor, r/ChatGPTCoding, r/AI_Agents, r/mcp + targeted searches in r/LocalLLaMA, r/selfhosted | `scripts/claw-reddit-monitor.py` (`SUBREDDITS`) | 30 min |
 | Hacker News | Algolia queries (harness/agent/MCP terms), 14-day window | `scripts/claw-hn-monitor.py`, `claw-ecosystem-monitor.sh` | 30 min |
 | Moltbook | Community posts, HTML scrape | `scripts/claw-moltbook-monitor.py` | 30 min |
-| Discovery | GitHub topic/keyword search, awesome lists (awesome-ai-agents, awesome-agents, awesome-mcp-servers, awesome-claude-code, awesome-code-ai); subreddit/HN discovery queries are harness-scoped (no "machine learning news") | `claw-ecosystem-monitor.sh --mode discover`, `claw-source-discovery.py` | weekly (Mon 14:10 UTC) |
+| Discovery | GitHub topic/keyword search, awesome lists (awesome-ai-agents, awesome-agents, awesome-mcp-servers, awesome-claude-code, awesome-code-ai, awesome-cli-coding-agents); subreddit/HN discovery queries are harness-scoped (no "machine learning news") | `claw-ecosystem-monitor.sh --mode discover`, `claw-source-discovery.py` | weekly (Mon 14:10 UTC) |
 | Leaderboards | SWE-bench (Verified, bash-only), Aider polyglot, LiveBench, Terminal-Bench 2.1 — emits only on top-3 movement, sha-gated fetches | `scripts/claw-leaderboard-monitor.py` (`BOARDS`) | 30 min |
 | Registries | OpenRouter model list (id diff = minutes-level new-model detection), LiteLLM pricing registry (sha-gated key diff), HF trending (weekly, coding/agent filter) | `scripts/claw-registry-monitor.py` | 30 min |
-| Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + Antigravity HTML heading-hash + sitemap slug diffs (Anthropic news/engineering, DeepSeek news) | `scripts/claw-pagewatch-monitor.py` | 30 min |
-| Bluesky | Phrase search ("claude code", "codex cli", "openclaw", "mcp server", "agent harness"), engagement-gated | `scripts/claw-bsky-monitor.py` | 30 min |
+| Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + HTML heading-hash (Antigravity, Kiro changelog) + sitemap slug diffs (Anthropic news/engineering, DeepSeek news) | `scripts/claw-pagewatch-monitor.py` | 30 min |
+| Bluesky | Phrase search ("claude code", "codex cli", "openclaw", "mcp server", "agent harness", plus Cursor/Devin/Antigravity/ACP/Kiro/Kilo/Kimi/Grok Build/Mistral Vibe), engagement-gated | `scripts/claw-bsky-monitor.py` | 30 min |
 
 Discovered repos/feeds/subreddits land in `claw-ecosystem-sources.json` /
 `clawbytes-dynamic-feeds.json` on the volume and are merged automatically —
@@ -145,6 +145,41 @@ Drop a URL on Sov's channel of choice. Whoever evaluates it:
    **added**.
 3. If skipped: note it here as **passed** with the reason, so it isn't
    re-evaluated from scratch next time.
+
+### 2026-09-19 harness-type widening
+
+The August routing work shipped the vendors we already fetched. The channel
+still read as a handful of harnesses because the *intake* list lagged the
+2026 CLI field (Pi, Kiro, Kilo, Kimi Code, Mistral Vibe, …). Probe date
+2026-09-19; titles and recency taken from live `releases.atom` / HTML.
+
+**Added** — Pi (`earendil-works/pi`, live v0.85.1); Kilo Code (`Kilo-Org/kilocode`,
+v7.7.5); Kimi Code (`MoonshotAI/kimi-code`, 2.0.2 — successor to Kimi CLI);
+Mistral Vibe (`mistralai/mistral-vibe`, v2.25.5); Open Interpreter
+(`openinterpreter/openinterpreter`, 0.0.44); Deep Agents
+(`langchain-ai/deepagents`, `deepagents-code` + core SDK only — ACP/talon
+package bumps dropped); Codewhale (`Hmbown/CodeWhale`, v0.9.13); MiMo Code
+(`XiaomiMiMo/MiMo-Code`, v0.1.14); AGNO-AGI (`agno-agi/agno`, v3.0.10 —
+editorial-scope framework that had no feed); Tau (`huggingface/tau`, 0.4.4);
+Kiro changelog pagewatch (`kiro.dev/changelog`, HTML h2-hash, silent
+baseline — no RSS, no `.md` sibling). OpenCode atom repointed
+`sst/opencode` → `anomalyco/opencode`; Goose `block/goose` →
+`aaif-goose/goose` (both 301 to the live repo). Discovery now crawls
+`bradAGI/awesome-cli-coding-agents`. HN/Bluesky/LocalLLaMA queries and
+`READ_TERMS`/`REPO_PRIORITY` gained the new compounds. `classify_rss`
+also drops `pre-release`/`prerelease` titles (Kilo ships those next to
+`.0` tags).
+
+**Passed** — Grok Build `xai-org/grok-build` atom is empty (monorepo-sync
+commits, no tags); vocab still added so HN/Reddit mentions route.
+Trae Agent atom empty. Claw Code / leak-derived Claude Code rewrites
+(empty atoms; skip). Mastra atom is a package firehose (`@mastra/voice-*`
+same day as `mastracode`). Prime Agent and Oh My OpenAgent are beta-tag
+firehoses. Oh My Pi is multi-release-per-day. MetaGPT last release
+2025-03-09. SWE-agent last 2025-05-22. Plandex last 2025-07-16. Amazon Q
+Developer CLI last 2025-11-17 (Kiro is the live AWS product). Kimi CLI
+superseded by Kimi Code. Copilot CLI atom is daily `1.0.x-N` build tags
+(Copilot Changelog already covers the product). Kiro RSS/`.md` 404.
 
 The weekly yield snapshot (`memory/claw-source-yield.json`, Mondays 15:45 UTC)
 is the evidence for pruning sources that never produce. On-demand `audit` is

@@ -290,6 +290,7 @@ discover_awesome_lists() {
         "https://raw.githubusercontent.com/punkpeye/awesome-mcp-servers/main/README.md"
         "https://raw.githubusercontent.com/hesreallyhim/awesome-claude-code/main/README.md"
         "https://raw.githubusercontent.com/sourcegraph/awesome-code-ai/main/README.md"
+        "https://raw.githubusercontent.com/bradAGI/awesome-cli-coding-agents/main/README.md"
     )
     
     for list_url in "${lists[@]}"; do

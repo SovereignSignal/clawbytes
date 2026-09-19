@@ -81,7 +81,7 @@ SUBREDDITS = [
     },
     {
         "name": "LocalLLaMA",
-        "url": "https://www.reddit.com/r/LocalLLaMA/search.json?q=openclaw+OR+claude+code+OR+codex+OR+coding+agent&sort=new&limit=10",
+        "url": "https://www.reddit.com/r/LocalLLaMA/search.json?q=openclaw+OR+claude+code+OR+codex+OR+coding+agent+OR+kiro+OR+%22kilo+code%22+OR+%22kimi+code%22&sort=new&limit=10",
         "type": "search"
     },
     {
