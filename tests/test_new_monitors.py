@@ -63,13 +63,17 @@ def test_bsky_engagement_gate_and_url():
 
 def test_bsky_queries_cover_2026_harness_names():
     blob = " ".join(bsky.QUERIES).lower()
-    for phrase in ("cursor", "devin desktop", "antigravity", "agent client protocol"):
+    for phrase in ("cursor", "devin desktop", "antigravity", "agent client protocol",
+                   "kiro", "kilo code", "kimi code", "grok build", "mistral vibe",
+                   "oh-my-pi", "oh my pi", "herdr"):
         assert phrase in blob, f"Bluesky queries missing {phrase!r}"
 
 
 def test_hn_queries_cover_2026_harness_names():
     blob = " ".join(q["query"] for q in hn.HN_QUERIES).lower()
-    for phrase in ("antigravity", "devin desktop", "agent client protocol"):
+    for phrase in ("antigravity", "devin desktop", "agent client protocol",
+                   "kiro", "kilo code", "kimi code", "grok build", "pi coding agent",
+                   "oh-my-pi", "herdr"):
         assert phrase in blob, f"HN queries missing {phrase!r}"
 
 
@@ -99,6 +103,43 @@ def test_antigravity_html_watch_is_wired():
     watch = next(w for w in pw.HTML_WATCHES if w["key"] == "antigravity-changelog")
     assert watch["fingerprint"] == "headings"
     assert watch["html"] == "https://antigravity.google/changelog"
+
+
+def test_kiro_html_watch_is_wired():
+    keys = {w["key"] for w in pw.HTML_WATCHES}
+    assert "kiro-changelog" in keys
+    watch = next(w for w in pw.HTML_WATCHES if w["key"] == "kiro-changelog")
+    assert watch["fingerprint"] == "headings"
+    assert watch["html"] == "https://kiro.dev/changelog"
+    assert "h2" in watch["heading"]
+
+
+def test_2026_harness_release_feeds_are_wired():
+    names = {f["name"]: f for f in rss.RSS_FEEDS}
+    expected = {
+        "Pi Coding Agent Releases": "earendil-works/pi/releases.atom",
+        "Oh My Pi Releases": "can1357/oh-my-pi/releases.atom",
+        "Herdr Releases": "herdrdev/herdr/releases.atom",
+        "Kilo Code Releases": "Kilo-Org/kilocode/releases.atom",
+        "Kimi Code Releases": "MoonshotAI/kimi-code/releases.atom",
+        "Mistral Vibe Releases": "mistralai/mistral-vibe/releases.atom",
+        "Open Interpreter Releases": "openinterpreter/openinterpreter/releases.atom",
+        "Deep Agents Releases": "langchain-ai/deepagents/releases.atom",
+        "Codewhale Releases": "Hmbown/CodeWhale/releases.atom",
+        "MiMo Code Releases": "XiaomiMiMo/MiMo-Code/releases.atom",
+        "AGNO-AGI Releases": "agno-agi/agno/releases.atom",
+        "Tau Coding Agent Releases": "huggingface/tau/releases.atom",
+    }
+    for name, suffix in expected.items():
+        assert name in names, f"{name} missing from RSS_FEEDS"
+        assert names[name]["url"].endswith(suffix)
+        assert "releases" in names[name]["tags"]
+        # Version-only titles must still enter the backlog (invariant 2).
+        assert rss.is_relevant({"title": "v1.0.0", "summary": ""}, name)
+
+    # Canonical repos after 2026 moves (old URLs still 301, but don't leave them).
+    assert names["opencode Releases"]["url"].endswith("anomalyco/opencode/releases.atom")
+    assert names["Goose Releases"]["url"].endswith("aaif-goose/goose/releases.atom")
 
 
 def test_html_heading_fingerprint_ignores_bundle_hash(tmp_path, monkeypatch):

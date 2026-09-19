@@ -70,6 +70,17 @@ HTML_WATCHES = [
         "fingerprint": "headings",
         "lane": "ship",
     },
+    {
+        "key": "kiro-changelog",
+        "label": "Kiro",
+        "html": "https://kiro.dev/changelog",
+        "page": "https://kiro.dev/changelog",
+        # Root changelog is an HTML SPA (no RSS, no .md sibling — probed 2026-09).
+        # Hash h2s, not the full page; first sighting is a silent baseline.
+        "heading": r"<h2[^>]*>(.*?)</h2>",
+        "fingerprint": "headings",
+        "lane": "ship",
+    },
 ]
 
 

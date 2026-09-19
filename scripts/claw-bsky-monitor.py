@@ -25,6 +25,8 @@ HOSTS = ["https://api.bsky.app", "https://public.api.bsky.app"]
 QUERIES = [
     '"claude code"', '"codex cli"', '"openclaw"', '"mcp server"', '"agent harness"',
     '"cursor"', '"devin desktop"', '"antigravity"', '"agent client protocol"',
+    '"kiro"', '"kilo code"', '"kimi code"', '"grok build"', '"mistral vibe"',
+    '"oh-my-pi"', '"oh my pi"', '"herdr"',
 ]
 
 MIN_LIKES = 20

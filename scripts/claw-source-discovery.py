@@ -33,6 +33,8 @@ SUBREDDIT_QUERIES = [
     "claude code",
     "mcp server",
     "agent harness",
+    "kiro",
+    "kilo code",
 ]
 
 # Live allowlist (must match clawbytes_threads.ALLOWED_SUBREDDITS hardcoded set).
@@ -75,6 +77,13 @@ HN_TOPIC_KEYWORDS = {
     "claude code": "Claude Code",
     "devin desktop": "Devin Desktop",
     "agent client protocol": "Agent Client Protocol",
+    "kiro": "Kiro",
+    "kilo code": "Kilo Code",
+    "kimi code": "Kimi Code",
+    "grok build": "Grok Build",
+    "oh-my-pi": "Oh My Pi",
+    "oh my pi": "Oh My Pi",
+    "herdr": "Herdr",
     "mcp": "MCP",
     "reasoning": "reasoning model",
     "agentic": "agentic AI",
@@ -95,6 +104,10 @@ EXISTING_HN_QUERIES = {
     "AI assistant local self-hosted",
     "claude code OR cursor OR windsurf OR copilot",
     'antigravity OR "devin desktop" OR "agent client protocol"',
+    'kiro OR "kilo code" OR "kimi code" OR "mistral vibe"',
+    '"grok build" OR "open interpreter" OR "pi coding agent"',
+    '"oh-my-pi" OR "oh my pi" OR omp.sh',
+    "herdr",
     "AI agent security vulnerability",
     "LLM prompt injection exploit",
     "AI agent safety risk",

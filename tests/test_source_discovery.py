@@ -43,10 +43,12 @@ def test_hn_topic_keywords_drop_generic_ml_and_cover_harnesses():
     keys = {k.lower() for k in disc.HN_TOPIC_KEYWORDS}
     assert "diffusion" not in keys
     assert "transformer" not in keys
-    for phrase in ("antigravity", "cursor", "coding agent", "mcp", "devin desktop", "agent client protocol"):
+    for phrase in ("antigravity", "cursor", "coding agent", "mcp", "devin desktop",
+                   "agent client protocol", "kiro", "kilo code", "kimi code", "grok build",
+                   "oh-my-pi", "oh my pi", "herdr"):
         assert phrase in keys, f"HN topic keywords missing {phrase!r}"
     # Substring traps — never add bare tokens that live inside common words.
-    for trap in ("amp", "opus", "acp", "augment", "droid"):
+    for trap in ("amp", "opus", "acp", "augment", "droid", "pi", "kilo", "tau", "vibe", "agno", "omp"):
         assert trap not in keys
 
 
@@ -54,3 +56,9 @@ def test_existing_hn_queries_cover_live_monitor_queries():
     live = {q["query"] for q in hn.HN_QUERIES}
     assert live <= disc.EXISTING_HN_QUERIES
     assert any("antigravity" in q and "devin desktop" in q for q in disc.EXISTING_HN_QUERIES)
+    assert any("kiro" in q and "kilo code" in q for q in disc.EXISTING_HN_QUERIES)
+
+
+def test_discovery_crawls_cli_coding_agents_awesome_list():
+    text = (SCRIPTS / "claw-ecosystem-monitor.sh").read_text()
+    assert "bradAGI/awesome-cli-coding-agents" in text

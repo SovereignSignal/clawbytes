@@ -62,14 +62,14 @@ RSS_FEEDS = [
     {"name": "vercel-ai Releases", "url": "https://github.com/vercel/ai/releases.atom", "tags": ["releases", "agent-sdk"]},
     {"name": "continue Releases", "url": "https://github.com/continuedev/continue/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "e2b Releases", "url": "https://github.com/e2b-dev/E2B/releases.atom", "tags": ["releases", "sandbox"]},
-    {"name": "opencode Releases", "url": "https://github.com/sst/opencode/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "opencode Releases", "url": "https://github.com/anomalyco/opencode/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "gemini CLI Releases", "url": "https://github.com/google-gemini/gemini-cli/releases.atom", "tags": ["releases", "coding-agent"]},
     # Harness ecosystem widening (2026-06)
     {"name": "GitHub Copilot Changelog", "url": "https://github.blog/changelog/label/copilot/feed/", "tags": ["coding-agent", "official"], "high_signal": True},
     {"name": "Aider Releases", "url": "https://github.com/Aider-AI/aider/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "Cline Releases", "url": "https://github.com/cline/cline/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "Roo Code Releases", "url": "https://github.com/RooCodeInc/Roo-Code/releases.atom", "tags": ["releases", "coding-agent"]},
-    {"name": "Goose Releases", "url": "https://github.com/block/goose/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Goose Releases", "url": "https://github.com/aaif-goose/goose/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "OpenHands Releases", "url": "https://github.com/All-Hands-AI/OpenHands/releases.atom", "tags": ["releases", "frameworks"]},
     {"name": "Crush Releases", "url": "https://github.com/charmbracelet/crush/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "Qwen Code Releases", "url": "https://github.com/QwenLM/qwen-code/releases.atom", "tags": ["releases", "coding-agent"]},
@@ -97,6 +97,21 @@ RSS_FEEDS = [
     {"name": "openai-python Releases", "url": "https://github.com/openai/openai-python/releases.atom", "tags": ["releases", "agent-sdk"]},
     {"name": "python-genai Releases", "url": "https://github.com/googleapis/python-genai/releases.atom", "tags": ["releases", "agent-sdk"]},
     {"name": "Agent Client Protocol Releases", "url": "https://github.com/agentclientprotocol/agent-client-protocol/releases.atom", "tags": ["releases", "agent-sdk"]},
+    # 2026-09 harness widening — first-party release atoms, all endpoint-verified.
+    # Feed names stay compound so repo_name_from_feed never keys on substring
+    # traps (bare "pi"⊂picoclaw/api, "agno"⊂agnostic, "tau"/"kilo"/"vibe").
+    {"name": "Pi Coding Agent Releases", "url": "https://github.com/earendil-works/pi/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Oh My Pi Releases", "url": "https://github.com/can1357/oh-my-pi/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Herdr Releases", "url": "https://github.com/herdrdev/herdr/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Kilo Code Releases", "url": "https://github.com/Kilo-Org/kilocode/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Kimi Code Releases", "url": "https://github.com/MoonshotAI/kimi-code/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Mistral Vibe Releases", "url": "https://github.com/mistralai/mistral-vibe/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Open Interpreter Releases", "url": "https://github.com/openinterpreter/openinterpreter/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Deep Agents Releases", "url": "https://github.com/langchain-ai/deepagents/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Codewhale Releases", "url": "https://github.com/Hmbown/CodeWhale/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "MiMo Code Releases", "url": "https://github.com/XiaomiMiMo/MiMo-Code/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "AGNO-AGI Releases", "url": "https://github.com/agno-agi/agno/releases.atom", "tags": ["releases", "frameworks"]},
+    {"name": "Tau Coding Agent Releases", "url": "https://github.com/huggingface/tau/releases.atom", "tags": ["releases", "coding-agent"]},
     # Provider status feeds removed 2026-06-24: provider-status incidents are
     # retired from the Watch lane (operational weather, not editorial signal —
     # they read as the same alert repeating). classify_rss drops the status
@@ -145,6 +160,12 @@ RELEVANCE_KEYWORDS = [
     "replit agent", "agent mode", "augment code", "amp news",
     "warp blog", "jetbrains", "sourcegraph",
     "devin desktop", "antigravity", "agent client protocol",
+    # 2026-09 widening. Compounds only — bare "pi"/"agno"/"kilo"/"tau"/"vibe"
+    # live inside common words (picoclaw, agnostic, kilobyte, status-adjacent).
+    "kiro", "kilo code", "kimi code", "mistral vibe", "grok build",
+    "pi coding", "pi-mono", "oh-my-pi", "oh my pi", "omp.sh", "herdr",
+    "open interpreter", "deep agents", "deepagents",
+    "codewhale", "mimo code", "agno-agi", "tau coding", "tau-ai",
 ]
 
 def load_state():
