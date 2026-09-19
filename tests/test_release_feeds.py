@@ -9,7 +9,7 @@ def test_new_harness_repos_have_priorities():
                  "devin desktop", "devin", "antigravity", "amp news",
                  "factory", "copilot", "warp blog", "windsurf", "replit",
                  "augment code", "junie", "jetbrains", "agent client protocol",
-                 "kiro", "pi coding", "oh my pi", "kilo code", "kimi code", "grok build",
+                 "kiro", "pi coding", "oh my pi", "herdr", "kilo code", "kimi code", "grok build",
                  "open interpreter", "deep agents", "mistral vibe",
                  "codewhale", "mimo code", "agno-agi", "tau coding"]:
         assert repo in ct.REPO_PRIORITY, f"{repo} missing from REPO_PRIORITY"
@@ -39,6 +39,30 @@ def test_picoclaw_still_wins_over_pi_coding():
     # "pi" is inside "picoclaw"; the compound key must not steal Claw derivatives.
     assert ct.repo_name_from_feed("PicoClaw Releases") == "picoclaw"
     assert ct.repo_name_from_feed("Pi Coding Agent Releases") == "pi coding"
+
+
+def test_herdr_release_routes_to_ship():
+    assert ct.repo_name_from_feed("Herdr Releases") == "herdr"
+    item = {
+        "feed": "Herdr Releases",
+        "title": "v0.10.0",
+        "link": "https://github.com/herdrdev/herdr/releases/tag/v0.10.0",
+        "published": datetime.now(timezone.utc).isoformat(),
+    }
+    candidate = ct.classify_rss(item)
+    assert candidate is not None
+    assert candidate["primaryCategory"] == "ship"
+    assert candidate["score"] >= ct.REPO_PRIORITY["herdr"]
+
+
+def test_herdr_preview_build_is_dropped():
+    item = {
+        "feed": "Herdr Releases",
+        "title": "Preview build 2026-09-16-2c29fb29e302",
+        "link": "https://github.com/herdrdev/herdr/releases/tag/preview-2026-09-16",
+        "published": datetime.now(timezone.utc).isoformat(),
+    }
+    assert ct.classify_rss(item) is None
 
 
 def test_oh_my_pi_release_routes_to_ship():

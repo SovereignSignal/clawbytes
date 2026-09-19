@@ -35,6 +35,7 @@ HN_QUERIES = [
     {"query": "kiro OR \"kilo code\" OR \"kimi code\" OR \"mistral vibe\"", "tags": "story", "min_points": 10},
     {"query": "\"grok build\" OR \"open interpreter\" OR \"pi coding agent\"", "tags": "story", "min_points": 10},
     {"query": "\"oh-my-pi\" OR \"oh my pi\" OR omp.sh", "tags": "story", "min_points": 10},
+    {"query": "herdr", "tags": "story", "min_points": 10},
     # Security/watch
     {"query": "AI agent security vulnerability", "tags": "story", "min_points": 5},
     {"query": "LLM prompt injection exploit", "tags": "story", "min_points": 5},

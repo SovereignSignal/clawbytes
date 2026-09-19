@@ -45,7 +45,7 @@ def test_hn_topic_keywords_drop_generic_ml_and_cover_harnesses():
     assert "transformer" not in keys
     for phrase in ("antigravity", "cursor", "coding agent", "mcp", "devin desktop",
                    "agent client protocol", "kiro", "kilo code", "kimi code", "grok build",
-                   "oh-my-pi", "oh my pi"):
+                   "oh-my-pi", "oh my pi", "herdr"):
         assert phrase in keys, f"HN topic keywords missing {phrase!r}"
     # Substring traps — never add bare tokens that live inside common words.
     for trap in ("amp", "opus", "acp", "augment", "droid", "pi", "kilo", "tau", "vibe", "agno", "omp"):

@@ -10,7 +10,7 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 
 | Class | What | Defined in | Cadence |
 |---|---|---|---|
-| RSS/Atom feeds | 79 feeds: vendor blogs, changelogs (Cursor, GitHub/Copilot, Zed), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau), research blogs, ArXiv cs.AI/cs.CL | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
+| RSS/Atom feeds | 80 feeds: vendor blogs, changelogs (Cursor, GitHub/Copilot, Zed), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau), research blogs, ArXiv cs.AI/cs.CL | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
 | GitHub releases (API) | Curated + auto-discovered repos, merged via `claw-ecosystem-sources.json` | `scripts/claw-ecosystem-monitor.sh` | 30 min |
 | HF Daily Papers | huggingface.co/papers via `api/daily_papers`, keyword-scored into lanes | `scripts/claw-hf-papers.py` | 30 min |
 | Reddit | r/openclaw, r/ClaudeAI, r/ClaudeCode, r/cursor, r/ChatGPTCoding, r/AI_Agents, r/mcp + targeted searches in r/LocalLLaMA, r/selfhosted | `scripts/claw-reddit-monitor.py` (`SUBREDDITS`) | 30 min |
@@ -156,7 +156,9 @@ still read as a handful of harnesses because the *intake* list lagged the
 **Added** — Pi (`earendil-works/pi`, live v0.85.1); OMP / Oh My Pi
 (`can1357/oh-my-pi`, CLI `omp`, live v18.2.6 — daily patches demote via
 `is_minor_release`, `.0` minors still Ship; never key on bare `"omp"` ⊂
-compile/complete); Kilo Code (`Kilo-Org/kilocode`,
+compile/complete); Herdr (`herdrdev/herdr`, agent multiplexer,
+live v0.9.1 — preview-build titles already drop via the existing
+preview filter); Kilo Code (`Kilo-Org/kilocode`,
 v7.7.5); Kimi Code (`MoonshotAI/kimi-code`, 2.0.2 — successor to Kimi CLI);
 Mistral Vibe (`mistralai/mistral-vibe`, v2.25.5); Open Interpreter
 (`openinterpreter/openinterpreter`, 0.0.44); Deep Agents

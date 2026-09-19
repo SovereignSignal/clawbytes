@@ -102,6 +102,7 @@ RSS_FEEDS = [
     # traps (bare "pi"⊂picoclaw/api, "agno"⊂agnostic, "tau"/"kilo"/"vibe").
     {"name": "Pi Coding Agent Releases", "url": "https://github.com/earendil-works/pi/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "Oh My Pi Releases", "url": "https://github.com/can1357/oh-my-pi/releases.atom", "tags": ["releases", "coding-agent"]},
+    {"name": "Herdr Releases", "url": "https://github.com/herdrdev/herdr/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "Kilo Code Releases", "url": "https://github.com/Kilo-Org/kilocode/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "Kimi Code Releases", "url": "https://github.com/MoonshotAI/kimi-code/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "Mistral Vibe Releases", "url": "https://github.com/mistralai/mistral-vibe/releases.atom", "tags": ["releases", "coding-agent"]},
@@ -162,7 +163,7 @@ RELEVANCE_KEYWORDS = [
     # 2026-09 widening. Compounds only — bare "pi"/"agno"/"kilo"/"tau"/"vibe"
     # live inside common words (picoclaw, agnostic, kilobyte, status-adjacent).
     "kiro", "kilo code", "kimi code", "mistral vibe", "grok build",
-    "pi coding", "pi-mono", "oh-my-pi", "oh my pi", "omp.sh",
+    "pi coding", "pi-mono", "oh-my-pi", "oh my pi", "omp.sh", "herdr",
     "open interpreter", "deep agents", "deepagents",
     "codewhale", "mimo code", "agno-agi", "tau coding", "tau-ai",
 ]

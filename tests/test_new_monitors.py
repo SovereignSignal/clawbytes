@@ -65,7 +65,7 @@ def test_bsky_queries_cover_2026_harness_names():
     blob = " ".join(bsky.QUERIES).lower()
     for phrase in ("cursor", "devin desktop", "antigravity", "agent client protocol",
                    "kiro", "kilo code", "kimi code", "grok build", "mistral vibe",
-                   "oh-my-pi", "oh my pi"):
+                   "oh-my-pi", "oh my pi", "herdr"):
         assert phrase in blob, f"Bluesky queries missing {phrase!r}"
 
 
@@ -73,7 +73,7 @@ def test_hn_queries_cover_2026_harness_names():
     blob = " ".join(q["query"] for q in hn.HN_QUERIES).lower()
     for phrase in ("antigravity", "devin desktop", "agent client protocol",
                    "kiro", "kilo code", "kimi code", "grok build", "pi coding agent",
-                   "oh-my-pi"):
+                   "oh-my-pi", "herdr"):
         assert phrase in blob, f"HN queries missing {phrase!r}"
 
 
@@ -119,6 +119,7 @@ def test_2026_harness_release_feeds_are_wired():
     expected = {
         "Pi Coding Agent Releases": "earendil-works/pi/releases.atom",
         "Oh My Pi Releases": "can1357/oh-my-pi/releases.atom",
+        "Herdr Releases": "herdrdev/herdr/releases.atom",
         "Kilo Code Releases": "Kilo-Org/kilocode/releases.atom",
         "Kimi Code Releases": "MoonshotAI/kimi-code/releases.atom",
         "Mistral Vibe Releases": "mistralai/mistral-vibe/releases.atom",
