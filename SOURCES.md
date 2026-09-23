@@ -10,7 +10,7 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 
 | Class | What | Defined in | Cadence |
 |---|---|---|---|
-| RSS/Atom feeds | 79 feeds: vendor blogs, changelogs that Ship (Cursor, GitHub Copilot, Amp News), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau), research blogs, ArXiv cs.AI/cs.CL (harness-compound gate — bare `agent` is not enough). Warp, Replit, Augment, JetBrains, and Zed blogs stay in the list and route to Read. Windsurf Blog is not in the list (removed 2026-09-23, stale since 2026-05-12). A new feed name baselines silently. | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
+| RSS/Atom feeds | 80 feeds: vendor blogs, changelogs that Ship (Cursor, GitHub Copilot, Amp News), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, fx, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau), research blogs, ArXiv cs.AI/cs.CL (harness-compound gate — bare `agent` is not enough). Warp, Replit, Augment, JetBrains, and Zed blogs stay in the list and route to Read. Windsurf Blog is not in the list (removed 2026-09-23, stale since 2026-05-12). A new feed name baselines silently. | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
 | GitHub releases (API) | Curated + auto-discovered repos, merged via `claw-ecosystem-sources.json`. First tag on a repo is a silent baseline. Later tags are classified on the release path; the tag is marked seen only after collect hands the item to the backlog. | `scripts/claw-ecosystem-monitor.sh` | 30 min |
 | HF Daily Papers | huggingface.co/papers via `api/daily_papers`, keyword-scored into lanes | `scripts/claw-hf-papers.py` | 30 min |
 | Reddit | r/openclaw, r/ClaudeAI, r/ClaudeCode, r/cursor, r/ChatGPTCoding, r/AI_Agents, r/mcp + targeted searches in r/LocalLLaMA, r/selfhosted | `scripts/claw-reddit-monitor.py` (`SUBREDDITS`) | 30 min |
@@ -218,3 +218,21 @@ marked seen and dropped.
 **Still passed** — Mastra, Langfuse, Helicone, Phoenix, Inspect, Modal,
 Daytona, vector-database release atoms, Grok Build (empty atom), people
 feeds, yield-based pruning. Do not add those as raw `… Releases` feeds.
+
+### 2026-09-23 harnesses named in the public tier list
+
+Probe of the harnesses in the 2026-09-21 public tier-list image. Already-covered
+names were left on their existing feeds (the #18 routing stays).
+
+**Added** — fx (`vercel-labs/fx`, atom verified, latest tag v0.0.10 on
+2026-09-14). Feed name is `fx Coding Agent Releases` so the priority key is
+the compound `fx coding` (bare `fx` matches inside `firefox`). `0.0.x` tags
+demote through `is_minor_release` and still classify as Ship; a `.0` minor
+keeps the headline score. First sighting of the feed name baselines silently.
+
+**Passed** — Grok Build. `xai-org/grok-build` `releases.atom` is valid and
+empty (no tags). The HTML changelog at `https://x.ai/build/changelog` is a
+`1.0.x` patch train (headings from 1.0.8 through 1.0.40 on 2026-09-23) with
+no RSS and no `.md` sibling. A heading-hash watch would emit every patch into
+Ship at the pagewatch score, which clears the morning bar. Vocab for HN and
+Bluesky stays; no feed was added.

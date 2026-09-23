@@ -120,6 +120,7 @@ def test_2026_harness_release_feeds_are_wired():
     expected = {
         "Pi Coding Agent Releases": "earendil-works/pi/releases.atom",
         "Oh My Pi Releases": "can1357/oh-my-pi/releases.atom",
+        "fx Coding Agent Releases": "vercel-labs/fx/releases.atom",
         "Herdr Releases": "herdrdev/herdr/releases.atom",
         "Kilo Code Releases": "Kilo-Org/kilocode/releases.atom",
         "Kimi Code Releases": "MoonshotAI/kimi-code/releases.atom",
