@@ -10,15 +10,16 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 
 | Class | What | Defined in | Cadence |
 |---|---|---|---|
-| RSS/Atom feeds | 80 feeds: vendor blogs, changelogs (Cursor, GitHub/Copilot, Zed), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau), research blogs, ArXiv cs.AI/cs.CL | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
-| GitHub releases (API) | Curated + auto-discovered repos, merged via `claw-ecosystem-sources.json` | `scripts/claw-ecosystem-monitor.sh` | 30 min |
+| RSS/Atom feeds | 79 feeds: vendor blogs, changelogs that Ship (Cursor, GitHub Copilot, Amp News), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau), research blogs, ArXiv cs.AI/cs.CL (harness-compound gate — bare `agent` is not enough). Warp, Replit, Augment, JetBrains, and Zed blogs stay in the list and route to Read. Windsurf Blog is not in the list (removed 2026-09-23, stale since 2026-05-12). A new feed name baselines silently. | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
+| GitHub releases (API) | Curated + auto-discovered repos, merged via `claw-ecosystem-sources.json`. First tag on a repo is a silent baseline. Later tags are classified on the release path; the tag is marked seen only after collect hands the item to the backlog. | `scripts/claw-ecosystem-monitor.sh` | 30 min |
 | HF Daily Papers | huggingface.co/papers via `api/daily_papers`, keyword-scored into lanes | `scripts/claw-hf-papers.py` | 30 min |
 | Reddit | r/openclaw, r/ClaudeAI, r/ClaudeCode, r/cursor, r/ChatGPTCoding, r/AI_Agents, r/mcp + targeted searches in r/LocalLLaMA, r/selfhosted | `scripts/claw-reddit-monitor.py` (`SUBREDDITS`) | 30 min |
 | Hacker News | Algolia queries (harness/agent/MCP terms), 14-day window | `scripts/claw-hn-monitor.py`, `claw-ecosystem-monitor.sh` | 30 min |
 | Moltbook | Community posts, HTML scrape | `scripts/claw-moltbook-monitor.py` | 30 min |
 | Discovery | GitHub topic/keyword search, awesome lists (awesome-ai-agents, awesome-agents, awesome-mcp-servers, awesome-claude-code, awesome-code-ai, awesome-cli-coding-agents); subreddit/HN discovery queries are harness-scoped (no "machine learning news") | `claw-ecosystem-monitor.sh --mode discover`, `claw-source-discovery.py` | weekly (Mon 14:10 UTC) |
 | Leaderboards | SWE-bench (Verified, bash-only), Aider polyglot, LiveBench, Terminal-Bench 2.1 — emits only on top-3 movement, sha-gated fetches | `scripts/claw-leaderboard-monitor.py` (`BOARDS`) | 30 min |
-| Registries | OpenRouter model list (id diff = minutes-level new-model detection), LiteLLM pricing registry (sha-gated key diff), HF trending (weekly, coding/agent filter) | `scripts/claw-registry-monitor.py` | 30 min |
+| Registries | OpenRouter model list (id diff, coding/agent family filter — same word-boundary pattern as HF trending), LiteLLM pricing registry (sha-gated key diff, URL fragment includes the new-key hash), HF trending (weekly, coding/agent filter) | `scripts/claw-registry-monitor.py` | 30 min |
+| GitHub advisories | Advisory Database, package-name allowlist (tracked repos, not `ecosystem=pip`), silent baseline, `html_url` per advisory, cap 2 Watch items per UTC day | `scripts/claw-advisory-monitor.py` | 30 min |
 | Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + HTML heading-hash (Antigravity, Kiro changelog) + sitemap slug diffs (Anthropic news/engineering, DeepSeek news) | `scripts/claw-pagewatch-monitor.py` | 30 min |
 | Bluesky | Phrase search ("claude code", "codex cli", "openclaw", "mcp server", "agent harness", plus Cursor/Devin/Antigravity/ACP/Kiro/Kilo/Kimi/Grok Build/Mistral Vibe), engagement-gated | `scripts/claw-bsky-monitor.py` | 30 min |
 
@@ -189,3 +190,31 @@ superseded by Kimi Code. Copilot CLI atom is daily `1.0.x-N` build tags
 The weekly yield snapshot (`memory/claw-source-yield.json`, Mondays 15:45 UTC)
 is the evidence for pruning sources that never produce. On-demand `audit` is
 the human-readable path.
+
+### 2026-09-23 routing and Watch
+
+**Removed** — Windsurf Blog (`windsurf.com/feed.xml`). Still stale: last item
+2026-05-12. Devin Release Notes remains the Cognition changelog.
+
+**Retargeted, still fetched** — Warp Blog, Replit Blog, Augment Code Blog,
+JetBrains AI Blog, JetBrains Junie Blog, and Zed Blog. They no longer Ship.
+A keyword hit classifies as Read. Cursor Changelog, GitHub Copilot Changelog,
+and Amp News still Ship. A `coding-agent` tag plus the word `blog` is not a
+Ship signal (LangChain, Mistral, and DeepMind stay Read).
+
+**Added** — GitHub Advisory Database as a Watch monitor
+(`scripts/claw-advisory-monitor.py`). Allowlist match on
+`vulnerabilities[].package.name` (tracked packages, including langchain,
+langgraph, mcp, claude-code, codex). Silent first run. Advisory `html_url`.
+Cap 2 items per UTC day. Not an `ecosystem=pip` query. Provider status feeds
+stay retired.
+
+**Routing** — ArXiv cs.AI and cs.CL require a harness compound (`coding agent`,
+`tool use`, `mcp`, `claude code`, `agent harness`, …) instead of bare `agent`.
+OpenRouter emits only coding/agent ids. HN titles that start with `How ` stay
+Community. Discovered-repo GitHub releases are classified instead of being
+marked seen and dropped.
+
+**Still passed** — Mastra, Langfuse, Helicone, Phoenix, Inspect, Modal,
+Daytona, vector-database release atoms, Grok Build (empty atom), people
+feeds, yield-based pruning. Do not add those as raw `… Releases` feeds.

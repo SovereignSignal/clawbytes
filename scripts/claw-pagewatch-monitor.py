@@ -211,7 +211,10 @@ def check_pages(verbose=True):
             continue
         old = state["slugs"].get(watch["key"], [])
         fresh = [u for u in slugs if u not in set(old)] if old else []
-        for url in fresh[:MAX_SITEMAP_ITEMS_PER_RUN]:
+        # The cap is a rate limit. Persist only what we emitted plus the
+        # previous baseline; overflow stays unseen for the next run.
+        emitted = fresh[:MAX_SITEMAP_ITEMS_PER_RUN] if old else []
+        for url in emitted:
             lane = lane_for_slug(url)
             new_items.append({
                 "id": f"pagewatch:{watch['key']}:{url}",
@@ -226,7 +229,18 @@ def check_pages(verbose=True):
                 print(f"  🆕 {watch['label']}: {url}")
         if verbose and not fresh:
             print(f"  = {watch['label']} sitemap: {'baseline recorded' if not old else 'no new pages'} ({len(slugs)} tracked)")
-        state["slugs"][watch["key"]] = slugs
+        elif verbose and len(fresh) > len(emitted):
+            print(f"  ⚠️ {watch['label']} sitemap: {len(fresh) - len(emitted)} new URL(s) held for the next run")
+        if not old:
+            state["slugs"][watch["key"]] = slugs
+        else:
+            merged = list(old)
+            known = set(merged)
+            for url in emitted:
+                if url not in known:
+                    merged.append(url)
+                    known.add(url)
+            state["slugs"][watch["key"]] = merged
 
     if new_items:
         state["foundItems"] = (state.get("foundItems", []) + new_items)[-200:]

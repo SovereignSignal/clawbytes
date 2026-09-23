@@ -111,11 +111,12 @@ def load_state():
     return {"seenPosts": [], "lastCheck": None, "foundItems": []}
 
 def save_state(state):
-    """Save state to file."""
-    MEMORY_DIR.mkdir(exist_ok=True)
+    """Save state atomically (temp file + rename). A torn write aborts collect."""
+    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
     state["lastCheck"] = datetime.now(timezone.utc).isoformat()
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+    tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+    tmp.write_text(json.dumps(state, indent=2))
+    tmp.replace(STATE_FILE)
 
 def fetch_reddit(url, timeout=15):
     """Fetch Reddit JSON API."""

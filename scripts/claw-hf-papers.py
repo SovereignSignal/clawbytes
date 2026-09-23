@@ -8,6 +8,7 @@ State file: memory/claw-hf-state.json
 
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -37,6 +38,7 @@ RELEVANCE_KEYWORDS = {
     "distillation": 2,
     "distill": 2,
     "rl": 2,
+    "rlhf": 2,
     "reinforcement": 2,
     "reasoning": 2,
     "multimodal": 1,
@@ -100,8 +102,16 @@ def score_paper(paper):
     ai_summary = (paper.get("ai_summary") or "").lower()
     ai_keywords = [k.lower() for k in paper.get("ai_keywords", [])]
     text = f"{title} {summary} {ai_summary} {' '.join(ai_keywords)}"
-    score = sum(weight for kw, weight in RELEVANCE_KEYWORDS.items() if kw in text)
+    score = sum(weight for kw, weight in RELEVANCE_KEYWORDS.items() if _keyword_hit(text, kw))
     return score, text
+
+
+def _keyword_hit(text: str, kw: str) -> bool:
+    # "rl" is inside early/world/url. Match the token, and rlhf as its own token
+    # so the boundary on "rl" does not hide RLHF papers.
+    if kw in {"rl", "rlhf"}:
+        return re.search(rf"\b{re.escape(kw)}\b", text) is not None
+    return kw in text
 
 
 def assign_lane(paper, score, text):

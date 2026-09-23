@@ -80,6 +80,50 @@ def test_format_curated_html_is_consolidated_compact():
     assert out.count("🚀") == 0
 
 
+def test_publish_lane_empty_approved_items_fall_back(monkeypatch):
+    monkeypatch.setenv("CLAWBYTES_USE_CURATOR", "1")
+    curated = {"lane": "ship", "items": [], "_curator": {"approved": True, "fallback": False}}
+    monkeypatch.setattr(ct, "curator_input_bundle", lambda c, *a, **k: {"lane": c})
+    monkeypatch.setattr(ct, "run_curator_subprocess", lambda *a, **k: curated)
+    monkeypatch.setattr(ct, "format_category_bundle", lambda c, *a, **k: "DET")
+    monkeypatch.setattr(ct, "bundle_for_category", lambda c, *a, **k: [{"id": "1"}])
+    sent = {}
+    monkeypatch.setattr(ct, "send_telegram", lambda m: sent.setdefault("msg", m))
+    monkeypatch.setattr(ct, "mark_posted", lambda *a, **k: None)
+    ok, count = ct._publish_lane("ship", send=True)
+    assert ok is True and count == 1 and sent["msg"] == "DET"
+
+
+def test_publish_lane_gate_rejection_falls_back(monkeypatch):
+    monkeypatch.setenv("CLAWBYTES_USE_CURATOR", "1")
+    curated = {"lane": "ship", "items": [{"id": "a", "title": "T", "url": "https://x"}], "_curator": {"approved": True, "fallback": False}}
+    monkeypatch.setattr(ct, "curator_input_bundle", lambda c, *a, **k: {"lane": c})
+    monkeypatch.setattr(ct, "run_curator_subprocess", lambda *a, **k: curated)
+    monkeypatch.setattr(ct, "format_curated_html", lambda cur, c: "<b>unbalanced")
+
+    def _validate(message):
+        if message == "DET":
+            return (True, [])
+        return (False, ["unbalanced"])
+
+    monkeypatch.setattr(ct, "validate_lane_for_publish", _validate)
+    monkeypatch.setattr(ct, "format_category_bundle", lambda c, *a, **k: "DET")
+    monkeypatch.setattr(ct, "bundle_for_category", lambda c, *a, **k: [{"id": "1"}])
+    sent = {}
+    monkeypatch.setattr(ct, "send_telegram", lambda m: sent.setdefault("msg", m))
+    monkeypatch.setattr(ct, "mark_posted", lambda *a, **k: None)
+    ok, count = ct._publish_lane("ship", send=True)
+    assert ok is True and count == 1 and sent["msg"] == "DET"
+
+
+def test_format_curated_html_escapes_href():
+    curated = {"items": [{"title": "A & B", "url": "https://x.test/a?b=1&c=2", "blurb": "ok"}]}
+    out = ct.format_curated_html(curated, "ship")
+    assert "b=1&amp;c=2" in out
+    assert "A &amp; B" in out
+    assert 'href="https://x.test/a?b=1&c=2"' not in out
+
+
 def test_publish_lane_decline_falls_back_to_deterministic(monkeypatch):
     # Breadth over purity: a whole-lane decline must NOT silence the lane — it
     # falls back to the deterministic post. The curator's per-item drops still

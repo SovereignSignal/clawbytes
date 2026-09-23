@@ -32,7 +32,7 @@ def test_run_monitors_runs_all_when_all_succeed(monkeypatch):
 
     monkeypatch.setattr(ct.subprocess, "run", _fake_run)
     ct.run_monitors()
-    assert len(ran) == 9  # every monitor in the batch ran
+    assert len(ran) == 10  # every monitor in the batch ran
 
 
 def test_run_monitors_continues_after_one_fails(monkeypatch):
@@ -47,7 +47,7 @@ def test_run_monitors_continues_after_one_fails(monkeypatch):
 
     monkeypatch.setattr(ct.subprocess, "run", _fake_run)
     ct.run_monitors()
-    assert len(ran) == 9  # later monitors still ran
+    assert len(ran) == 10  # later monitors still ran
 
 
 def test_run_monitors_survives_timeout(monkeypatch):
@@ -62,7 +62,7 @@ def test_run_monitors_survives_timeout(monkeypatch):
 
     monkeypatch.setattr(ct.subprocess, "run", _fake_run)
     ct.run_monitors()  # must not raise
-    assert len(ran) == 9  # the timed-out monitor didn't starve the rest
+    assert len(ran) == 10  # the timed-out monitor didn't starve the rest
 
 
 def test_run_monitors_survives_unexpected_exception(monkeypatch):
@@ -76,7 +76,7 @@ def test_run_monitors_survives_unexpected_exception(monkeypatch):
 
     monkeypatch.setattr(ct.subprocess, "run", _fake_run)
     ct.run_monitors()  # must not raise
-    assert len(ran) == 9
+    assert len(ran) == 10
 
 
 def test_run_monitors_does_not_use_shell(monkeypatch):

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -223,6 +224,58 @@ def test_pagewatch_md_url_unique_per_change(tmp_path, monkeypatch):
     assert items2[0]["url"].startswith("https://x/y#updated-")
 
 
+def test_openrouter_drops_non_coding_ids(monkeypatch):
+    payload = {"data": [
+        {"id": "openai/gpt-4o", "name": "GPT-4o", "description": "general chat"},
+        {"id": "moonshotai/kimi-k2.7-code", "name": "Kimi K2.7 Code", "description": "coding"},
+        {"id": "acme/http-client", "name": "HTTP Client", "description": "client sdk"},
+        {"id": "acme/new-encoder", "name": "Encoder", "description": "encoder weights"},
+    ]}
+    monkeypatch.setattr(reg, "_fetch_json", lambda url, headers=None, timeout=30: payload)
+    baseline = reg.check_openrouter({}, "2026-09-23T00:00:00+00:00", False)
+    assert baseline == []
+    state = {"openrouterIds": ["openai/gpt-4o-old"]}
+    items = reg.check_openrouter(state, "2026-09-23T01:00:00+00:00", False)
+    urls = [item["url"] for item in items]
+    assert any("kimi-k2.7-code" in url for url in urls)
+    assert all("gpt-4o" not in url for url in urls)
+    assert all("http-client" not in url and "encoder" not in url for url in urls)
+    assert "openai/gpt-4o" in state["openrouterIds"]
+    assert "acme/http-client" in state["openrouterIds"]
+
+
+def test_hf_trending_does_not_match_encoder_or_client():
+    now = datetime(2026, 6, 12, tzinfo=timezone.utc)
+    fresh = (now - timedelta(days=2)).isoformat()
+    models = [
+        {"id": "org/new-encoder", "tags": ["encoder"], "createdAt": fresh},
+        {"id": "org/http-client", "tags": ["client"], "createdAt": fresh},
+        {"id": "org/Kimi-K2.7-Code", "tags": [], "createdAt": fresh},
+    ]
+    picks = reg.hf_trending_picks(models, known_ids=set(), now=now)
+    assert [m["id"] for m in picks] == ["org/Kimi-K2.7-Code"]
+
+
+def test_registry_litellm_same_day_batches_differ(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_fetch(url, headers=None, timeout=30):
+        calls["n"] += 1
+        if "api.github.com" in url:
+            return {"sha": f"sha-{calls['n']}"}
+        if calls["n"] < 4:
+            return {"model-a": {}, "model-b": {}}
+        return {"model-a": {}, "model-b": {}, "model-c": {}}
+
+    monkeypatch.setattr(reg, "_fetch_json", fake_fetch)
+    state = {"litellmKeys": ["model-a"], "litellmSha": "old"}
+    first = reg.check_litellm(state, "2026-09-23T01:00:00+00:00", False)
+    second = reg.check_litellm(state, "2026-09-23T02:00:00+00:00", False)
+    assert len(first) == 1 and len(second) == 1
+    assert first[0]["url"] != second[0]["url"]
+    assert "#new-2026-09-23-" in first[0]["url"]
+
+
 def test_registry_litellm_batch_url_carries_date(monkeypatch):
     def fake_fetch(url, headers=None, timeout=30):
         if "api.github.com" in url:
@@ -233,3 +286,93 @@ def test_registry_litellm_batch_url_carries_date(monkeypatch):
     items = reg.check_litellm(state, "2026-06-13T00:00:00+00:00", False)
     assert len(items) == 1
     assert "#new-2026-06-13" in items[0]["url"]
+
+
+def test_bsky_does_not_remember_posts_under_the_bar(tmp_path, monkeypatch):
+    monkeypatch.setattr(bsky, "MEMORY_DIR", tmp_path)
+    monkeypatch.setattr(bsky, "STATE_FILE", tmp_path / "claw-bsky-state.json")
+    monkeypatch.setattr(bsky, "QUERIES", ['"claude code"'])
+    uri = "at://did:plc:x/app.bsky.feed.post/cold1"
+    cold = {
+        "uri": uri, "likeCount": 1, "repostCount": 0,
+        "author": {"handle": "dev.bsky.social"},
+        "record": {"text": "claude code hooks"},
+    }
+    hot = dict(cold, likeCount=30)
+    calls = {"n": 0}
+
+    def search(_query):
+        calls["n"] += 1
+        return [cold if calls["n"] == 1 else hot]
+
+    monkeypatch.setattr(bsky, "search_posts", search)
+    assert bsky.check_bsky(verbose=False) == []
+    state = json.loads((tmp_path / "claw-bsky-state.json").read_text())
+    assert uri not in state["seenUris"]
+    items = bsky.check_bsky(verbose=False)
+    assert len(items) == 1
+    assert items[0]["id"] == uri
+
+
+def test_sitemap_cap_leaves_overflow_for_the_next_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(pw, "MEMORY_DIR", tmp_path)
+    monkeypatch.setattr(pw, "STATE_FILE", tmp_path / "claw-pagewatch-state.json")
+    monkeypatch.setattr(pw, "MD_WATCHES", [])
+    monkeypatch.setattr(pw, "HTML_WATCHES", [])
+    monkeypatch.setattr(pw, "SITEMAP_WATCHES", [{
+        "key": "anthropic",
+        "label": "Anthropic",
+        "url": "https://example.com/sitemap.xml",
+        "prefixes": ("https://www.anthropic.com/news/",),
+    }])
+    base = [f"https://www.anthropic.com/news/old-{i}" for i in range(2)]
+    burst = base + [f"https://www.anthropic.com/news/new-{i}" for i in range(7)]
+    pages = iter([base, burst, burst])
+    monkeypatch.setattr(pw, "fetch_text", lambda url, timeout=20: "<xml/>")
+    monkeypatch.setattr(pw, "sitemap_slugs", lambda xml, prefixes: next(pages))
+    assert pw.check_pages(verbose=False) == []
+    first = pw.check_pages(verbose=False)
+    second = pw.check_pages(verbose=False)
+    assert len(first) == pw.MAX_SITEMAP_ITEMS_PER_RUN
+    assert len(second) == 2
+    assert {item["url"] for item in first + second} == set(burst) - set(base)
+
+
+def test_rss_new_feed_baselines_silently(tmp_path, monkeypatch):
+    monkeypatch.setattr(rss, "MEMORY_DIR", tmp_path)
+    monkeypatch.setattr(rss, "STATE_FILE", tmp_path / "claw-rss-state.json")
+    monkeypatch.setattr(rss, "RSS_FEEDS", [{
+        "name": "Brand New Releases",
+        "url": "https://example.com/releases.atom",
+        "tags": ["releases"],
+    }])
+    first_xml = """<rss><channel><item><title>v1.0.0</title><link>https://ex/1</link><guid>id-1</guid></item></channel></rss>"""
+    second_xml = """<rss><channel>
+      <item><title>v2.0.0</title><link>https://ex/2</link><guid>id-2</guid></item>
+      <item><title>v1.0.0</title><link>https://ex/1</link><guid>id-1</guid></item>
+    </channel></rss>"""
+    bodies = iter([first_xml, second_xml])
+    monkeypatch.setattr(rss, "fetch_feed", lambda url, timeout=15: next(bodies))
+    assert rss.check_feeds(verbose=False)[0] == []
+    state = json.loads((tmp_path / "claw-rss-state.json").read_text())
+    assert "id-1" in state["lastSeenByFeed"]["Brand New Releases"]
+    assert not (tmp_path / "claw-rss-state.json.tmp").exists()
+    second, _status = rss.check_feeds(verbose=False)
+    assert [item["title"] for item in second] == ["v2.0.0"]
+
+
+def test_arxiv_relevance_requires_harness_compound():
+    assert rss.is_relevant({"title": "Tool-use agents with longer context", "summary": ""}, "ArXiv cs.AI")
+    assert not rss.is_relevant({"title": "Early agent world models", "summary": ""}, "ArXiv cs.CL")
+    assert not rss.is_relevant({"title": "A survey of diffusion models", "summary": ""}, "ArXiv cs.AI")
+
+
+def test_windsurf_blog_removed_and_marketing_blogs_not_ship_allowlisted():
+    assert all(feed["name"] != "Windsurf Blog" for feed in rss.RSS_FEEDS)
+    for name in (
+        "windsurf blog", "warp blog", "replit blog", "augment code blog",
+        "jetbrains ai blog", "jetbrains junie blog", "zed blog",
+    ):
+        assert name not in ct.CHANGELOG_SHIP_FEED_NAMES
+    for name in ("cursor changelog", "github copilot changelog", "amp news"):
+        assert name in ct.CHANGELOG_SHIP_FEED_NAMES

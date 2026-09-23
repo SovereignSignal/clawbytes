@@ -24,6 +24,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
@@ -155,6 +156,7 @@ REPO_PRIORITY = {
     "smolagents": 54,
     "junie": 56,  # before "jetbrains"
     "jetbrains": 56,
+    "zed": 58,  # clears Ship's morning bar without an age bonus; not a READ_TERMS token
     "e2b": 52,
     "crush": 50,
     "anthropic-sdk": 58,
@@ -166,17 +168,14 @@ REPO_PRIORITY = {
 # Vendor changelogs/blogs whose feed names are not "releases"/"release notes".
 # Exact feed-name match covers backlog items that landed without tags;
 # the coding-agent tag path covers new feeds without editing this tuple.
+# Exact names that Ship. Marketing blogs (Warp, Replit, Augment, JetBrains,
+# Zed, Windsurf) are not in this tuple: a keyword hit on those feeds is Read.
+# Cursor Changelog, Copilot Changelog, and Amp News stay on the Ship path.
+# Devin/Factory Release Notes Ship because the feed name contains "release notes".
 CHANGELOG_SHIP_FEED_NAMES = (
     "cursor changelog",
     "github copilot changelog",
     "amp news",
-    "windsurf blog",
-    "warp blog",
-    "replit blog",
-    "augment code blog",
-    "jetbrains ai blog",
-    "jetbrains junie blog",
-    "zed blog",
 )
 
 def _load_dynamic_subreddits():
@@ -265,10 +264,21 @@ def read_text(path: Path) -> str:
 
 
 def load_json(path: Path, default):
+    """Read JSON. A torn write (collect overlapping a monitor) is an empty read.
+
+    Callers retry next cycle. Raising here aborts collect_into_backlog, which
+    is the first thing autopublish does, so that hour's lanes would not post.
+    """
     if path.exists():
-        text = path.read_text()
+        try:
+            text = path.read_text()
+        except OSError:
+            return default
         if text.strip():
-            return json.loads(text)
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return default
     return default
 
 
@@ -343,12 +353,34 @@ def _ensure_publisher():
 
 
 def parse_dt(value: str) -> Optional[datetime]:
+    """Parse an ISO-8601 or RFC 822 timestamp into aware UTC.
+
+    RSS pubDate values are RFC 822 (`Fri, 18 Sep 2026 13:42:27 +0000` or
+    `GMT`). A naive ISO timestamp is treated as UTC so age_score can subtract
+    it from now_utc() without a TypeError that aborts the whole collect.
+    """
     if not value:
         return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except Exception:
+    text = str(value).strip()
+    if not text:
         return None
+    dt = None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        dt = None
+    if dt is None:
+        try:
+            dt = parsedate_to_datetime(text)
+        except Exception:
+            return None
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt
 
 
 def trim(text: str, length: int = 120) -> str:
@@ -436,6 +468,7 @@ def display_repo_name(repo: str) -> str:
         "augment code": "Augment Code",
         "junie": "Junie",
         "jetbrains": "JetBrains",
+        "zed": "Zed",
         "agent client protocol": "ACP",
         "kiro": "Kiro",
         "pi coding": "Pi",
@@ -495,7 +528,12 @@ def normalize_release_title(repo: str, title: str) -> str:
 def age_score(dt: Optional[datetime], max_hours: int) -> float:
     if not dt:
         return 0.0
-    hours = max(0.0, (now_utc() - dt).total_seconds() / 3600)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        hours = max(0.0, (now_utc() - dt).total_seconds() / 3600)
+    except TypeError:
+        return 0.0
     return max(0.0, max_hours - hours)
 
 
@@ -521,25 +559,50 @@ def is_deepagents_sidecar_churn(feed: str, title: str) -> bool:
     return "deepagents-acp" in low or "deepagents-talon" in low
 
 
+def is_prerelease_title(title: str) -> bool:
+    """True for a real pre-release tag, not those letters inside a stable title.
+
+    Drops `v2.0.0-alpha.2`, `v7.7.0 (pre-release)`, and `Preview build …`.
+    Keeps `Alphabetical tool index v2.0.0` and `v2.0.0 Adds preview of
+    background agents` — the token has to sit on the version, or lead the title.
+    """
+    low = (title or "").lower()
+    if re.search(r"\b(?:pre-release|prerelease)\b", low):
+        return True
+    if re.match(r"\s*(?:preview|nightly|canary|alpha|beta|staging)\b", low):
+        return True
+    # Separators only. A run of whitespace must not swallow later words, or
+    # "v2.0.0 Adds preview …" matches `preview` and the stable release drops.
+    if re.search(
+        r"v?\d+\.\d+(?:\.\d+)?(?:[-.]+|\s+)?(?:alpha|beta|rc|preview|nightly|canary|staging)\b",
+        low,
+    ):
+        return True
+    # Compact pre-release tags (PEP 440: 1.14.6a2, 2.0rc1, 1.0b3, v0.22.0rc2).
+    if re.search(r"\d+\.\d+(?:\.\d+)?(?:a|b|rc)\d+", low):
+        return True
+    if re.search(r"(?:python|rust|node|js)-v?\d+\.\d+\.\d+(?:a|b|rc)\d+", low):
+        return True
+    if re.search(r"(?<![a-z])rc[.\-]?\d", low):
+        return True
+    return False
+
+
 def is_minor_release(title: str) -> bool:
-    """Check if a release is minor (alpha, patch, hotfix, etc)."""
-    low = title.lower()
-    # Alpha/preview releases
-    if any(x in low for x in ["alpha", "preview", "nightly", "canary", "dev", "experimental"]):
+    """Demote patches and real pre-release tags. Do not demote on substrings.
+
+    `dev` inside `developer`, `fix` inside `prefix`/`fixed`, and `patch`
+    inside `dispatch` are not patch releases. `X.Y.Z` with Z>0 still is.
+    """
+    low = (title or "").lower()
+    if is_prerelease_title(title):
+        return True
+    if re.search(r"\b(?:dev|experimental|hotfix|patch|fix|minor)\b", low):
         return True
     # Patch releases: any X.Y.Z with Z>0 (e.g. 2.1.160, 1.2.4, 0.4.2) — demote so
     # routine patches don't headline. Keep .0 minor/major releases (1.2.0, 2.0.0)
     # headline-worthy, and preserve the first-cut 0.0.1 exception.
     if re.search(r"v?\d+\.\d+\.[1-9]\d*\b", low) and not re.search(r"v?0\.0\.1\b", low):
-        return True
-    # Compact pre-release tags (PEP 440 style: 1.14.6a2, 2.0rc1, 1.0b3)
-    if re.search(r"\d+\.\d+(?:\.\d+)?(?:a|b|rc)\d+", low):
-        return True
-    # Repository-specific prerelease tags can show up as python-v0.1.0b3 or rust-v0.1.0b3.
-    if re.search(r"(?:python|rust|node|js)-v?\d+\.\d+\.\d+(?:a|b|rc)\d+", low):
-        return True
-    # Hotfix/patch keywords
-    if any(x in low for x in ["hotfix", "patch", "fix", "minor"]):
         return True
     # Date-based versioning (e.g. 20260413.04, 20260409.01) — treat .XX suffix as patch
     if re.search(r"20\d{6}\.\d+", low):
@@ -548,13 +611,13 @@ def is_minor_release(title: str) -> bool:
 
 
 def is_coding_agent_changelog(item: dict) -> bool:
-    """True when this RSS item is a closed-source harness changelog/news/blog.
+    """True when this RSS item is a closed-source harness changelog or news feed.
 
-    `classify_rss` only special-cased feed names containing "releases" /
-    "release notes", so Cursor Changelog / Amp News / Copilot Changelog were
-    falling through to Read. Tags are the real signal — a bare "blog" must not
-    Ship LangChain/Mistral. The name tuple covers backlog items that landed
-    without tags.
+    Cursor Changelog / Amp News / Copilot Changelog are not named "releases",
+    so they need this path to reach Ship. A `coding-agent` tag plus the word
+    `blog` is not enough — that shipped Warp/Replit/Augment/JetBrains/Zed
+    marketing into a 4-item lane. LangChain, Mistral, and DeepMind blogs stay
+    on the Read path. The name tuple covers backlog items that landed without tags.
     """
     feed = (item.get("feed") or "").lower().strip()
     if feed in CHANGELOG_SHIP_FEED_NAMES:
@@ -562,7 +625,48 @@ def is_coding_agent_changelog(item: dict) -> bool:
     tags = {str(t).lower() for t in (item.get("tags") or [])}
     if "coding-agent" not in tags:
         return False
-    return "changelog" in feed or "blog" in feed or feed.endswith(" news") or " news" in f" {feed}"
+    return "changelog" in feed or feed.endswith(" news") or " news" in f" {feed}"
+
+
+# ArXiv cs.AI / cs.CL are research firehoses. Bare "agent" (a READ_TERM) is too
+# wide; require a harness compound. Do not put "releases" in those feed names
+# or the keyword gate turns off.
+ARXIV_FEEDS = ("arxiv cs.ai", "arxiv cs.cl")
+ARXIV_HARNESS_TERMS = (
+    "coding agent",
+    "coding harness",
+    "agent harness",
+    "tool use",
+    "tool-use",
+    "function calling",
+    "claude code",
+    "mcp",
+    "subagent",
+    "computer use",
+)
+
+# Short READ_TERMS that are substrings of unrelated words.
+_BOUNDARY_READ_TERMS = {"cursor", "aider"}
+
+
+def _read_term_in(text: str, term: str) -> bool:
+    if term in _BOUNDARY_READ_TERMS:
+        return re.search(rf"\b{re.escape(term)}\b", text) is not None
+    return term in text
+
+
+def arxiv_harness_hit(text: str) -> bool:
+    low = (text or "").lower()
+    return any(term in low for term in ARXIV_HARNESS_TERMS)
+
+
+def _reddit_term_in(text: str, term: str) -> bool:
+    """Watch/Read reddit terms. `bug` is not the prefix of `debug`; `vs` is not `devs`."""
+    if term == "bug":
+        return re.search(r"\bbug\b", text) is not None
+    if term == "vs":
+        return re.search(r"\bvs\.?\b", text) is not None or " versus " in f" {text} "
+    return term in text
 
 
 def classify_rss(item: dict) -> Optional[dict]:
@@ -621,13 +725,7 @@ def classify_rss(item: dict) -> Optional[dict]:
         }
 
     if "releases" in feed_low:
-        if any(x in low for x in ["beta", "nightly", "staging", "alpha", "pre-release", "prerelease", "preview"]):
-            return None
-        if re.search(r"(?:^|[-_\s])v?\d+\.\d+\.\d+(?:a|b|rc)\d+\b", low):
-            return None
-        # Skip release candidates (v0.22.0rc2, 1.0-rc1) — pre-releases, same
-        # class as beta/alpha. Lookbehind avoids matching words like "search".
-        if re.search(r"(?<![a-z])rc[.\-]?\d", low):
+        if is_prerelease_title(title):
             return None
         # Skip chore/ci/internal/dependency release titles
         if any(x in low for x in ["chore:", "ci:", "build:", "internal", "rusty-v8", "dependency"]):
@@ -658,7 +756,10 @@ def classify_rss(item: dict) -> Optional[dict]:
             "title": display_title,
         }
 
-    if any(term in low for term in READ_TERMS):
+    if feed_low.strip() in ARXIV_FEEDS and not arxiv_harness_hit(low):
+        return None
+
+    if any(_read_term_in(low, term) for term in READ_TERMS):
         categories = ["read"]
         if any(term in low for term in SECURITY_TERMS):
             categories = ["watch", "read"]
@@ -765,9 +866,9 @@ def classify_reddit(item: dict) -> Optional[dict]:
 
     # Classify into the right lane based on content
     categories = ["community"]
-    if any(term in low for term in SECURITY_TERMS) or any(term in low for term in WATCH_REDDIT_TERMS):
+    if any(term in low for term in SECURITY_TERMS) or any(_reddit_term_in(low, term) for term in WATCH_REDDIT_TERMS):
         categories = ["watch", "community"]
-    elif any(term in low for term in READ_REDDIT_TERMS):
+    elif any(_reddit_term_in(low, term) for term in READ_REDDIT_TERMS):
         # Substantive discussions → Read, not Community
         categories = ["read", "community"]
         # Boost Read scores for high-comment discussions
@@ -834,7 +935,7 @@ def classify_hackernews(item: dict) -> Optional[dict]:
     if any(t in low for t in ["security", "vulnerability", "exploit", "injection", "unsafe", "attack"]):
         primary = "watch"
         categories = ["watch", "community"]
-    elif any(t in low for t in ["architecture", "framework", "how ", "why ", "protocol", "deep dive"]):
+    elif any(t in low for t in ["architecture", "framework", "why ", "protocol", "deep dive"]):
         primary = "read"
         categories = ["read", "community"]
     else:
@@ -1051,6 +1152,83 @@ def classify_bsky(item: dict) -> Optional[dict]:
     }
 
 
+def classify_advisory(item: dict) -> Optional[dict]:
+    """GitHub Advisory Database hit on an allowlisted package → Watch.
+
+    The monitor baselines silently and caps emits, so arrivals here are
+    already filtered. Score clears Watch's morning bar (25) without an age bonus.
+    """
+    url = item.get("url") or ""
+    title = item.get("title") or ""
+    if not url or not title:
+        return None
+    dt = parse_dt(item.get("published") or item.get("found_at") or "")
+    score = 48 + age_score(dt, 168) / 10
+    package = item.get("package") or "GitHub Advisory"
+    return {
+        "primaryCategory": "watch",
+        "categories": ["watch"],
+        "score": round(score, 2),
+        "summary": item.get("summary") or f"Security advisory in {package}",
+        "expiresAt": (dt or now_utc()) + timedelta(hours=CATEGORY_META["watch"]["ttl_hours"]),
+        "publishedAt": dt,
+        "sourceType": "advisory",
+        "sourceName": package,
+        "sourceId": item.get("id") or url,
+        "url": url,
+        "title": title,
+    }
+
+
+def classify_ecosystem_release(item: dict) -> Optional[dict]:
+    """A discovered-repo GitHub release, scored on the same path as release atoms.
+
+    The shell monitor baselines a repo's first tag (emits nothing) and leaves
+    later tags unseen until this collect hands them to the backlog.
+    """
+    repo = (item.get("repo") or "").strip()
+    tag = (item.get("tag") or "").strip()
+    title = (item.get("name") or "").strip() or tag
+    url = item.get("url") or ""
+    if not repo or not tag or not url or not title:
+        return None
+    return classify_rss({
+        "feed": f"{repo} Releases",
+        "title": title,
+        "link": url,
+        "published": item.get("published") or "",
+        "id": f"{repo}:{tag}",
+    })
+
+
+def _mark_ecosystem_releases_seen(releases: List[dict]) -> None:
+    """Record tags only after collect has handed them to the classifier.
+
+    The shell does not mark an emitted tag seen. If this write doesn't happen,
+    the next monitor run emits the same tag again.
+    """
+    if not releases:
+        return
+    path = MEMORY / "claw-ecosystem-state.json"
+    state = load_json(path, None)
+    if not isinstance(state, dict):
+        return
+    seen = state.get("lastSeenReleases")
+    if not isinstance(seen, dict):
+        seen = {}
+    changed = False
+    for rel in releases:
+        repo = rel.get("repo")
+        tag = rel.get("tag")
+        if repo and tag and seen.get(repo) != tag:
+            seen[repo] = tag
+            changed = True
+    if not changed:
+        return
+    state["lastSeenReleases"] = seen
+    save_json(path, state)
+
+
 def classify_ecosystem_hn(item: dict) -> Optional[dict]:
     """Classify HN stories produced by the ecosystem shell monitor."""
     normalized = {
@@ -1132,6 +1310,7 @@ def run_monitors() -> None:
         ["python3", "scripts/claw-registry-monitor.py", "--quiet"],
         ["python3", "scripts/claw-pagewatch-monitor.py", "--quiet"],
         ["python3", "scripts/claw-bsky-monitor.py", "--quiet"],
+        ["python3", "scripts/claw-advisory-monitor.py", "--quiet"],
         ["bash", "scripts/claw-ecosystem-monitor.sh", "--mode", "check"],
     ]
     for cmd in cmds:
@@ -1176,10 +1355,16 @@ def collect_candidates() -> Dict[str, List[dict]]:
     registry = load_json(MEMORY / "claw-registry-state.json", {}).get("foundItems", [])
     pagewatch = load_json(MEMORY / "claw-pagewatch-state.json", {}).get("foundItems", [])
     bsky = load_json(MEMORY / "claw-bsky-state.json", {}).get("foundItems", [])
+    advisory = load_json(MEMORY / "claw-advisory-state.json", {}).get("foundItems", [])
     ecosystem = load_json(MEMORY / "claw-ecosystem-new-items.json", {})
+    ecosystem_releases: List[dict] = []
     if isinstance(ecosystem, dict):
         hf_papers = _unique_items(hf_papers + ecosystem.get("newHFPapers", []), ("id", "hf_id", "url"))
         ecosystem_hn = ecosystem.get("newHNStories", [])
+        ecosystem_releases = [
+            rel for rel in ecosystem.get("newReleases", [])
+            if isinstance(rel, dict) and rel.get("repo") and rel.get("tag") and not rel.get("baseline")
+        ]
     else:
         ecosystem_hn = []
     return {
@@ -1192,6 +1377,8 @@ def collect_candidates() -> Dict[str, List[dict]]:
         "registry": registry,
         "pagewatch": pagewatch,
         "bsky": bsky,
+        "advisory": advisory,
+        "ecosystem_release": ecosystem_releases,
         "ecosystem_hn": ecosystem_hn,
     }
 
@@ -1215,6 +1402,10 @@ def classify_source_candidate(kind: str, item: dict) -> Optional[dict]:
         return classify_pagewatch(item)
     if kind == "bsky":
         return classify_bsky(item)
+    if kind == "advisory":
+        return classify_advisory(item)
+    if kind == "ecosystem_release":
+        return classify_ecosystem_release(item)
     if kind == "ecosystem_hn":
         return classify_ecosystem_hn(item)
     return None
@@ -1235,6 +1426,10 @@ def raw_source_label(kind: str, item: dict) -> str:
         return item.get("watch", "pagewatch")
     if kind == "bsky":
         return item.get("handle", "bluesky")
+    if kind == "advisory":
+        return item.get("package") or "GitHub Advisory"
+    if kind == "ecosystem_release":
+        return item.get("repo") or "github-release"
     if kind == "ecosystem_hn":
         return "hackernews/ecosystem"
     return item.get("sourceName") or item.get("sourceType") or kind
@@ -1315,6 +1510,7 @@ def unconsumed_state_report() -> list:
         "claw-registry-state.json",
         "claw-pagewatch-state.json",
         "claw-bsky-state.json",
+        "claw-advisory-state.json",
         "claw-ecosystem-new-items.json",
         "clawbytes-backlog.json",
         "clawbytes-thread-state.json",
@@ -1474,10 +1670,19 @@ def collect_into_backlog() -> dict:
 
     added = []
     candidates = collect_candidates()
+    acked_releases: List[dict] = []
 
     for kind, items in candidates.items():
         for item in items:
-            candidate = classify_source_candidate(kind, item)
+            try:
+                candidate = classify_source_candidate(kind, item)
+            except Exception as exc:  # noqa: BLE001 - one bad item must not abort collect
+                print(f"[collect] skipped {kind} item ({exc!r})", file=sys.stderr)
+                continue
+            if kind == "ecosystem_release":
+                # Handed to the classifier (even when it returns None). The
+                # shell left the tag unseen so a crash here retries next cycle.
+                acked_releases.append(item)
             if not candidate:
                 continue
             if not is_fresh(candidate):
@@ -1513,6 +1718,7 @@ def collect_into_backlog() -> dict:
 
     save_json(BACKLOG_FILE, backlog)
     save_json(THREAD_STATE_FILE, state)
+    _mark_ecosystem_releases_seen(acked_releases)
 
     counts = {c: 0 for c in CATEGORY_META}
     for item in added:
@@ -2480,26 +2686,37 @@ def _publish_lane(category: str, send: bool) -> tuple:
         timeout = int(os.environ.get("CLAWBYTES_CURATOR_TIMEOUT", "300"))
         curated = run_curator_subprocess(curator_input_bundle(category), timeout=timeout)
         if curated is not None:
-            meta = curated.get("_curator", {})
-            if not meta.get("fallback") and meta.get("approved", True):
-                items = curated.get("items") or []
-                if send and items:
-                    message = format_curated_html(curated, category)
-                    ok, errs = validate_lane_for_publish(message)
-                    if ok and send_telegram(message):
-                        mark_posted(category, None, items)
-                        return (True, len(items))
-                    if not ok:
-                        print(f"[autopublish] curated {category} rejected by gate: "
-                              f"{'; '.join(errs)}", file=sys.stderr)
-                    return (False, len(items))
+            meta = curated.get("_curator") or {}
+            fallback = bool(meta.get("fallback"))
+            approved = bool(meta.get("approved", True)) and not fallback
+            items = curated.get("items") or []
+            # An approved empty list is a whole-lane decline in practice
+            # (models often return items: [] with approved left true). A curated
+            # body the gate or Telegram rejects must not silence the lane either.
+            if approved and items and send:
+                message = format_curated_html(curated, category)
+                ok, errs = validate_lane_for_publish(message)
+                if ok and send_telegram(message):
+                    mark_posted(category, None, items)
+                    return (True, len(items))
+                if not ok:
+                    print(f"[autopublish] curated {category} rejected by gate: "
+                          f"{'; '.join(errs)}; using deterministic bundle", file=sys.stderr)
+                else:
+                    print(f"[autopublish] curated {category} Telegram send failed; "
+                          f"using deterministic bundle", file=sys.stderr)
+            elif approved and items and not send:
                 return (False, len(items))
-            if not meta.get("approved", True):
+            elif approved and not items:
+                print(f"[autopublish] curator returned no items for {category}; "
+                      f"using deterministic bundle", file=sys.stderr)
+            elif not meta.get("approved", True):
                 # Breadth over purity: a whole-lane decline falls back to the
                 # deterministic post rather than going silent. The curator still
                 # improves approved lanes and drops weak *individual* items.
                 print(f"[autopublish] curator declined {category}; using deterministic bundle", file=sys.stderr)
-            # fallback marker or decline → fall through to deterministic
+            # fallback marker, empty items, gate rejection, or send failure
+            # → fall through to deterministic
         # curated is None (curator failed) → fall through to deterministic
 
     message = format_category_bundle(category)
@@ -2681,7 +2898,7 @@ def format_curated_html(curated: dict, category: str) -> str:
         title = item.get("title") or ""
         url = item.get("url") or ""
         blurb = (item.get("blurb") or item.get("existing_blurb") or "").strip()
-        line = f"\n{item_emoji} <a href=\"{url}\">{html_escape(title)}</a>"
+        line = f"\n{item_emoji} <a href=\"{html_escape(url)}\">{html_escape(title)}</a>"
         if blurb:
             line += f" — {html_escape(blurb)}"
         lines.append(line)
@@ -2720,7 +2937,7 @@ def format_curated_messages(curated: dict, category: str) -> List[str]:
             lines.append(f"<i>{html_escape(lead)}</i>")
 
         lines.append("")
-        lines.append(f"<a href=\"{url}\">{html_escape(title)}</a>")
+        lines.append(f"<a href=\"{html_escape(url)}\">{html_escape(title)}</a>")
         if blurb:
             lines.append(html_escape(blurb))
 
