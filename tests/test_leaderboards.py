@@ -137,6 +137,23 @@ def test_terminal_bench_board_is_wired_and_url_unique_per_movement():
     assert "#terminal-bench-2-1-20260820" in candidate["url"]
 
 
+def test_same_day_leaderboard_moves_get_distinct_urls():
+    board = lb.BOARDS[0]
+    first = lb.build_item(
+        board, "top3_change",
+        [("Same", 80.0), ("B", 70.0), ("C", 60.0)],
+        "2026-09-23T01:00:00+00:00",
+    )
+    second = lb.build_item(
+        board, "top3_change",
+        [("Same", 80.0), ("C", 70.0), ("B", 60.0)],
+        "2026-09-23T18:00:00+00:00",
+    )
+    assert first["url"] != second["url"]
+    assert first["id"] != second["id"]
+    assert "#swebench-verified-20260923-" in first["url"]
+
+
 def test_terminal_bench_check_boards_baselines_then_emits_on_new_leader(tmp_path, monkeypatch):
     monkeypatch.setattr(lb, "STATE_FILE", tmp_path / "lb.json")
     board = next(b for b in lb.BOARDS if b["key"] == "terminal-bench-2-1")

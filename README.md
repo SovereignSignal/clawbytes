@@ -1,6 +1,6 @@
 # ClawBytes
 
-Signal aggregator for the AI coding-harness ecosystem. Collects from RSS/Atom feeds, vendor changelogs, Reddit, Hacker News, HuggingFace papers, benchmark leaderboards, model registries, feedless vendor pages, and Bluesky — classifies every item into four editorial lanes, and publishes staggered lane bundles to the [@clawbytes](https://t.me/clawbytes) Telegram channel and a mirrored Slack channel.
+Signal aggregator for the AI coding-harness ecosystem. Collects from RSS/Atom feeds, vendor changelogs, Reddit, Hacker News, HuggingFace papers, benchmark leaderboards, model registries, GitHub security advisories, feedless vendor pages, and Bluesky — classifies every item into four editorial lanes, and publishes staggered lane bundles to the [@clawbytes](https://t.me/clawbytes) Telegram channel and a mirrored Slack channel.
 
 Editorial scope lives in [`EDITORIAL_SCOPE.md`](EDITORIAL_SCOPE.md); the full source inventory and the candidate decision log live in [`SOURCES.md`](SOURCES.md).
 
@@ -30,7 +30,7 @@ Deployed on Railway as a single always-on container running `scripts/scheduler.p
 
 ## Source classes
 
-The authoritative, current list with file references is in [`SOURCES.md`](SOURCES.md). In brief: RSS/Atom feeds (vendor blogs, changelogs, GitHub `releases.atom`, research, ArXiv), Reddit, Hacker News, HuggingFace Daily Papers, weekly **discovery** (GitHub topics, awesome-list diffs), benchmark **leaderboards** (SWE-bench, Aider, LiveBench, Terminal-Bench 2.1 — sha-gated, emit on top-3 movement only), model **registries** (OpenRouter, LiteLLM pricing, HF trending), **feedless pages** (Mintlify `.md` hashes, Antigravity HTML heading-hash, sitemap slug diffs for Anthropic/Claude/Devin CLI/xAI/DeepSeek), and **Bluesky** phrase search.
+The authoritative, current list with file references is in [`SOURCES.md`](SOURCES.md). In brief: RSS/Atom feeds (vendor blogs, changelogs, GitHub `releases.atom`, research, ArXiv with a harness-compound gate), Reddit, Hacker News, HuggingFace Daily Papers, weekly **discovery** (GitHub topics, awesome-list diffs), benchmark **leaderboards** (SWE-bench, Aider, LiveBench, Terminal-Bench 2.1 — sha-gated, emit on top-3 movement only), model **registries** (OpenRouter coding/agent ids, LiteLLM pricing, HF trending), **GitHub advisories** (package allowlist, Watch, cap 2/day), **feedless pages** (Mintlify `.md` hashes, Antigravity HTML heading-hash, sitemap slug diffs for Anthropic/Claude/Devin CLI/xAI/DeepSeek), and **Bluesky** phrase search.
 
 ## Scheduler jobs
 

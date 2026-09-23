@@ -79,14 +79,17 @@ def check_bsky(verbose=True):
     now_iso = datetime.now(timezone.utc).isoformat()
     new_items = []
 
+    pending = set()
     for query in QUERIES:
         posts = search_posts(query)
         kept = 0
         for post in posts:
             uri = post.get("uri", "")
-            if not uri or uri in seen:
+            if not uri or uri in seen or uri in pending:
                 continue
-            seen.add(uri)
+            # Do not remember a post that is still under the bar. sort=latest
+            # returns posts before they have likes; marking them seen drops
+            # the ones that later clear the bar.
             if not passes_engagement(post):
                 continue
             url = post_web_url(post)
@@ -94,6 +97,7 @@ def check_bsky(verbose=True):
                 continue
             text = " ".join(((post.get("record") or {}).get("text") or "").split())
             handle = (post.get("author") or {}).get("handle", "bsky")
+            pending.add(uri)
             new_items.append({
                 "id": uri,
                 "query": query,
@@ -109,7 +113,8 @@ def check_bsky(verbose=True):
             print(f"  = bsky {query}: {len(posts)} fetched, {kept} kept")
 
     new_items = new_items[:MAX_ITEMS_PER_RUN]
-    state["seenUris"] = sorted(seen)[-5000:]
+    # Only posts we actually kept are seen. Capped overflow can retry.
+    state["seenUris"] = sorted(seen | {item["id"] for item in new_items})[-5000:]
     if new_items:
         state["foundItems"] = (state.get("foundItems", []) + new_items)[-200:]
     save_state(state)

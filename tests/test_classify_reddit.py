@@ -51,3 +51,26 @@ def test_tutorial_reddit_stays_community_not_read():
     assert candidate is not None
     assert candidate["primaryCategory"] == "community"
     assert "read" not in candidate["categories"]
+
+
+def test_debug_is_not_watch_and_devs_is_not_a_comparison():
+    debug = ct.classify_reddit(_item(
+        "claudecode", title="debugging claude code hooks", score=40, comments=10,
+    ))
+    assert debug is not None
+    assert debug["primaryCategory"] != "watch"
+    devs = ct.classify_reddit(_item(
+        "claudecode", title="devs shipping codex builds", score=40, comments=10,
+    ))
+    assert devs is not None
+    assert devs["primaryCategory"] == "community"
+    versus = ct.classify_reddit(_item(
+        "claudecode", title="claude vs codex workflows", score=40, comments=10,
+    ))
+    assert versus is not None
+    assert versus["primaryCategory"] == "read"
+    real_bug = ct.classify_reddit(_item(
+        "claudecode", title="claude code bug in hooks", score=40, comments=10,
+    ))
+    assert real_bug is not None
+    assert real_bug["primaryCategory"] == "watch"

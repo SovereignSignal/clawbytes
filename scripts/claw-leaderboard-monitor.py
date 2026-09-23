@@ -269,13 +269,17 @@ def build_item(board, change, tops, now_iso):
         title = f"{board['label']}: top-3 movement"
     ranked = " · ".join(f"{name} ({value:.1f}%)" for name, value in tops)
     day = now_iso[:10].replace("-", "")
+    # Date alone collides when the same #1 model moves twice in a UTC day,
+    # and when the leader is unchanged but the rest of the top 3 moves.
+    digest = hashlib.sha1(ranked.encode()).hexdigest()[:8]
+    slug = re.sub(r"[^a-z0-9]+", "-", leader.lower()).strip("-")[:40] or "board"
     return {
         # Unique per change: postedUrls dedup keys on URL, so a bare page URL
         # would swallow every future movement after the first posted one.
-        "id": f"{board['key']}:{day}:{leader}",
+        "id": f"{board['key']}:{day}:{slug}:{digest}",
         "board": board["label"],
         "title": title,
-        "url": f"{board['page']}#{board['key']}-{day}",
+        "url": f"{board['page']}#{board['key']}-{day}-{digest}",
         "summary": f"Top {len(tops)}: {ranked}",
         "change": change,
         "found_at": now_iso,

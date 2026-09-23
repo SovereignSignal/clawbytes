@@ -491,8 +491,15 @@ check_github_releases() {
                 if [[ -n "$latest_tag" ]]; then
                     local seen_tag
                     seen_tag=$(echo "$state" | jq -r --arg repo "$repo" '.lastSeenReleases[$repo] // empty')
-                    
-                    if [[ "$latest_tag" != "$seen_tag" ]]; then
+                    local safe_name="${repo//\//_}"
+
+                    if [[ -z "$seen_tag" ]]; then
+                        # First sighting records the current tag and emits nothing.
+                        jq -n --arg repo "$repo" --arg tag "$latest_tag" \
+                            '{repo:$repo, tag:$tag}' > "$tmpdir/${safe_name}.baseline"
+                    elif [[ "$latest_tag" != "$seen_tag" ]]; then
+                        # Do not mark this tag seen here. collect hands it to the
+                        # backlog and then writes lastSeenReleases.
                         echo "$releases" | jq --arg repo "$repo" '.[0] | {
                             repo: $repo,
                             tag: .tag_name,
@@ -500,7 +507,7 @@ check_github_releases() {
                             url: .html_url,
                             published: .published_at,
                             body: (.body | if . then .[0:500] else "" end)
-                        }' > "$tmpdir/${repo//\//_}.json"
+                        }' > "$tmpdir/${safe_name}.json"
                     fi
                 fi
             fi
@@ -518,7 +525,15 @@ check_github_releases() {
     # Wait for all workers
     wait
     
-    # Collect results
+    # Collect results. Baselines are repo→tag and are not news.
+    local baselines="{}"
+    for f in "$tmpdir"/*.baseline; do
+        [[ -f "$f" ]] || continue
+        local item
+        item=$(cat "$f")
+        baselines=$(echo "$baselines" | jq --argjson item "$item" '. + {($item.repo): $item.tag}')
+    done
+
     for f in "$tmpdir"/*.json; do
         [[ -f "$f" ]] || continue
         local item
@@ -528,6 +543,10 @@ check_github_releases() {
     done
     
     rm -rf "$tmpdir"
+
+    if [[ -n "${BASELINE_MAP_FILE:-}" ]]; then
+        echo "$baselines" > "$BASELINE_MAP_FILE"
+    fi
     
     echo "   Found $batch_count new release(s)" >&2
     echo "$new_releases"
@@ -583,18 +602,16 @@ PY
 # Update state with new findings
 update_state() {
     local state="$1"
-    local new_releases="$2"
+    local baselines="$2"  # object of repo → tag for first sightings only
     local new_hn="$3"
     local new_skills="$4"
     
     local now
     now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     
-    # Update lastSeenReleases
-    local updated_releases
-    updated_releases=$(echo "$new_releases" | jq 'reduce .[] as $r ({}; .[$r.repo] = $r.tag)')
-    
-    state=$(echo "$state" | jq --argjson new "$updated_releases" '
+    # First-sight baselines only. An emitted release stays unseen until
+    # collect hands it to the backlog.
+    state=$(echo "$state" | jq --argjson new "$baselines" '
         .lastSeenReleases = (.lastSeenReleases + $new)
     ')
     
@@ -634,33 +651,47 @@ run_check() {
     echo "📊 Monitoring $repo_count repositories" >&2
     echo "" >&2
     
+    local baseline_map_file
+    baseline_map_file=$(mktemp)
+    echo '{}' > "$baseline_map_file"
+    BASELINE_MAP_FILE="$baseline_map_file"
+    export BASELINE_MAP_FILE
+
     echo "📦 Checking GitHub releases..." >&2
     local new_releases
     new_releases=$(check_github_releases "$state")
+    local baselines
+    baselines=$(cat "$baseline_map_file")
+    rm -f "$baseline_map_file"
     local release_count
     release_count=$(echo "$new_releases" | jq 'length')
     echo "   Found $release_count new release(s)" >&2
-    
-    echo "🔶 Checking Hacker News..." >&2
-    local new_hn
-    new_hn=$(check_hackernews "$state")
-    local hn_count
-    hn_count=$(echo "$new_hn" | jq 'length')
-    echo "   Found $hn_count new story/stories" >&2
 
-    echo "📄 Checking HuggingFace Papers..." >&2
-    local new_hf
-    new_hf=$(python3 "${SCRIPT_DIR}/claw-hf-papers.py" --quiet 2>/dev/null || echo "[]")
-    local hf_count
-    hf_count=$(echo "$new_hf" | jq 'length' 2>/dev/null || echo 0)
-    echo "   Found $hf_count new paper(s)" >&2
+    local new_hn new_hf new_skills
+    # Test hook: exercise the release baseline without hitting HN or HF.
+    if [[ "${CLAWBYTES_ECOSYSTEM_RELEASES_ONLY:-}" == "1" ]]; then
+        new_hn="[]"
+        new_hf="[]"
+        new_skills="[]"
+    else
+        echo "🔶 Checking Hacker News..." >&2
+        new_hn=$(check_hackernews "$state")
+        local hn_count
+        hn_count=$(echo "$new_hn" | jq 'length')
+        echo "   Found $hn_count new story/stories" >&2
 
-    echo "🛍️ Checking ClawHub..." >&2
-    local new_skills
-    new_skills=$(check_clawhub_skills "$state")
-    local skill_count
-    skill_count=$(echo "$new_skills" | jq 'length')
-    echo "   Found $skill_count new skill item(s)" >&2
+        echo "📄 Checking HuggingFace Papers..." >&2
+        new_hf=$(python3 "${SCRIPT_DIR}/claw-hf-papers.py" --quiet 2>/dev/null || echo "[]")
+        local hf_count
+        hf_count=$(echo "$new_hf" | jq 'length' 2>/dev/null || echo 0)
+        echo "   Found $hf_count new paper(s)" >&2
+
+        echo "🛍️ Checking ClawHub..." >&2
+        new_skills=$(check_clawhub_skills "$state")
+        local skill_count
+        skill_count=$(echo "$new_skills" | jq 'length')
+        echo "   Found $skill_count new skill item(s)" >&2
+    fi
     
     # Build output
     local output
@@ -691,7 +722,7 @@ run_check() {
     echo "$output" > "$OUTPUT_FILE"
     
     local new_state
-    new_state=$(update_state "$state" "$new_releases" "$new_hn" "$new_skills")
+    new_state=$(update_state "$state" "$baselines" "$new_hn" "$new_skills")
     save_json "$STATE_FILE" "$new_state"
     
     echo "" >&2

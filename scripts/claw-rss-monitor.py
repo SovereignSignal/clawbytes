@@ -81,7 +81,9 @@ RSS_FEEDS = [
     {"name": "Devin Release Notes", "url": "https://docs.devin.ai/release-notes/overview/rss.xml", "tags": ["coding-agent", "official"], "high_signal": True},
     {"name": "Factory Release Notes", "url": "https://docs.factory.ai/changelog/release-notes/rss.xml", "tags": ["coding-agent", "official"]},
     {"name": "Amp News", "url": "https://ampcode.com/news.rss", "tags": ["coding-agent", "official"], "high_signal": True},
-    {"name": "Windsurf Blog", "url": "https://windsurf.com/feed.xml", "tags": ["coding-agent", "official"]},
+    # Windsurf Blog removed 2026-09-23: stale since 2026-05-12 (last item
+    # "Opus 4.7 (fast mode) is now available in Windsurf"). Devin Release Notes
+    # is the live Cognition changelog.
     {"name": "Warp Blog", "url": "https://www.warp.dev/blog/feed.xml", "tags": ["coding-agent"]},
     {"name": "Replit Blog", "url": "https://blog.replit.com/feed.xml", "tags": ["coding-agent"]},
     {"name": "Augment Code Blog", "url": "https://augmentcode.com/blog/rss.xml", "tags": ["coding-agent"]},
@@ -168,6 +170,21 @@ RELEVANCE_KEYWORDS = [
     "codewhale", "mimo code", "agno-agi", "tau coding", "tau-ai",
 ]
 
+# ArXiv cs.AI / cs.CL: bare "agent" is too wide. Require a harness compound.
+# Feed names must not contain "releases" or this gate never runs.
+ARXIV_HARNESS_TERMS = (
+    "coding agent",
+    "coding harness",
+    "agent harness",
+    "tool use",
+    "tool-use",
+    "function calling",
+    "claude code",
+    "mcp",
+    "subagent",
+    "computer use",
+)
+
 def load_state():
     """Load state from file or return default."""
     if STATE_FILE.exists():
@@ -176,11 +193,12 @@ def load_state():
     return {"lastSeenByFeed": {}, "lastCheck": None, "foundItems": []}
 
 def save_state(state):
-    """Save state to file."""
-    MEMORY_DIR.mkdir(exist_ok=True)
+    """Save state atomically (temp file + rename). A torn write aborts collect."""
+    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
     state["lastCheck"] = datetime.now(timezone.utc).isoformat()
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+    tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+    tmp.write_text(json.dumps(state, indent=2))
+    tmp.replace(STATE_FILE)
 
 def fetch_feed(url, timeout=15):
     """Fetch RSS/Atom feed content."""
@@ -311,6 +329,12 @@ def is_relevant(entry, feed_name, tags=None):
         return True
     if low_name == "amp news":
         return True
+
+    # ArXiv is a research firehose. Bare "agent" (and the general keyword
+    # list) lets adjacent ML through. Require a harness compound.
+    if low_name in ("arxiv cs.ai", "arxiv cs.cl"):
+        text = f"{entry.get('title', '')} {entry.get('summary', '')}".lower()
+        return any(term in text for term in ARXIV_HARNESS_TERMS)
     
     # Check title and summary for keywords
     text = f"{entry.get('title', '')} {entry.get('summary', '')}".lower()
@@ -361,8 +385,17 @@ def check_feeds(filter_relevant=True, verbose=True):
         
         feed_status[name] = f"ok ({len(entries)} entries)"
         
-        # Get last seen ID for this feed
-        last_seen = state["lastSeenByFeed"].get(name, [])
+        # First sighting of a feed name records ids and emits nothing.
+        # Otherwise a newly added atom dumps its in-TTL backlog as news.
+        seen_map = state.setdefault("lastSeenByFeed", {})
+        if name not in seen_map:
+            seen_ids = [e.get("id") or e.get("link") for e in entries[:50]]
+            seen_map[name] = seen_ids
+            if verbose:
+                print(f"  baseline recorded ({len(seen_ids)} ids), emitting nothing")
+            continue
+
+        last_seen = seen_map.get(name, [])
         
         for entry in entries[:10]:  # Check latest 10 entries
             entry_id = entry.get("id") or entry.get("link") or entry.get("title")
@@ -391,7 +424,7 @@ def check_feeds(filter_relevant=True, verbose=True):
         
         # Update last seen (keep last 50 IDs per feed)
         seen_ids = [e.get("id") or e.get("link") for e in entries[:50]]
-        state["lastSeenByFeed"][name] = seen_ids
+        seen_map[name] = seen_ids
     
     # Store new items for digest
     if new_items:

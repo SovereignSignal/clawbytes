@@ -50,3 +50,21 @@ def test_no_posts_ever_is_an_issue(tmp_path):
 def test_unreadable_state_is_an_issue(tmp_path):
     issues = scheduler.health_issues(tmp_path, now=NOW)
     assert issues and "state" in issues[0]
+
+
+def test_failed_health_alert_does_not_write_marker(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAWBYTES_MEMORY_DIR", str(tmp_path))
+    _write_state(tmp_path, (NOW - timedelta(hours=5)).isoformat(), (NOW - timedelta(hours=3)).isoformat())
+    monkeypatch.setattr(scheduler, "_send_admin_dm", lambda *a, **k: False)
+    scheduler.health_check()
+    assert not (tmp_path / "claw-health-alert-state.json").exists()
+
+
+def test_successful_health_alert_writes_marker(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAWBYTES_MEMORY_DIR", str(tmp_path))
+    _write_state(tmp_path, (NOW - timedelta(hours=5)).isoformat(), (NOW - timedelta(hours=3)).isoformat())
+    monkeypatch.setattr(scheduler, "_send_admin_dm", lambda *a, **k: True)
+    scheduler.health_check()
+    marker = json.loads((tmp_path / "claw-health-alert-state.json").read_text())
+    assert marker.get("sentAt")
+    assert "collect stalled" in marker.get("text", "")

@@ -17,6 +17,7 @@ First sighting of each registry records a baseline and emits nothing.
 State file: memory/claw-registry-state.json
 """
 
+import hashlib
 import json
 import os
 import re
@@ -36,7 +37,8 @@ HF_TRENDING_URL = "https://huggingface.co/api/models?sort=trendingScore&directio
 
 MAX_ITEMS_PER_RUN = 5          # per registry, guards against listing floods
 HF_CHECK_EVERY_DAYS = 6        # trending churns daily; weekly diff is signal
-HF_CODE_AGENT = re.compile(r"code|coder|coding|agent|cli|swe", re.IGNORECASE)
+# Word boundaries so "encoder" and "client" do not match code/cli.
+HF_CODE_AGENT = re.compile(r"\b(?:code|coder|coding|agent|cli|swe)\b", re.IGNORECASE)
 
 
 def _fetch_json(url, headers=None, timeout=30):
@@ -106,8 +108,17 @@ def check_openrouter(state, now_iso, verbose):
     by_id = {m.get("id"): m for m in models if m.get("id")}
     old = state.get("openrouterIds", [])
     new_ids = diff_new_keys(old, by_id.keys())
+    # Same coding/agent family filter as HF trending. Unrelated listings
+    # would otherwise fill Ship (base 58, cap 5). Full id set is still stored
+    # so a non-coding id is not "new" again next run.
+    coding_ids = []
+    for model_id in new_ids:
+        model = by_id[model_id]
+        haystack = f"{model_id} {model.get('name') or ''}"
+        if HF_CODE_AGENT.search(haystack):
+            coding_ids.append(model_id)
     items = []
-    for model_id in new_ids[:MAX_ITEMS_PER_RUN]:
+    for model_id in coding_ids[:MAX_ITEMS_PER_RUN]:
         model = by_id[model_id]
         name = model.get("name") or model_id
         desc = (model.get("description") or "").split(".")[0][:140]
@@ -118,11 +129,11 @@ def check_openrouter(state, now_iso, verbose):
             desc or "New model listing",
             now_iso,
         ))
-    if len(new_ids) > MAX_ITEMS_PER_RUN and verbose:
-        print(f"  ⚠️ OpenRouter: {len(new_ids)} new listings, emitting first {MAX_ITEMS_PER_RUN}")
+    if len(coding_ids) > MAX_ITEMS_PER_RUN and verbose:
+        print(f"  ⚠️ OpenRouter: {len(coding_ids)} new coding listings, emitting first {MAX_ITEMS_PER_RUN}")
     state["openrouterIds"] = sorted(by_id.keys())
     if verbose:
-        print(f"  = OpenRouter: {len(by_id)} models, {len(new_ids)} new" + (" (baseline)" if not old else ""))
+        print(f"  = OpenRouter: {len(by_id)} models, {len(coding_ids)} new coding" + (" (baseline)" if not old else ""))
     return items if old else []
 
 
@@ -148,12 +159,13 @@ def check_litellm(state, now_iso, verbose):
     items = []
     if old and new_keys:
         shown = ", ".join(new_keys[:6]) + ("…" if len(new_keys) > 6 else "")
-        # Unique URL per batch — publish dedup is URL-keyed, so a bare file
-        # URL would let only the first batch ever post (see CLAUDE.md inv. 4).
+        # Unique URL per batch — publish dedup is URL-keyed. The UTC day is
+        # not enough: two key-diffs the same day shared one fragment.
+        digest = hashlib.sha1("\n".join(new_keys).encode()).hexdigest()[:10]
         items.append(_item(
-            "LiteLLM registry", f"batch:{now_iso[:10]}:{len(new_keys)}",
+            "LiteLLM registry", f"batch:{now_iso[:10]}:{digest}",
             f"{len(new_keys)} new model(s) priced in the LiteLLM registry",
-            f"https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json#new-{now_iso[:10]}",
+            f"https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json#new-{now_iso[:10]}-{digest}",
             shown,
             now_iso,
         ))

@@ -60,10 +60,12 @@ def load_state():
 
 
 def save_state(state):
-    MEMORY_DIR.mkdir(exist_ok=True)
+    """Save state atomically (temp file + rename). A torn write aborts collect."""
+    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
     state["lastCheck"] = datetime.now(timezone.utc).isoformat()
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+    tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+    tmp.write_text(json.dumps(state, indent=2))
+    tmp.replace(STATE_FILE)
 
 
 def fetch_hn(query, tags="story", page=0, timeout=15, days=14):

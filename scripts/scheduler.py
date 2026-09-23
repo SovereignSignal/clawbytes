@@ -150,7 +150,7 @@ def _send_admin_slack(text: str) -> bool:
         return False
 
 
-def _send_admin_dm(label: str, text: str, *, html: bool = False) -> None:
+def _send_admin_dm(label: str, text: str, *, html: bool = False) -> bool:
     """Send an operational/status report to Sov as a Telegram DM.
 
     Status reports never go to audience surfaces (the Slack channel or the
@@ -198,6 +198,8 @@ def _send_admin_dm(label: str, text: str, *, html: bool = False) -> None:
             log.info("DONE %s: delivered via Slack ops fallback (Telegram unavailable)", label)
         else:
             log.info("SKIP %s slack fallback (unconfigured or failed); alert not delivered", label)
+        return slack_ok
+    return True
 
 
 _PARSE_ISO_FAIL = object()
@@ -266,7 +268,12 @@ def health_check() -> None:
     ):
         log.info("health_check: issues unchanged, alert already sent recently")
         return
-    _send_admin_dm("health_alert", text)
+    if not _send_admin_dm("health_alert", text):
+        # Both paths failed. Do not write the repeat suppressor — the next
+        # health check has to be able to retry. A marker here would hide the
+        # stall for ALERT_REPEAT_HOURS.
+        log.info("health_check: alert not delivered; marker not written")
+        return
     try:
         marker_path.write_text(json.dumps({"sentAt": datetime.now(timezone.utc).isoformat(), "text": text}))
     except Exception:  # noqa: BLE001
