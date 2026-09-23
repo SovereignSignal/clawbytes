@@ -9,12 +9,12 @@ def test_new_harness_repos_have_priorities():
                  "devin desktop", "devin", "antigravity", "amp news",
                  "factory", "copilot", "warp blog", "windsurf", "replit",
                  "augment code", "junie", "jetbrains", "agent client protocol",
-                 "kiro", "pi coding", "oh my pi", "herdr", "kilo code", "kimi code", "grok build",
+                 "kiro", "pi coding", "fx coding", "oh my pi", "herdr", "kilo code", "kimi code", "grok build",
                  "open interpreter", "deep agents", "mistral vibe",
                  "codewhale", "mimo code", "agno-agi", "tau coding"]:
         assert repo in ct.REPO_PRIORITY, f"{repo} missing from REPO_PRIORITY"
     # Substring traps: bare tokens that live inside common words stay out.
-    for trap in ("amp", "acp", "opus", "augment", "pi", "kilo", "tau", "vibe", "agno", "omp"):
+    for trap in ("amp", "acp", "opus", "augment", "pi", "kilo", "tau", "vibe", "agno", "omp", "fx"):
         assert trap not in ct.REPO_PRIORITY, f"bare {trap!r} is a substring trap"
 
 
@@ -78,6 +78,36 @@ def test_oh_my_pi_release_routes_to_ship():
     assert candidate["primaryCategory"] == "ship"
     assert candidate["score"] >= ct.REPO_PRIORITY["oh my pi"]
     assert "OMP" in candidate["title"] or "Oh My Pi" in candidate["title"] or candidate["title"].startswith("v18")
+
+
+def test_fx_release_routes_to_ship():
+    assert ct.repo_name_from_feed("fx Coding Agent Releases") == "fx coding"
+    assert ct.repo_name_from_feed("Pi Coding Agent Releases") == "pi coding"
+    item = {
+        "feed": "fx Coding Agent Releases",
+        "title": "v0.1.0",
+        "link": "https://github.com/vercel-labs/fx/releases/tag/v0.1.0",
+        "published": datetime.now(timezone.utc).isoformat(),
+    }
+    candidate = ct.classify_rss(item)
+    assert candidate is not None
+    assert candidate["primaryCategory"] == "ship"
+    assert candidate["score"] >= ct.REPO_PRIORITY["fx coding"]
+    assert candidate["title"].startswith("fx ")
+
+
+def test_fx_patch_still_reaches_ship_demoted():
+    # 0.0.x tags are a patch train. They stay on Ship but below the headline bar.
+    item = {
+        "feed": "fx Coding Agent Releases",
+        "title": "v0.0.10",
+        "link": "https://github.com/vercel-labs/fx/releases/tag/v0.0.10",
+        "published": datetime.now(timezone.utc).isoformat(),
+    }
+    candidate = ct.classify_rss(item)
+    assert candidate is not None
+    assert candidate["primaryCategory"] == "ship"
+    assert candidate["score"] < ct.REPO_PRIORITY["fx coding"]
 
 
 def test_pi_release_routes_to_ship():
