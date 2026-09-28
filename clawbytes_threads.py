@@ -28,7 +28,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -414,6 +414,105 @@ def source_key(kind: str, raw_id: str, url: str) -> str:
 
 def backlog_id(url: str, title: str) -> str:
     return hashlib.sha1(f"{url}|{title}".encode("utf-8")).hexdigest()[:16]
+
+
+_SEEN_KEY_URL = re.compile(r"https?://\S+", re.IGNORECASE)
+
+
+def normalize_url_for_dedupe(url: str) -> str:
+    """Comparison key for a posted or seen URL. Does not rewrite stored state.
+
+    Changelog links reuse one page and append a changing ``#updated-<hash>``
+    fragment, so exact URL equality treats the same release as new. The key
+    drops that fragment, lowercases the scheme and host, and strips a trailing
+    slash. Query params are kept, except ``utm_*`` tracking params.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    raw = raw.split("#", 1)[0].strip()
+    if not raw:
+        return ""
+    parts = urlsplit(raw)
+    if not parts.netloc:
+        return raw[:-1] if len(raw) > 1 and raw.endswith("/") else raw
+
+    scheme = (parts.scheme or "").lower()
+    host = (parts.hostname or "").lower()
+    if host:
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        netloc = host
+        if parts.username is not None:
+            auth = parts.username
+            if parts.password is not None:
+                auth += ":" + parts.password
+            netloc = f"{auth}@{host}"
+        if parts.port is not None:
+            netloc = f"{netloc}:{parts.port}"
+    else:
+        netloc = parts.netloc.lower()
+
+    path = parts.path or ""
+    if path == "/":
+        path = ""
+    elif len(path) > 1:
+        path = path.rstrip("/")
+
+    query_pairs = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if not key.lower().startswith("utm_")
+    ]
+    return urlunsplit((scheme, netloc, path, urlencode(query_pairs), ""))
+
+
+def dedupe_url_set(urls) -> set:
+    """Normalized forms of stored URLs. Empty results are omitted so blank
+    entries don't collapse into each other. The stored strings are unchanged.
+    """
+    keys = set()
+    for url in urls or []:
+        if not isinstance(url, str):
+            continue
+        key = normalize_url_for_dedupe(url)
+        if key:
+            keys.add(key)
+    return keys
+
+
+def normalize_seen_key(key: str) -> str:
+    """Normalize any URL embedded in a seenSourceKeys entry for comparison.
+
+    The stored key is left as originally written, fragment and all.
+    """
+    if not key:
+        return ""
+    return _SEEN_KEY_URL.sub(lambda match: normalize_url_for_dedupe(match.group(0)), key)
+
+
+def seen_key_set(keys) -> set:
+    out = set()
+    for key in keys or []:
+        if isinstance(key, str) and key:
+            out.add(normalize_seen_key(key))
+    return out
+
+
+def _collapse_duplicate_urls(items: List[dict]) -> List[dict]:
+    """Keep the first item for each normalized URL. Callers sort first, so the
+    survivor is the one the lane already ranked highest. Stored URLs stay as-is.
+    """
+    seen = set()
+    kept: List[dict] = []
+    for item in items:
+        key = normalize_url_for_dedupe(item.get("url") or "")
+        if key:
+            if key in seen:
+                continue
+            seen.add(key)
+        kept.append(item)
+    return kept
 
 
 def repo_name_from_feed(feed: str) -> str:
@@ -1471,18 +1570,30 @@ def audit_candidate(kind: str, item: dict, state: dict, backlog: dict) -> dict:
         return row
 
     seen_source_keys = set(state.get("seenSourceKeys", []))
+    seen_norm = seen_key_set(seen_source_keys)
     posted_urls = set(state.get("postedUrls", []))
+    posted_norm = dedupe_url_set(posted_urls)
     existing = {existing_item.get("id"): existing_item for existing_item in backlog.get("items", [])}
     key = source_key(kind, candidate["sourceId"], candidate["url"])
     bid = backlog_id(candidate["url"], candidate["title"])
+    url_key = normalize_url_for_dedupe(candidate.get("url") or "")
     row["sourceKey"] = key
     row["backlogId"] = bid
 
-    if candidate["url"] in posted_urls:
+    matched = existing.get(bid)
+    if matched is None and url_key:
+        for existing_item in existing.values():
+            if normalize_url_for_dedupe(existing_item.get("url") or "") == url_key:
+                matched = existing_item
+                break
+
+    # Exact membership still wins for legacy rows; normalized comparison catches
+    # the same link with a new fragment, host case, or trailing slash.
+    if candidate["url"] in posted_urls or (url_key and url_key in posted_norm):
         row.update({"status": "skipped", "reason": "posted_url"})
-    elif bid in existing:
-        row.update({"status": "skipped", "reason": "already_in_backlog", "backlogStatus": existing[bid].get("status")})
-    elif key in seen_source_keys:
+    elif matched is not None:
+        row.update({"status": "skipped", "reason": "already_in_backlog", "backlogStatus": matched.get("status")})
+    elif key in seen_source_keys or normalize_seen_key(key) in seen_norm:
         row.update({"status": "skipped", "reason": "seen_source_key"})
     else:
         row.update({"status": "would_add", "reason": "passes_classifier"})
@@ -1668,7 +1779,12 @@ def collect_into_backlog() -> dict:
     state = load_json(THREAD_STATE_FILE, {})
 
     seen_source_keys = set(state.get("seenSourceKeys", []))
+    seen_norm = seen_key_set(seen_source_keys)
+    posted_norm = dedupe_url_set(state.get("postedUrls", []))
     existing_ids = {item["id"] for item in backlog.get("items", [])}
+    backlog_url_norm = dedupe_url_set(
+        item.get("url") for item in backlog.get("items", []) if isinstance(item, dict)
+    )
 
     added = []
     candidates = collect_candidates()
@@ -1690,13 +1806,19 @@ def collect_into_backlog() -> dict:
             if not is_fresh(candidate):
                 continue
             key = source_key(kind, candidate["sourceId"], candidate["url"])
-            if key in seen_source_keys:
+            if key in seen_source_keys or normalize_seen_key(key) in seen_norm:
+                continue
+            url_key = normalize_url_for_dedupe(candidate.get("url") or "")
+            if url_key and (url_key in posted_norm or url_key in backlog_url_norm):
                 continue
             seen_source_keys.add(key)
+            seen_norm.add(normalize_seen_key(key))
             b = backlog_item(candidate)
             if b["id"] not in existing_ids:
                 backlog["items"].append(b)
                 existing_ids.add(b["id"])
+                if url_key:
+                    backlog_url_norm.add(url_key)
                 added.append(b)
 
     now = now_utc()
@@ -1799,6 +1921,7 @@ def queue_for_category(category: str) -> List[dict]:
     backlog = load_json(BACKLOG_FILE, {"items": []})
     state = load_json(THREAD_STATE_FILE, {})
     posted_urls = set(state.get("postedUrls", []))
+    posted_norm = dedupe_url_set(posted_urls)
     now = now_utc()
     out = []
     for item in backlog.get("items", []):
@@ -1813,7 +1936,8 @@ def queue_for_category(category: str) -> List[dict]:
             continue
         if category not in item.get("categories", []):
             continue
-        if item.get("url") in posted_urls:
+        url_key = normalize_url_for_dedupe(item.get("url") or "")
+        if item.get("url") in posted_urls or (url_key and url_key in posted_norm):
             continue
         expires = parse_dt(item.get("expiresAt", ""))
         if expires and expires < now:
@@ -1830,7 +1954,7 @@ def queue_for_category(category: str) -> List[dict]:
     if _normalize_scores_enabled():
         apply_normalized_scores(out)
         out.sort(key=lambda x: -(x.get("normScore") or 0))
-    return out
+    return _collapse_duplicate_urls(out)
 
 
 def source_bucket(item: dict) -> str:
@@ -2613,11 +2737,15 @@ def mark_posted(category: str, limit: Optional[int] = None, posted_items: Option
     bundle = posted_items if posted_items is not None else bundle_for_category(category, limit)
     posted_ids = {item.get("id") for item in bundle if item.get("id")}
     posted_urls_to_mark = {item.get("url") for item in bundle if item.get("url")}
+    posted_norm_to_mark = dedupe_url_set(posted_urls_to_mark)
     posted_urls = set(state.get("postedUrls", []))
     posted_backlog_ids = set(state.get("postedBacklogIds", []))
 
     for item in backlog.get("items", []):
-        if item.get("id") in posted_ids or item.get("url") in posted_urls_to_mark:
+        item_url = item.get("url")
+        item_norm = normalize_url_for_dedupe(item_url or "")
+        same_link = bool(item_norm) and item_norm in posted_norm_to_mark
+        if item.get("id") in posted_ids or item_url in posted_urls_to_mark or same_link:
             item["status"] = "posted"
             item["postedCategories"] = sorted(set(item.get("postedCategories", []) + [category]))
             posted_urls.add(item["url"])
