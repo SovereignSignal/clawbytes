@@ -32,6 +32,16 @@ GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 # Rate limiting - be nice to APIs
 GITHUB_DELAY=0.2  # seconds between GitHub requests (0.5s = 7200/hr, well within 5000/hr auth'd limit)
 HN_DELAY=0.5
+# /search is not the core API. Authenticated search is about 30 requests
+# per minute; unauthenticated is about 10. discover_github stays under that
+# cap. It does not space every query out to 2s/6s — nine queries already fit,
+# and a 6s gap times the awesome-list crawl would blow the script budget
+# (SCRIPT_MAX_DURATION in main; the older comment there also mentions 60s).
+GITHUB_SEARCH_LIMIT_AUTH=30
+GITHUB_SEARCH_LIMIT_ANON=10
+# One 403/429 backoff. Clipped to the time left under SCRIPT_MAX_DURATION
+# and hard-capped so a multi-hour Retry-After cannot stall the run.
+GITHUB_SEARCH_BACKOFF_CAP=20
 
 # Star thresholds for discovery
 MIN_STARS_NEW=50      # Min stars for repos <7 days old
@@ -270,14 +280,182 @@ add_repo_to_sources() {
 
 # ============ DISCOVERY FUNCTIONS ============
 
+# Clip a search wait so it cannot run past the script budget. script_start
+# and SCRIPT_MAX_DURATION are set in main and visible here (bash locals).
+github_search_bound() {
+    local want="$1"
+    local now elapsed remaining cap start budget reserve
+    reserve=15
+    start="${script_start:-}"
+    budget="${SCRIPT_MAX_DURATION:-300}"
+    if [[ ! "$want" =~ ^[0-9]+$ ]]; then
+        want=0
+    fi
+    if [[ -z "$start" || ! "$start" =~ ^[0-9]+$ ]]; then
+        if (( want > GITHUB_SEARCH_BACKOFF_CAP )); then
+            printf '%s\n' "$GITHUB_SEARCH_BACKOFF_CAP"
+        else
+            printf '%s\n' "$want"
+        fi
+        return 0
+    fi
+    now=$(date +%s)
+    elapsed=$((now - start))
+    if (( elapsed < 0 )); then
+        elapsed=0
+    fi
+    remaining=$((budget - elapsed))
+    if (( remaining <= reserve )); then
+        printf '%s\n' 0
+        return 0
+    fi
+    cap=$((remaining - reserve))
+    if (( cap > GITHUB_SEARCH_BACKOFF_CAP )); then
+        cap=$GITHUB_SEARCH_BACKOFF_CAP
+    fi
+    if (( want > cap )); then
+        printf '%s\n' "$cap"
+    else
+        printf '%s\n' "$want"
+    fi
+}
+
+# Seconds to wait after a 403/429. Retry-After wins over X-RateLimit-Reset.
+# A present Retry-After of 0 means "retry immediately" — do not fall through
+# to a far-future reset timestamp.
+github_search_retry_wait() {
+    local now want ra rs ts
+    now=$(date +%s)
+    ra="${GITHUB_SEARCH_RETRY_AFTER:-}"
+    rs="${GITHUB_SEARCH_RESET:-}"
+    want=0
+    if [[ -n "$ra" ]]; then
+        if [[ "$ra" =~ ^[0-9]+$ ]]; then
+            want=$ra
+        else
+            ts=$(date -d "$ra" +%s 2>/dev/null || true)
+            if [[ "${ts:-}" =~ ^[0-9]+$ ]] && (( ts > now )); then
+                want=$((ts - now))
+            else
+                want=2
+            fi
+        fi
+    elif [[ "$rs" =~ ^[0-9]+$ ]] && (( rs > now )); then
+        want=$((rs - now))
+    else
+        want=2
+    fi
+    github_search_bound "$want"
+}
+
+# Stay at or under the search per-minute cap. Returns 1 when the only way
+# to comply is a wait the script budget cannot afford — caller skips the
+# rest of the queries instead of hammering.
+github_search_pace() {
+    local limit="$1"
+    local now ts needed wait
+    local -a kept=()
+    now=$(date +%s)
+    for ts in "${GITHUB_SEARCH_AT[@]}"; do
+        if (( now - ts < 60 )); then
+            kept+=("$ts")
+        fi
+    done
+    if (( ${#kept[@]} >= limit )); then
+        needed=$((60 - (now - kept[0])))
+        if (( needed < 1 )); then
+            needed=1
+        fi
+        wait=$(github_search_bound "$needed")
+        if (( wait < needed )); then
+            return 1
+        fi
+        if (( wait > 0 )); then
+            sleep "$wait"
+        fi
+        now=$(date +%s)
+        kept=()
+        for ts in "${GITHUB_SEARCH_AT[@]}"; do
+            if (( now - ts < 60 )); then
+                kept+=("$ts")
+            fi
+        done
+    fi
+    GITHUB_SEARCH_AT=("${kept[@]}")
+    GITHUB_SEARCH_AT+=("$now")
+    return 0
+}
+
+github_search_read_headers() {
+    local hdr="$1"
+    local parsed status retry_after reset_at
+    GITHUB_SEARCH_STATUS=""
+    GITHUB_SEARCH_RETRY_AFTER=""
+    GITHUB_SEARCH_RESET=""
+    [[ -f "$hdr" ]] || return 0
+    parsed=$(tr -d '\r' < "$hdr" | awk '
+        {
+            key = tolower($1)
+        }
+        key ~ /^http\// { status = $2 }
+        key == "retry-after:" { retry = $2 }
+        key == "x-ratelimit-reset:" { reset = $2 }
+        END {
+            printf "%s\n%s\n%s\n", status, retry, reset
+        }
+    ')
+    status=$(printf '%s\n' "$parsed" | sed -n '1p')
+    retry_after=$(printf '%s\n' "$parsed" | sed -n '2p')
+    reset_at=$(printf '%s\n' "$parsed" | sed -n '3p')
+    GITHUB_SEARCH_STATUS=$status
+    GITHUB_SEARCH_RETRY_AFTER=$retry_after
+    GITHUB_SEARCH_RESET=$reset_at
+}
+
+# Search request. Body stays in $2 — never a shell variable — so a large
+# result cannot trip MAX_ARG_STRLEN the way --argjson used to.
+# Sends Authorization only when GITHUB_TOKEN is already set (env or load_tokens).
+# A curl stub that ignores -D and prints JSON still counts as HTTP 200.
+github_search_once() {
+    local url="$1"
+    local dest="$2"
+    local hdr
+    local -a args
+    jq_tmp_init
+    hdr=$(mktemp "$JQ_TMP_DIR/gh-hdr.XXXXXX")
+    : > "$hdr"
+    args=(-s --max-time 15 -D "$hdr" -H "Accept: application/vnd.github+json" -H "User-Agent: ClawBytes-Monitor/1.0")
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        args+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+    fi
+    if ! curl "${args[@]}" "$url" > "$dest"; then
+        return 1
+    fi
+    github_search_read_headers "$hdr"
+    if [[ -z "$GITHUB_SEARCH_STATUS" ]]; then
+        if jq empty "$dest" >/dev/null 2>&1; then
+            GITHUB_SEARCH_STATUS=200
+        else
+            return 1
+        fi
+    fi
+    return 0
+}
+
+github_search_skip() {
+    local status="$1"
+    echo "⚠️ GitHub search blocked (HTTP ${status}); skipping remaining search queries" >&2
+}
+
 # GitHub Search Discovery
 discover_github() {
     echo "🔍 GitHub Discovery..." >&2
     unexport discoveries response items item repo_data
     jq_tmp_init
-    local discoveries_file repo_file
+    local discoveries_file repo_file body_file
     discoveries_file=$(mktemp "$JQ_TMP_DIR/gh-disc.XXXXXX")
     repo_file=$(mktemp "$JQ_TMP_DIR/gh-repo.XXXXXX")
+    body_file=$(mktemp "$JQ_TMP_DIR/gh-body.XXXXXX")
     printf '%s\n' '[]' > "$discoveries_file"
 
     # Search queries
@@ -292,29 +470,66 @@ discover_github() {
         "topic:mcp-server&sort=stars&per_page=10"
         "topic:ai-agent+created:>2026-01-01&sort=stars&per_page=10"
     )
-    
+
+    local -a GITHUB_SEARCH_AT=()
+    local search_retried=0
+    local limit=$GITHUB_SEARCH_LIMIT_ANON
+    local query url status wait
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        limit=$GITHUB_SEARCH_LIMIT_AUTH
+    fi
+
     for query in "${queries[@]}"; do
-        local url="https://api.github.com/search/repositories?q=${query}"
-        local response
-        response=$(github_api "$url" 2>/dev/null) || continue
-        
-        # Parse results
-        local items
-        items=$(echo "$response" | jq -c '.items // []')
-        
+        url="https://api.github.com/search/repositories?q=${query}"
+        if ! github_search_pace "$limit"; then
+            echo "⚠️ GitHub search rate limit reached; skipping remaining search queries" >&2
+            break
+        fi
+        if ! github_search_once "$url" "$body_file"; then
+            sleep "$GITHUB_DELAY"
+            continue
+        fi
+        status="$GITHUB_SEARCH_STATUS"
+        if [[ "$status" == "403" || "$status" == "429" ]]; then
+            if (( search_retried == 0 )); then
+                search_retried=1
+                wait=$(github_search_retry_wait)
+                if (( wait > 0 )); then
+                    sleep "$wait"
+                fi
+                if ! github_search_pace "$limit"; then
+                    github_search_skip "$status"
+                    break
+                fi
+                if ! github_search_once "$url" "$body_file"; then
+                    github_search_skip "$status"
+                    break
+                fi
+                status="$GITHUB_SEARCH_STATUS"
+            fi
+            if [[ "$status" == "403" || "$status" == "429" ]]; then
+                github_search_skip "$status"
+                break
+            fi
+        fi
+        if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+            sleep "$GITHUB_DELAY"
+            continue
+        fi
+
         while IFS= read -r item; do
             [[ -z "$item" || "$item" == "null" ]] && continue
-            
+
             local repo_name stars created_at
             repo_name=$(echo "$item" | jq -r '.full_name')
             stars=$(echo "$item" | jq -r '.stargazers_count // 0')
             created_at=$(echo "$item" | jq -r '.created_at // ""')
-            
+
             # Skip if already known
             if is_repo_known "$repo_name"; then
                 continue
             fi
-            
+
             # Check star threshold
             local threshold=$MIN_STARS_DEFAULT
             if [[ -n "$created_at" ]]; then
@@ -322,12 +537,12 @@ discover_github() {
                 created_epoch=$(date -d "$created_at" +%s 2>/dev/null || echo 0)
                 local week_ago
                 week_ago=$(date -d "7 days ago" +%s)
-                
+
                 if [[ $created_epoch -gt $week_ago ]]; then
                     threshold=$MIN_STARS_NEW
                 fi
             fi
-            
+
             if [[ $stars -ge $threshold ]]; then
                 printf '%s\n' "$item" | jq '{
                     repo: .full_name,
@@ -346,9 +561,9 @@ discover_github() {
                 jq_append_element "$discoveries_file" "$repo_file"
                 echo "   📦 Found: $repo_name (⭐ $stars)" >&2
             fi
-        done < <(echo "$items" | jq -c '.[]')
+        done < <(jq -c '.items // [] | .[]' "$body_file")
 
-        sleep $GITHUB_DELAY
+        sleep "$GITHUB_DELAY"
     done
 
     cat "$discoveries_file"
@@ -945,8 +1160,11 @@ main() {
     init_files
     jq_tmp_init
 
-    # Set a hard timeout for the entire script
-    # The cron job times out at 60s, we want to finish well before that
+    # Set a hard timeout for the entire script.
+    # An older note said the cron job times out at 60s. The enforced budget
+    # in this script is SCRIPT_MAX_DURATION (300s; the cron comment says 600s).
+    # GitHub search's one 403/429 backoff uses this same clock and will not
+    # sleep past it.
     local script_start
     script_start=$(date +%s)
     local SCRIPT_MAX_DURATION=300  # 5 min budget; cron timeout is 600s
