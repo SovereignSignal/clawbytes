@@ -998,7 +998,7 @@ def classify_moltbook(item: dict) -> Optional[dict]:
 
 
 def classify_hf_paper(item: dict) -> Optional[dict]:
-    """Classify HuggingFace Daily Papers output into Read/Watch/Community."""
+    """Classify HuggingFace Daily Papers into Read, plus Community on an explicit hint."""
     url = item.get("url", "")
     title = item.get("title", "")
     if not url or not title:
@@ -1007,7 +1007,6 @@ def classify_hf_paper(item: dict) -> Optional[dict]:
     upvotes = int(item.get("upvotes", 0) or 0)
     relevance = int(item.get("score", 0) or 0)
     summary_text = item.get("ai_summary") or "HF Daily Papers signal"
-    low = f"{title} {summary_text}".lower()
 
     hint = item.get("category_hint") if item.get("category_hint") in CATEGORY_META else "read"
     # HF papers are context/research signals, not Ship releases. GitHub/project
@@ -1017,11 +1016,14 @@ def classify_hf_paper(item: dict) -> Optional[dict]:
     # Papers never route to Watch — that lane is for actionable incidents and
     # advisories (security monitor, status feeds), not academic research. Even
     # security-flavored papers belong in Read. Keeps Watch tight and Read full.
-    categories = [hint]
+    # Community is added only for an explicit community hint already on the
+    # item. Keyword hits ("agent", "benchmark", "tool", "harness") used to
+    # dual-tag nearly every paper into Community and flooded that lane.
+    if item.get("lane") == "community":
+        hint = "community"
+    categories = ["read"]
     if hint == "community":
         categories = ["community", "read"]
-    elif "agent" in low or "benchmark" in low or "tool" in low or "harness" in low:
-        categories = ["read", "community"]
 
     primary = categories[0]
     base = {"watch": 42, "read": 30, "community": 22}.get(primary, 30)
@@ -2656,6 +2658,58 @@ def print_status() -> None:
         )
 
 
+_CURATOR_REASON_LIMIT = 300
+_LOG_SECRET_RE = re.compile(
+    r"(?i)(?:bearer\s+[A-Za-z0-9._\-]{8,}|sk-[A-Za-z0-9_\-]{8,}|(?:api[_-]?key|token|secret)\s*[:=]\s*\S+)"
+)
+
+
+def _redact_log_text(text: str) -> str:
+    """One line, with credential-shaped fragments removed. Never a prompt dump."""
+    collapsed = " ".join(str(text or "").split())
+    return _LOG_SECRET_RE.sub("[redacted]", collapsed)
+
+
+def _curator_drop_summary(drop_reasons) -> str:
+    if not isinstance(drop_reasons, dict):
+        return ""
+    bits = []
+    for item_id, reason in drop_reasons.items():
+        reason_text = _redact_log_text(reason)
+        if not reason_text:
+            continue
+        label = _redact_log_text(item_id)
+        bits.append(f"{label}: {reason_text}" if label else reason_text)
+    if not bits:
+        return ""
+    return "drops: " + "; ".join(bits)
+
+
+def _format_curator_decline_reason(meta: dict) -> str:
+    """skip_reason, per-item drops, then notes, capped so the log stays one line.
+
+    Notes shrink first so a long note cannot hide the skip or drop reasons.
+    """
+    if not isinstance(meta, dict):
+        return "no reason given"
+    skip = _redact_log_text(meta.get("skip_reason") or "")
+    notes = _redact_log_text(meta.get("notes") or "")
+    if notes and notes == skip:
+        notes = ""
+    drops = _curator_drop_summary(meta.get("drop_reasons"))
+    head = [part for part in (skip, drops) if part]
+    if notes:
+        room = _CURATOR_REASON_LIMIT - len("; ".join(head)) - (2 if head else 0)
+        if room >= 8:
+            if len(notes) > room:
+                notes = notes[: room - 3] + "..."
+            head.append(notes)
+    text = "; ".join(head) if head else "no reason given"
+    if len(text) > _CURATOR_REASON_LIMIT:
+        text = text[: _CURATOR_REASON_LIMIT - 3] + "..."
+    return text
+
+
 def _curator_enabled_for(category: str) -> bool:
     """Whether autopublish should run the curator pass on this lane.
 
@@ -2716,10 +2770,21 @@ def _publish_lane(category: str, send: bool) -> tuple:
                 # Breadth over purity: a whole-lane decline falls back to the
                 # deterministic post rather than going silent. The curator still
                 # improves approved lanes and drops weak *individual* items.
-                print(f"[autopublish] curator declined {category}; using deterministic bundle", file=sys.stderr)
+                reason = _format_curator_decline_reason(meta)
+                print(
+                    f"[autopublish] curator declined {category}: {reason}; "
+                    f"using deterministic bundle",
+                    file=sys.stderr,
+                )
             # fallback marker, empty items, gate rejection, or send failure
             # → fall through to deterministic
-        # curated is None (curator failed) → fall through to deterministic
+        else:
+            # Curator subprocess error or empty result. Same fallback: post the
+            # deterministic bundle, and say so. Do not dump prompts or stderr.
+            print(
+                f"[autopublish] curator error for {category}; using deterministic bundle",
+                file=sys.stderr,
+            )
 
     message = format_category_bundle(category)
     bundle = bundle_for_category(category)
