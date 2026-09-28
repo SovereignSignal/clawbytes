@@ -8,6 +8,15 @@
 #   ./claw-ecosystem-monitor.sh --mode both      # Check + discover
 
 set -euo pipefail
+# allexport (a parent `set -a`, or SHELLOPTS=allexport) marks every assignment
+# for export. `local` also keeps -x when that name arrived already exported.
+# A growing JSON value then sits in the environment of every child. Linux
+# rejects execve once any argument or environment string exceeds MAX_ARG_STRLEN
+# (128 KiB), which bash logs as "jq: Argument list too long". The failing
+# append is inside a command substitution, so the discover run still exits 0
+# with whatever was accumulated after the wipe. Turn allexport off before any
+# JSON is built; call sites below also unexport names that may have inherited -x.
+set +a
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="${WORKSPACE:-$(dirname "$SCRIPT_DIR")}"
@@ -121,7 +130,60 @@ load_json() {
 save_json() {
     local file="$1"
     local data="$2"
+    # `data` may have inherited -x. Drop it before jq so a large document
+    # is not also an environment string.
+    unexport data
     echo "$data" | jq '.' > "$file"
+}
+
+# Scratch dir for JSON handed to jq through --slurpfile / stdin instead of argv.
+JQ_TMP_DIR=""
+
+jq_tmp_init() {
+    if [[ -z "$JQ_TMP_DIR" ]]; then
+        JQ_TMP_DIR=$(mktemp -d)
+    fi
+}
+
+# Clear an inherited export flag. No-op when the name is unset.
+# `export -n` sees the caller's local; it does not create a new one.
+unexport() {
+    local name
+    for name in "$@"; do
+        # ${name?} is the name to unexport; the ? quiets shellcheck SC2163.
+        export -n "${name?}"
+    done
+}
+
+# Append the single JSON value in $2 to the JSON array stored in $1.
+# --slurpfile binds the value as a one-element array, so this matches
+# the old `. + [$repo]` / `. + [$item]` programs.
+jq_append_element() {
+    local array_file="$1"
+    local elem_file="$2"
+    local tmp
+    tmp=$(mktemp "$JQ_TMP_DIR/append.XXXXXX")
+    jq --slurpfile elem "$elem_file" '. + $elem' "$array_file" > "$tmp"
+    mv "$tmp" "$array_file"
+}
+
+# Merge one {repo, tag} object into a repo→tag map. Matches
+# `. + {($item.repo): $item.tag}` when $item was a single object.
+jq_merge_baseline() {
+    local object_file="$1"
+    local elem_file="$2"
+    local tmp
+    tmp=$(mktemp "$JQ_TMP_DIR/base.XXXXXX")
+    jq --slurpfile item "$elem_file" '. + {($item[0].repo): $item[0].tag}' "$object_file" > "$tmp"
+    mv "$tmp" "$object_file"
+}
+
+# Write a shell variable to a file. printf is a builtin, so the value
+# never becomes an execve argument.
+write_json_var() {
+    local name="$1"
+    local dest="$2"
+    printf '%s\n' "${!name}" > "$dest"
 }
 
 # Get all repos from sources (curated + dynamic)
@@ -148,9 +210,10 @@ is_repo_known() {
 
 # Fetch repo metadata from GitHub
 fetch_repo_metadata() {
+    unexport response
     local repo="$1"
     local url="https://api.github.com/repos/${repo}"
-    
+
     local response
     response=$(github_api "$url" 2>/dev/null) || {
         echo "{}"
@@ -175,25 +238,33 @@ fetch_repo_metadata() {
 
 # Add repo to sources.json (curated or dynamic)
 add_repo_to_sources() {
+    unexport repo_data sources
     local repo_data="$1"
     local section="$2"  # "curated" or "dynamic"
-    
+
     local sources
     sources=$(load_json "$SOURCES_FILE")
-    
+
     local now
     now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    
+
     # Add discoveredAt timestamp
-    repo_data=$(echo "$repo_data" | jq --arg ts "$now" '. + {discoveredAt: $ts}')
-    
-    # Add to appropriate section
-    sources=$(echo "$sources" | jq --argjson repo "$repo_data" --arg section "$section" '
-        .[$section] = (.[$section] + [$repo]) |
+    repo_data=$(printf '%s\n' "$repo_data" | jq --arg ts "$now" '. + {discoveredAt: $ts}')
+
+    jq_tmp_init
+    local repo_file sources_file
+    repo_file=$(mktemp "$JQ_TMP_DIR/repo.XXXXXX")
+    sources_file=$(mktemp "$JQ_TMP_DIR/sources.XXXXXX")
+    write_json_var repo_data "$repo_file"
+    write_json_var sources "$sources_file"
+
+    # $repo is a one-element array from --slurpfile, so add $repo, not [$repo].
+    sources=$(jq --slurpfile repo "$repo_file" --arg section "$section" '
+        .[$section] = (.[$section] + $repo) |
         ._meta.lastUpdated = now |
         ._meta.totalDiscovered = ((.curated | length) + (.dynamic | length))
-    ')
-    
+    ' "$sources_file")
+
     save_json "$SOURCES_FILE" "$sources"
 }
 
@@ -202,8 +273,13 @@ add_repo_to_sources() {
 # GitHub Search Discovery
 discover_github() {
     echo "🔍 GitHub Discovery..." >&2
-    local discoveries="[]"
-    
+    unexport discoveries response items item repo_data
+    jq_tmp_init
+    local discoveries_file repo_file
+    discoveries_file=$(mktemp "$JQ_TMP_DIR/gh-disc.XXXXXX")
+    repo_file=$(mktemp "$JQ_TMP_DIR/gh-repo.XXXXXX")
+    printf '%s\n' '[]' > "$discoveries_file"
+
     # Search queries
     local queries=(
         "topic:ai-agent+topic:openclaw&sort=updated&per_page=10"
@@ -253,8 +329,7 @@ discover_github() {
             fi
             
             if [[ $stars -ge $threshold ]]; then
-                local repo_data
-                repo_data=$(echo "$item" | jq '{
+                printf '%s\n' "$item" | jq '{
                     repo: .full_name,
                     name: .name,
                     description: (.description // ""),
@@ -266,24 +341,29 @@ discover_github() {
                     updatedAt: .updated_at,
                     source: "github-search",
                     isNew: true
-                }')
-                
-                discoveries=$(echo "$discoveries" | jq --argjson repo "$repo_data" '. + [$repo]')
+                }' > "$repo_file"
+
+                jq_append_element "$discoveries_file" "$repo_file"
                 echo "   📦 Found: $repo_name (⭐ $stars)" >&2
             fi
         done < <(echo "$items" | jq -c '.[]')
-        
+
         sleep $GITHUB_DELAY
     done
-    
-    echo "$discoveries"
+
+    cat "$discoveries_file"
 }
 
 # Awesome List Crawler
 discover_awesome_lists() {
     echo "📚 Crawling Awesome Lists..." >&2
-    local discoveries="[]"
-    
+    unexport discoveries content urls repo_data
+    jq_tmp_init
+    local discoveries_file repo_file
+    discoveries_file=$(mktemp "$JQ_TMP_DIR/aw-disc.XXXXXX")
+    repo_file=$(mktemp "$JQ_TMP_DIR/aw-repo.XXXXXX")
+    printf '%s\n' '[]' > "$discoveries_file"
+
     local lists=(
         "https://raw.githubusercontent.com/e2b-dev/awesome-ai-agents/main/README.md"
         "https://raw.githubusercontent.com/kyrolabs/awesome-agents/main/README.md"
@@ -336,8 +416,8 @@ discover_awesome_lists() {
                 stars=$(echo "$repo_data" | jq -r '.stars // 0')
                 
                 if [[ $stars -ge $MIN_STARS_DEFAULT ]]; then
-                    repo_data=$(echo "$repo_data" | jq '. + {source: "awesome-list", isNew: true}')
-                    discoveries=$(echo "$discoveries" | jq --argjson repo "$repo_data" '. + [$repo]')
+                    printf '%s\n' "$repo_data" | jq '. + {source: "awesome-list", isNew: true}' > "$repo_file"
+                    jq_append_element "$discoveries_file" "$repo_file"
                     echo "   📚 Found: $repo_name (⭐ $stars)" >&2
                 fi
             fi
@@ -345,14 +425,19 @@ discover_awesome_lists() {
             sleep $GITHUB_DELAY
         done <<< "$urls"
     done
-    
-    echo "$discoveries"
+
+    cat "$discoveries_file"
 }
 
 # Hacker News Discovery
 discover_hackernews() {
     echo "🔶 HN Discovery..." >&2
-    local discoveries="[]"
+    unexport discoveries github_repos response hits hit repo_data
+    jq_tmp_init
+    local discoveries_file repo_file
+    discoveries_file=$(mktemp "$JQ_TMP_DIR/hn-disc.XXXXXX")
+    repo_file=$(mktemp "$JQ_TMP_DIR/hn-repo.XXXXXX")
+    printf '%s\n' '[]' > "$discoveries_file"
     local github_repos="[]"
     
     local queries=(
@@ -404,16 +489,16 @@ discover_hackernews() {
             stars=$(echo "$repo_data" | jq -r '.stars // 0')
             
             if [[ $stars -ge $MIN_STARS_NEW ]]; then
-                repo_data=$(echo "$repo_data" | jq '. + {source: "hackernews", isNew: true}')
-                discoveries=$(echo "$discoveries" | jq --argjson repo "$repo_data" '. + [$repo]')
+                printf '%s\n' "$repo_data" | jq '. + {source: "hackernews", isNew: true}' > "$repo_file"
+                jq_append_element "$discoveries_file" "$repo_file"
                 echo "   🔶 Found: $repo_name (⭐ $stars)" >&2
             fi
         fi
         
         sleep $GITHUB_DELAY
     done <<< "$unique_repos"
-    
-    echo "$discoveries"
+
+    cat "$discoveries_file"
 }
 
 # Brave Search discovery removed 2026-06-25 (Brave deprecated).
@@ -438,8 +523,8 @@ check_clawhub_skills() {
 
 # Check all known repos for new releases (parallelized with progress)
 check_github_releases() {
+    unexport state new_releases baselines releases item repos
     local state="$1"
-    local new_releases="[]"
     local batch_count=0
     local start_time
     start_time=$(date +%s)
@@ -481,6 +566,7 @@ check_github_releases() {
         
         # Background worker per repo
         (
+            unexport releases
             local releases
             releases=$(fetch_github_releases "$repo")
             
@@ -526,36 +612,43 @@ check_github_releases() {
     wait
     
     # Collect results. Baselines are repo→tag and are not news.
-    local baselines="{}"
+    # Worker files are already JSON; slurp them instead of --argjson so a
+    # long release name never lands on argv or in an exported variable.
+    jq_tmp_init
+    local baselines_file releases_file
+    baselines_file=$(mktemp "$JQ_TMP_DIR/baselines.XXXXXX")
+    releases_file=$(mktemp "$JQ_TMP_DIR/releases.XXXXXX")
+    printf '%s\n' '{}' > "$baselines_file"
+    printf '%s\n' '[]' > "$releases_file"
     for f in "$tmpdir"/*.baseline; do
         [[ -f "$f" ]] || continue
-        local item
-        item=$(cat "$f")
-        baselines=$(echo "$baselines" | jq --argjson item "$item" '. + {($item.repo): $item.tag}')
+        jq_merge_baseline "$baselines_file" "$f"
     done
 
     for f in "$tmpdir"/*.json; do
         [[ -f "$f" ]] || continue
-        local item
-        item=$(cat "$f")
-        new_releases=$(echo "$new_releases" | jq --argjson item "$item" '. + [$item]')
+        jq_append_element "$releases_file" "$f"
         batch_count=$((batch_count + 1))
     done
-    
+
     rm -rf "$tmpdir"
 
     if [[ -n "${BASELINE_MAP_FILE:-}" ]]; then
-        echo "$baselines" > "$BASELINE_MAP_FILE"
+        cat "$baselines_file" > "$BASELINE_MAP_FILE"
     fi
-    
+
     echo "   Found $batch_count new release(s)" >&2
-    echo "$new_releases"
+    cat "$releases_file"
 }
 
 # Check Hacker News for relevant stories
 check_hackernews() {
+    unexport state new_stories response hits seen_ids stories
     local state="$1"
     local new_stories="[]"
+    jq_tmp_init
+    local seen_file
+    seen_file=$(mktemp "$JQ_TMP_DIR/seen.XXXXXX")
     
     local queries=("openclaw" "claw+agent" "hermes+agent" "claude+code" "ai+coding+agent" "mcp+agent" "codex+agent" "browser+agent")
     local min_created
@@ -573,12 +666,11 @@ PY
         local hits
         hits=$(echo "$response" | jq '.hits // []')
         
-        local seen_ids
-        seen_ids=$(echo "$state" | jq -r '.lastSeenHNStories | @json')
-        
+        printf '%s\n' "$state" | jq '.lastSeenHNStories' > "$seen_file"
+
         local stories
-        stories=$(echo "$hits" | jq --argjson seen "$seen_ids" '
-            [.[] | select(.objectID as $id | ($seen | index($id)) == null)] |
+        stories=$(printf '%s\n' "$hits" | jq --slurpfile seen "$seen_file" '
+            [.[] | select(.objectID as $id | ($seen[0] | index($id)) == null)] |
             [.[] | {
                 id: .objectID,
                 title: .title,
@@ -601,36 +693,46 @@ PY
 
 # Update state with new findings
 update_state() {
+    unexport state baselines new_hn new_skills new_hn_ids new_skill_ids
     local state="$1"
     local baselines="$2"  # object of repo → tag for first sightings only
     local new_hn="$3"
     local new_skills="$4"
-    
+
     local now
     now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    
+
+    jq_tmp_init
+    local base_file hn_file skill_file state_file tmp
+    base_file=$(mktemp "$JQ_TMP_DIR/upd-base.XXXXXX")
+    hn_file=$(mktemp "$JQ_TMP_DIR/upd-hn.XXXXXX")
+    skill_file=$(mktemp "$JQ_TMP_DIR/upd-skill.XXXXXX")
+    state_file=$(mktemp "$JQ_TMP_DIR/upd-state.XXXXXX")
+    tmp=$(mktemp "$JQ_TMP_DIR/upd-out.XXXXXX")
+
     # First-sight baselines only. An emitted release stays unseen until
     # collect hands it to the backlog.
-    state=$(echo "$state" | jq --argjson new "$baselines" '
-        .lastSeenReleases = (.lastSeenReleases + $new)
-    ')
-    
-    # Update HN story IDs
-    local new_hn_ids
-    new_hn_ids=$(echo "$new_hn" | jq '[.[].id]')
-    state=$(echo "$state" | jq --argjson ids "$new_hn_ids" '
-        .lastSeenHNStories = ((.lastSeenHNStories + $ids) | unique | .[-100:])
-    ')
+    write_json_var baselines "$base_file"
+    write_json_var state "$state_file"
+    jq --slurpfile new "$base_file" '
+        .lastSeenReleases = (.lastSeenReleases + $new[0])
+    ' "$state_file" > "$tmp"
+    mv "$tmp" "$state_file"
 
-    local new_skill_ids
-    new_skill_ids=$(echo "$new_skills" | jq '[.[].id]')
-    state=$(echo "$state" | jq --argjson ids "$new_skill_ids" '
-        .lastSeenSkills = ((.lastSeenSkills + $ids) | unique | .[-100:])
-    ')
-    
-    state=$(echo "$state" | jq --arg ts "$now" '.lastCheck = $ts')
-    
-    echo "$state"
+    # Update HN story IDs
+    printf '%s\n' "$new_hn" | jq '[.[].id]' > "$hn_file"
+    jq --slurpfile ids "$hn_file" '
+        .lastSeenHNStories = ((.lastSeenHNStories + $ids[0]) | unique | .[-100:])
+    ' "$state_file" > "$tmp"
+    mv "$tmp" "$state_file"
+
+    printf '%s\n' "$new_skills" | jq '[.[].id]' > "$skill_file"
+    jq --slurpfile ids "$skill_file" '
+        .lastSeenSkills = ((.lastSeenSkills + $ids[0]) | unique | .[-100:])
+    ' "$state_file" > "$tmp"
+    mv "$tmp" "$state_file"
+
+    jq --arg ts "$now" '.lastCheck = $ts' "$state_file"
 }
 
 # ============ MAIN FUNCTIONS ============
@@ -640,7 +742,8 @@ run_check() {
     echo "=======================================" >&2
     echo "📅 $(date)" >&2
     echo "" >&2
-    
+
+    unexport state new_releases baselines new_hn new_hf new_skills output
     local state
     state=$(load_json "$STATE_FILE")
 
@@ -693,28 +796,39 @@ run_check() {
         echo "   Found $skill_count new skill item(s)" >&2
     fi
     
-    # Build output
-    local output
+    # Build output. Payloads stay in files so a long release name cannot
+    # exceed the 128 KiB per-argument limit.
+    jq_tmp_init
+    local ts releases_file hn_file skills_file hf_file output
+    ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    releases_file=$(mktemp "$JQ_TMP_DIR/out-rel.XXXXXX")
+    hn_file=$(mktemp "$JQ_TMP_DIR/out-hn.XXXXXX")
+    skills_file=$(mktemp "$JQ_TMP_DIR/out-skills.XXXXXX")
+    hf_file=$(mktemp "$JQ_TMP_DIR/out-hf.XXXXXX")
+    write_json_var new_releases "$releases_file"
+    write_json_var new_hn "$hn_file"
+    write_json_var new_skills "$skills_file"
+    write_json_var new_hf "$hf_file"
     output=$(jq -n \
-        --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+        --arg ts "$ts" \
         --arg mode "check" \
-        --argjson releases "$new_releases" \
-        --argjson hn "$new_hn" \
-        --argjson skills "$new_skills" \
-        --argjson hf "$new_hf" \
+        --slurpfile releases "$releases_file" \
+        --slurpfile hn "$hn_file" \
+        --slurpfile skills "$skills_file" \
+        --slurpfile hf "$hf_file" \
         '{
             timestamp: $ts,
             mode: $mode,
-            newReleases: $releases,
-            newHNStories: $hn,
-            newSkills: $skills,
-            newHFPapers: $hf,
+            newReleases: $releases[0],
+            newHNStories: $hn[0],
+            newSkills: $skills[0],
+            newHFPapers: $hf[0],
             summary: {
-                releaseCount: ($releases | length),
-                hnCount: ($hn | length),
-                skillCount: ($skills | length),
-                hfCount: ($hf | length),
-                hasNews: ((($releases | length) + ($hn | length) + ($skills | length) + ($hf | length)) > 0)
+                releaseCount: ($releases[0] | length),
+                hnCount: ($hn[0] | length),
+                skillCount: ($skills[0] | length),
+                hfCount: ($hf[0] | length),
+                hasNews: ((($releases[0] | length) + ($hn[0] | length) + ($skills[0] | length) + ($hf[0] | length)) > 0)
             }
         }'
     )
@@ -736,23 +850,36 @@ run_discover() {
     echo "==========================================" >&2
     echo "📅 $(date)" >&2
     echo "" >&2
-    
+
+    unexport all_discoveries github_discoveries awesome_discoveries hn_discoveries state discovery output
     local all_discoveries="[]"
 
     load_tokens
-    
-    # Run all discovery sources
+
+    jq_tmp_init
+    local all_file part_file
+    all_file=$(mktemp "$JQ_TMP_DIR/all-disc.XXXXXX")
+    part_file=$(mktemp "$JQ_TMP_DIR/part-disc.XXXXXX")
+
+    # Run all discovery sources. Merge from files so neither side is an
+    # argv element or an exported environment string.
     local github_discoveries
     github_discoveries=$(discover_github)
-    all_discoveries=$(echo "$all_discoveries $github_discoveries" | jq -s 'add | unique_by(.repo)')
-    
+    write_json_var all_discoveries "$all_file"
+    printf '%s\n' "$github_discoveries" > "$part_file"
+    all_discoveries=$(jq -s 'add | unique_by(.repo)' "$all_file" "$part_file")
+
     local awesome_discoveries
     awesome_discoveries=$(discover_awesome_lists)
-    all_discoveries=$(echo "$all_discoveries $awesome_discoveries" | jq -s 'add | unique_by(.repo)')
-    
+    write_json_var all_discoveries "$all_file"
+    printf '%s\n' "$awesome_discoveries" > "$part_file"
+    all_discoveries=$(jq -s 'add | unique_by(.repo)' "$all_file" "$part_file")
+
     local hn_discoveries
     hn_discoveries=$(discover_hackernews)
-    all_discoveries=$(echo "$all_discoveries $hn_discoveries" | jq -s 'add | unique_by(.repo)')
+    write_json_var all_discoveries "$all_file"
+    printf '%s\n' "$hn_discoveries" > "$part_file"
+    all_discoveries=$(jq -s 'add | unique_by(.repo)' "$all_file" "$part_file")
 
     # Brave Search discovery removed 2026-06-25 (Brave deprecated).
 
@@ -770,19 +897,22 @@ run_discover() {
     state=$(echo "$state" | jq --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" '.lastDiscovery = $ts')
     save_json "$STATE_FILE" "$state"
     
-    # Build output
-    local output
+    # Build output. The accumulated array is a file, not --argjson.
+    local ts disc_file output
+    ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    disc_file=$(mktemp "$JQ_TMP_DIR/disc-out.XXXXXX")
+    write_json_var all_discoveries "$disc_file"
     output=$(jq -n \
-        --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+        --arg ts "$ts" \
         --arg mode "discover" \
-        --argjson discoveries "$all_discoveries" \
+        --slurpfile discoveries "$disc_file" \
         '{
             timestamp: $ts,
             mode: $mode,
-            newDiscoveries: $discoveries,
+            newDiscoveries: $discoveries[0],
             summary: {
-                discoveryCount: ($discoveries | length),
-                hasDiscoveries: (($discoveries | length) > 0)
+                discoveryCount: ($discoveries[0] | length),
+                hasDiscoveries: (($discoveries[0] | length) > 0)
             }
         }'
     )
@@ -803,13 +933,18 @@ run_discover() {
 cleanup_workers() {
     # Kill any background jobs on exit
     jobs -p | xargs -r kill 2>/dev/null || true
+    if [[ -n "${JQ_TMP_DIR:-}" && -d "$JQ_TMP_DIR" ]]; then
+        rm -rf "$JQ_TMP_DIR"
+        JQ_TMP_DIR=""
+    fi
 }
 
 trap cleanup_workers EXIT
 
 main() {
     init_files
-    
+    jq_tmp_init
+
     # Set a hard timeout for the entire script
     # The cron job times out at 60s, we want to finish well before that
     local script_start
