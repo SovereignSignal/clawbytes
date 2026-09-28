@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 import clawbytes_threads as ct
@@ -207,3 +208,38 @@ def test_ollama_curator_config_gate(monkeypatch):
     assert curator._ollama_curator_configured() is False  # still no key
     monkeypatch.setenv("CLAWBYTES_LLM_API_KEY", "k")  # key can come from the shared LLM var
     assert curator._ollama_curator_configured() is True
+
+
+def test_curator_memory_paths_follow_memory_dir(monkeypatch, tmp_path):
+    """Curator state files follow CLAWBYTES_MEMORY_DIR, else repo memory/."""
+    monkeypatch.setenv("CLAWBYTES_MEMORY_DIR", str(tmp_path))
+
+    assert curator.memory_dir() == tmp_path
+    assert curator.degraded_log_path() == tmp_path / "degraded_publishes.json"
+    assert curator.discovered_refs_path() == tmp_path / "discovered_references.json"
+
+    curator.log_degraded("ship", "timeout", "claude timed out")
+    curator.persist_discovered_references([
+        {"kind": "repo", "value": "https://github.com/example/tool", "why": "mentioned in a blurb"},
+    ])
+
+    degraded = json.loads((tmp_path / "degraded_publishes.json").read_text())
+    assert degraded == [{
+        "lane": "ship",
+        "kind": "timeout",
+        "message": "claude timed out",
+        "at": degraded[0]["at"],
+    }]
+    assert isinstance(degraded[0]["at"], int)
+
+    refs = json.loads((tmp_path / "discovered_references.json").read_text())
+    assert refs[0]["kind"] == "repo"
+    assert refs[0]["value"] == "https://github.com/example/tool"
+    assert refs[0]["why"] == "mentioned in a blurb"
+    assert isinstance(refs[0]["discovered_at"], int)
+    assert list(refs[0]) == ["kind", "value", "why", "discovered_at"]
+
+    monkeypatch.delenv("CLAWBYTES_MEMORY_DIR", raising=False)
+    assert curator.memory_dir() == curator.REPO_ROOT / "memory"
+    assert curator.degraded_log_path() == curator.REPO_ROOT / "memory" / "degraded_publishes.json"
+    assert curator.discovered_refs_path() == curator.REPO_ROOT / "memory" / "discovered_references.json"

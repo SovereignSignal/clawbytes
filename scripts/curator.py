@@ -106,8 +106,25 @@ def _curate_via_openai(system_prompt: str, user_prompt: str, timeout: int) -> Cl
 
 
 CURATOR_PROMPT_FILE = REPO_ROOT / "docs" / "curator-prompt.md"
-DISCOVERED_REFS_FILE = REPO_ROOT / "memory" / "discovered_references.json"
-DEGRADED_LOG = REPO_ROOT / "memory" / "degraded_publishes.json"
+
+
+def memory_dir() -> Path:
+    """Persistent state directory, same rule as the rest of the bot.
+
+    ``CLAWBYTES_MEMORY_DIR`` when set (the Railway volume). Otherwise
+    ``<repo>/memory``, matching supervisor.py and the monitors. Read on each
+    call so writes follow the process environment rather than the image-local
+    ``memory/`` directory, which a redeploy wipes.
+    """
+    return Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(REPO_ROOT / "memory")))
+
+
+def degraded_log_path() -> Path:
+    return memory_dir() / "degraded_publishes.json"
+
+
+def discovered_refs_path() -> Path:
+    return memory_dir() / "discovered_references.json"
 
 
 def build_user_prompt(bundle: dict) -> str:
@@ -149,11 +166,12 @@ def fallback_bundle(bundle: dict, reason: str, error_kind: str = "fallback") -> 
 
 def log_degraded(lane: str, kind: str, message: str) -> None:
     """Append a degraded-publish event for supervisor to inspect."""
-    DEGRADED_LOG.parent.mkdir(parents=True, exist_ok=True)
+    path = degraded_log_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     existing = []
-    if DEGRADED_LOG.exists():
+    if path.exists():
         try:
-            existing = json.loads(DEGRADED_LOG.read_text())
+            existing = json.loads(path.read_text())
         except Exception:
             existing = []
     existing.append({
@@ -163,18 +181,19 @@ def log_degraded(lane: str, kind: str, message: str) -> None:
         "at": int(time.time()),
     })
     existing = existing[-200:]  # keep last 200 events
-    DEGRADED_LOG.write_text(json.dumps(existing, indent=2))
+    path.write_text(json.dumps(existing, indent=2))
 
 
 def persist_discovered_references(refs: list) -> None:
     """Append curator-flagged references to the queue supervisor drains."""
     if not refs:
         return
-    DISCOVERED_REFS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    path = discovered_refs_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     existing = []
-    if DISCOVERED_REFS_FILE.exists():
+    if path.exists():
         try:
-            existing = json.loads(DISCOVERED_REFS_FILE.read_text())
+            existing = json.loads(path.read_text())
         except Exception:
             existing = []
     for ref in refs:
@@ -183,7 +202,7 @@ def persist_discovered_references(refs: list) -> None:
             ref.setdefault("discovered_at", int(time.time()))
             existing.append(ref)
     existing = existing[-500:]  # bound the queue
-    DISCOVERED_REFS_FILE.write_text(json.dumps(existing, indent=2))
+    path.write_text(json.dumps(existing, indent=2))
 
 
 def curate(bundle: dict, *, timeout: int = 180, dry_run: bool = False) -> dict:
