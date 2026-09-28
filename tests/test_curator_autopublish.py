@@ -124,6 +124,62 @@ def test_format_curated_html_escapes_href():
     assert 'href="https://x.test/a?b=1&c=2"' not in out
 
 
+def test_publish_lane_decline_logs_reason_and_still_publishes(monkeypatch, capsys):
+    monkeypatch.setenv("CLAWBYTES_USE_CURATOR", "1")
+    long_notes = "n" * 400
+    declined = {
+        "lane": "community",
+        "items": [{"id": "paper-1"}],
+        "system_prompt": "SECRET PROMPT do not log sk-live-secret-token-value",
+        "_curator": {
+            "approved": False,
+            "fallback": False,
+            "skip_reason": "lane is arXiv and HF papers with no community signal",
+            "notes": long_notes,
+            "drop_reasons": {"paper-1": "research paper, not a community discussion"},
+            "prompt": "full curator prompt should stay out of the log",
+        },
+    }
+    monkeypatch.setattr(ct, "curator_input_bundle", lambda c, *a, **k: {"lane": c})
+    monkeypatch.setattr(ct, "run_curator_subprocess", lambda *a, **k: declined)
+    monkeypatch.setattr(ct, "format_category_bundle", lambda c, *a, **k: "DET")
+    monkeypatch.setattr(ct, "bundle_for_category", lambda c, *a, **k: [{"id": "paper-1"}])
+    sent = {}
+    monkeypatch.setattr(ct, "send_telegram", lambda m: sent.setdefault("msg", m))
+    monkeypatch.setattr(ct, "mark_posted", lambda *a, **k: None)
+    ok, count = ct._publish_lane("community", send=True)
+    assert ok is True and count == 1 and sent["msg"] == "DET"
+    err = capsys.readouterr().err
+    assert "[autopublish] curator declined community:" in err
+    assert "using deterministic bundle" in err
+    assert "lane is arXiv and HF papers with no community signal" in err
+    assert "research paper, not a community discussion" in err
+    assert "SECRET PROMPT" not in err
+    assert "sk-live-secret-token-value" not in err
+    assert "full curator prompt" not in err
+    # notes are included but truncated to ~300 chars of the reason
+    assert long_notes not in err
+    decline_line = next(line for line in err.splitlines() if "curator declined community:" in line)
+    reason = decline_line.split("curator declined community:", 1)[1]
+    reason = reason.split("; using deterministic bundle", 1)[0].strip()
+    assert len(reason) <= 300
+
+
+def test_publish_lane_curator_error_logs_and_falls_back(monkeypatch, capsys):
+    monkeypatch.setenv("CLAWBYTES_USE_CURATOR", "1")
+    monkeypatch.setattr(ct, "curator_input_bundle", lambda c, *a, **k: {"lane": c})
+    monkeypatch.setattr(ct, "run_curator_subprocess", lambda *a, **k: None)
+    monkeypatch.setattr(ct, "format_category_bundle", lambda c, *a, **k: "DET")
+    monkeypatch.setattr(ct, "bundle_for_category", lambda c, *a, **k: [{"id": "1"}])
+    sent = {}
+    monkeypatch.setattr(ct, "send_telegram", lambda m: sent.setdefault("msg", m))
+    monkeypatch.setattr(ct, "mark_posted", lambda *a, **k: None)
+    ok, count = ct._publish_lane("community", send=True)
+    assert ok is True and count == 1 and sent["msg"] == "DET"
+    err = capsys.readouterr().err
+    assert "[autopublish] curator error for community; using deterministic bundle" in err
+
+
 def test_publish_lane_decline_falls_back_to_deterministic(monkeypatch):
     # Breadth over purity: a whole-lane decline must NOT silence the lane — it
     # falls back to the deterministic post. The curator's per-item drops still

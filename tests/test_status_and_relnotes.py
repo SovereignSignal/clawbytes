@@ -65,6 +65,48 @@ def test_security_paper_routes_to_read_not_watch():
     assert c is not None
     assert "watch" not in c["categories"]
     assert c["primaryCategory"] == "read"
+    # "benchmark"/"agent" must not dual-tag the paper into Community.
+    assert c["categories"] == ["read"]
+
+
+def _hf_paper(**overrides):
+    item = {
+        "title": "A coding-agent harness benchmark for tool use",
+        "url": "https://huggingface.co/papers/2606.0099",
+        "found_at": datetime.now(timezone.utc).isoformat(),
+        "upvotes": 40,
+        "score": 8,
+        "ai_summary": "Evaluates agent tool use on a harness benchmark.",
+    }
+    item.update(overrides)
+    return item
+
+
+def test_hf_paper_without_community_hint_stays_read():
+    c = ct.classify_hf_paper(_hf_paper())
+    assert c is not None
+    assert c["primaryCategory"] == "read"
+    assert c["categories"] == ["read"]
+    assert "community" not in c["categories"]
+
+
+def test_hf_paper_with_community_hint_includes_community_and_read():
+    c = ct.classify_hf_paper(_hf_paper(category_hint="community"))
+    assert c is not None
+    assert c["primaryCategory"] == "community"
+    assert c["categories"] == ["community", "read"]
+
+
+def test_hf_paper_read_hint_ignores_community_keywords():
+    c = ct.classify_hf_paper(_hf_paper(category_hint="read"))
+    assert c is not None
+    assert c["categories"] == ["read"]
+
+
+def test_hf_paper_lane_community_is_an_explicit_community_signal():
+    c = ct.classify_hf_paper(_hf_paper(lane="community"))
+    assert c is not None
+    assert c["categories"] == ["community", "read"]
 
 
 # ── the security/CVE monitor is retired entirely (2026-06-24) ────────────────
