@@ -241,8 +241,8 @@ def run_sourcing_pass(report: dict, dry_run: bool = False) -> dict:
     system_prompt = SUPERVISOR_PROMPT_FILE.read_text() + "\n\n---\n\n# Editorial Scope\n\n" + load_scope()
     user_prompt = (
         "Perform today's sourcing pass. Specifically:\n"
-        "1. Read memory/discovered_references.json (drain the queue — process its contents).\n"
-        "2. Read memory/clawbytes-backlog.json and memory/degraded_publishes.json for context.\n"
+        f"1. Read {DISCOVERED_REFS} (drain the queue — process its contents).\n"
+        f"2. Read {MEMORY / 'clawbytes-backlog.json'} and {DEGRADED_LOG} for context.\n"
         "3. Read EDITORIAL_SCOPE.md and apply the anchor gate.\n"
         "4. Decide candidate sources to add to memory/candidate_sources.json and "
         "first-class sources to add to memory/claw-ecosystem-sources.json.\n"
