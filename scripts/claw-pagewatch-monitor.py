@@ -3,11 +3,13 @@
 ClawBytes Page Watcher
 Covers vendors that publish real signal but expose no feed:
 
-- Mintlify-style docs serve raw markdown at <page>.md — hash-watch it and
-  emit one item per change (Claude platform release notes, Devin CLI
-  changelog, xAI API release notes).
-- HTML SPAs with no markdown sibling (Google Antigravity changelog) —
-  hash the heading set, not the full page (bundle hashes change on deploys).
+- Mintlify-style docs serve raw markdown at <page>.md (Claude platform
+  release notes, Devin CLI changelog, xAI API release notes). Hash the
+  newest entry — its heading plus that entry's body — not the whole file.
+- HTML SPAs with no markdown sibling (Google Antigravity, Kiro) hash that
+  same newest entry, not the full page (bundle hashes change on deploys).
+  If no heading matches, fall back to the previous whole-page or
+  heading-set hash for that watch.
 - Sites with sitemaps but no RSS (anthropic.com, api-docs.deepseek.com) —
   diff the sitemap slug set and emit one item per new news/engineering URL.
 
@@ -58,8 +60,8 @@ MD_WATCHES = [
     },
 ]
 
-# Feedless HTML SPAs — hash the heading set, not the full page (Astro/Next
-# bundle hashes change on unrelated deploys). First sighting is silent.
+# Feedless HTML SPAs — hash the newest heading's entry, not the full page
+# (Astro/Next bundle hashes change on unrelated deploys). First sighting is silent.
 HTML_WATCHES = [
     {
         "key": "antigravity-changelog",
@@ -76,7 +78,7 @@ HTML_WATCHES = [
         "html": "https://kiro.dev/changelog",
         "page": "https://kiro.dev/changelog",
         # Root changelog is an HTML SPA (no RSS, no .md sibling — probed 2026-09).
-        # Hash h2s, not the full page; first sighting is a silent baseline.
+        # Hash the newest h2 plus its body; first sighting is a silent baseline.
         "heading": r"<h2[^>]*>(.*?)</h2>",
         "fingerprint": "headings",
         "lane": "ship",
@@ -127,6 +129,89 @@ def first_heading(text, pattern):
     return re.sub(r"<[^>]+>", "", m.group(1)).strip()
 
 
+def _is_html_watch(watch):
+    pattern = watch.get("heading") or ""
+    return watch.get("fingerprint") == "headings" or "<" in pattern
+
+
+def _stable_entry_body(raw, html):
+    """Prose of one changelog entry, minus markup and deploy-only noise.
+
+    An empty result means the body is not stable enough to mix into the
+    digest; callers then hash the heading alone.
+    """
+    text = raw or ""
+    if html:
+        text = re.sub(r"<script\b[^>]*>.*?</script>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"<style\b[^>]*>.*?</style>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"<!--.*?-->", " ", text, flags=re.DOTALL)
+        text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\b[a-f0-9]{8,}\b", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def newest_entry_fingerprint(text, watch):
+    """Heading plus stable body of the newest entry, or None if no heading.
+
+    The digest is this string. A change below the current top entry does not
+    alter it, so the ``#updated-`` fragment stays put until a new top entry
+    appears. None tells the caller to fall back to the whole-page hash.
+    """
+    pattern = watch.get("heading") or ""
+    if not pattern or not text:
+        return None
+    flags = re.MULTILINE | re.IGNORECASE
+    html = _is_html_watch(watch)
+    if html:
+        flags |= re.DOTALL
+    matches = list(re.finditer(pattern, text, flags))
+    if not matches:
+        return None
+    heading = first_heading(text, pattern)
+    if not heading:
+        return None
+    start = matches[0].end()
+    end = matches[1].start() if len(matches) > 1 else len(text)
+    body = _stable_entry_body(text[start:end], html)
+    return heading if not body else f"{heading}\n{body}"
+
+
+def _norm_identity(value):
+    return re.sub(r"\s+", " ", (value or "")).strip().casefold()
+
+
+def same_top_entry(state, key, identity):
+    """True when this page's newest heading was already recorded.
+
+    ``topEntries`` is the additive field. Legacy files only have ``headings``
+    (the first heading from the last run); that still counts, so a deploy
+    does not repost the release already on the page.
+    """
+    current = _norm_identity(identity)
+    if not current or not isinstance(state, dict):
+        return False
+    tops = state.get("topEntries")
+    if isinstance(tops, dict) and _norm_identity(tops.get(key)):
+        return _norm_identity(tops.get(key)) == current
+    headings = state.get("headings")
+    if isinstance(headings, dict) and _norm_identity(headings.get(key)):
+        return _norm_identity(headings.get(key)) == current
+    return False
+
+
+def remember_top_entry(state, key, identity):
+    """Record the newest heading. Adds ``topEntries``; does not rewrite other keys."""
+    if not identity or not isinstance(state, dict):
+        return
+    tops = state.get("topEntries")
+    if tops is None:
+        tops = {}
+        state["topEntries"] = tops
+    if isinstance(tops, dict):
+        tops[key] = identity
+
+
 def sitemap_slugs(xml_text, prefixes):
     urls = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", xml_text)
     return sorted(u for u in urls if u.startswith(prefixes))
@@ -173,18 +258,33 @@ def check_pages(verbose=True):
             if verbose:
                 print(f"  ! {watch['label']}: fetch failed ({e})")
             continue
-        digest = hashlib.sha256(watch_fingerprint(text, watch).encode()).hexdigest()
-        old_digest = state["hashes"].get(watch["key"])
         heading = first_heading(text, watch["heading"])
+        entry = newest_entry_fingerprint(text, watch) if heading else None
+        if entry:
+            # Newest entry only. Lower-page edits must not mint a new fragment.
+            computed = hashlib.sha256(entry.encode()).hexdigest()
+            identity = heading
+        else:
+            # No top entry to anchor on — previous whole-page / heading-set hash.
+            computed = hashlib.sha256(watch_fingerprint(text, watch).encode()).hexdigest()
+            identity = ""
+        old_digest = state["hashes"].get(watch["key"])
+        # Same heading: keep the stored digest so a body tweak or a legacy
+        # whole-page hash cannot post the release again.
+        if old_digest and same_top_entry(state, watch["key"], identity):
+            digest = old_digest
+        else:
+            digest = computed
         if old_digest and digest != old_digest:
             new_items.append({
                 "id": f"pagewatch:{watch['key']}:{digest[:12]}",
                 "watch": watch["label"],
                 "title": f"{watch['label']} — {heading}" if heading else f"{watch['label']} updated",
-                # Unique fragment per content change — publish dedup is
+                # Unique fragment per new top entry — publish dedup is
                 # URL-keyed, so the bare page URL would let only the first
                 # change post (see CLAUDE.md invariant 4). The fragment is
-                # inert in a browser; the page still loads.
+                # inert in a browser; the page still loads. It changes only
+                # when the newest entry changes.
                 "url": f"{watch['page']}#updated-{digest[:8]}",
                 "summary": "Changelog page updated",
                 "lane": watch["lane"],
@@ -196,6 +296,7 @@ def check_pages(verbose=True):
             print(f"  = {watch['label']}: {'baseline recorded' if not old_digest else 'unchanged'}")
         state["hashes"][watch["key"]] = digest
         state["headings"][watch["key"]] = heading
+        remember_top_entry(state, watch["key"], identity)
 
     for watch in SITEMAP_WATCHES:
         try:
