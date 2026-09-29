@@ -76,15 +76,77 @@ def autopublish() -> None:
     _run("autopublish", args)
 
 
+def _memory_dir() -> Path:
+    return Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(REPO_ROOT / "memory")))
+
+
+def _record_source_health(source: str, **outcome) -> None:
+    """One health line for a discovery source. Never raises."""
+    import source_health
+
+    try:
+        status, items, error = source_health.outcome_from_process(**outcome)
+        source_health.record_source_health(
+            source,
+            status=status,
+            items=items,
+            error=error,
+            memory_dir=_memory_dir(),
+            alert_sender=lambda text: _send_admin_dm("source_health", text),
+        )
+    except Exception:  # noqa: BLE001 - health bookkeeping must not kill discovery
+        log.exception("source_health failed for %s", source)
+
+
+def _run_observed_source(source: str, label: str, cmd: list[str]) -> None:
+    """Run one discovery script, capture its output, and record source health.
+
+    A nonzero exit still pages the admin immediately (same as ``_run_cmd``).
+    The sustained empty/error alert is separate and only fires after 24h.
+    """
+    log.info("START %s: %s", label, " ".join(cmd))
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(REPO_ROOT),
+            check=False,
+            capture_output=True,
+            text=True,
+            errors="replace",
+        )
+    except Exception as exc:  # noqa: BLE001 - a job failure must not kill the scheduler
+        log.exception("ERROR %s crashed", label)
+        _record_source_health(source, returncode=None, stdout="", stderr="", crashed=repr(exc))
+        _send_admin_dm(
+            f"alert:{label}",
+            f"⚠️ ClawBytes job '{label}' crashed before completing. Check Railway logs.",
+        )
+        return
+    _record_source_health(
+        source,
+        returncode=result.returncode,
+        stdout=result.stdout or "",
+        stderr=result.stderr or "",
+    )
+    log.info("DONE %s: exit=%s", label, result.returncode)
+    if result.returncode != 0:
+        _send_admin_dm(
+            f"alert:{label}",
+            f"⚠️ ClawBytes job '{label}' exited {result.returncode}. Check Railway logs.",
+        )
+
+
 def discover() -> None:
     """Weekly source discovery. New repos land in claw-ecosystem-sources.json
     (merged into release checks by get_all_repos) and new feeds/subreddits in
     clawbytes-dynamic-feeds.json (merged by the rss/reddit monitors)."""
-    _run_cmd(
+    _run_observed_source(
+        "ecosystem-discover",
         "discover_ecosystem",
         ["bash", str(REPO_ROOT / "scripts" / "claw-ecosystem-monitor.sh"), "--mode", "discover"],
     )
-    _run_cmd(
+    _run_observed_source(
+        "source-discovery",
         "discover_feeds",
         [sys.executable, str(REPO_ROOT / "scripts" / "claw-source-discovery.py")],
     )

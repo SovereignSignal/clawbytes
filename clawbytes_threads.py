@@ -1295,6 +1295,22 @@ def is_fresh(candidate: dict) -> bool:
     return bool(expires and expires > now_utc())
 
 
+def _import_source_health():
+    scripts_dir = str(Path(__file__).resolve().parent / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import source_health
+    return source_health
+
+
+def _source_health_alert(text: str) -> bool:
+    """Ops DM via the publisher already wired to CLAWBYTES_ADMIN_CHAT_ID."""
+    try:
+        return bool(_ensure_publisher().send_ops_alert(text))
+    except Exception:  # noqa: BLE001 - health visibility must not break collect
+        return False
+
+
 def run_monitors() -> None:
     """Run source monitors to refresh state files before collecting.
 
@@ -1304,37 +1320,64 @@ def run_monitors() -> None:
     monitor for that collect cycle.) Uses cwd= + arg list rather than
     shell=True — same pattern scheduler.py already uses, and avoids
     interpolated-shell command-injection risk.
+
+    stdout/stderr are captured (not discarded). Each source then emits one
+    ``source_health`` line and updates the on-disk health record.
     """
-    cmds = [
-        ["python3", "scripts/claw-rss-monitor.py"],
-        ["python3", "scripts/claw-reddit-monitor.py"],
-        ["python3", "scripts/claw-hn-monitor.py", "--quiet"],
-        ["python3", "scripts/claw-moltbook-monitor.py"],
-        ["python3", "scripts/claw-leaderboard-monitor.py", "--quiet"],
-        ["python3", "scripts/claw-registry-monitor.py", "--quiet"],
-        ["python3", "scripts/claw-pagewatch-monitor.py", "--quiet"],
-        ["python3", "scripts/claw-bsky-monitor.py", "--quiet"],
-        ["python3", "scripts/claw-advisory-monitor.py", "--quiet"],
-        ["bash", "scripts/claw-ecosystem-monitor.sh", "--mode", "check"],
+    source_health = _import_source_health()
+    monitors = [
+        ("rss", ["python3", "scripts/claw-rss-monitor.py"]),
+        ("reddit", ["python3", "scripts/claw-reddit-monitor.py"]),
+        ("hn", ["python3", "scripts/claw-hn-monitor.py", "--quiet"]),
+        ("moltbook", ["python3", "scripts/claw-moltbook-monitor.py"]),
+        ("leaderboard", ["python3", "scripts/claw-leaderboard-monitor.py", "--quiet"]),
+        ("registry", ["python3", "scripts/claw-registry-monitor.py", "--quiet"]),
+        ("pagewatch", ["python3", "scripts/claw-pagewatch-monitor.py", "--quiet"]),
+        ("bsky", ["python3", "scripts/claw-bsky-monitor.py", "--quiet"]),
+        ("advisory", ["python3", "scripts/claw-advisory-monitor.py", "--quiet"]),
+        ("ecosystem", ["bash", "scripts/claw-ecosystem-monitor.sh", "--mode", "check"]),
     ]
-    for cmd in cmds:
+    for name, cmd in monitors:
+        stdout = stderr = ""
+        returncode = None
+        timed_out = False
+        crashed = ""
         try:
-            p = subprocess.run(
+            proc = subprocess.run(
                 cmd,
                 cwd=str(WORKSPACE),
                 text=True,
                 capture_output=True,
                 timeout=300,
+                errors="replace",
             )
-        except subprocess.TimeoutExpired:
-            print(f"Monitor timed out after 300s: {' '.join(cmd)}", file=sys.stderr)
-            continue
+            stdout = getattr(proc, "stdout", "") or ""
+            stderr = getattr(proc, "stderr", "") or ""
+            returncode = proc.returncode
+        except subprocess.TimeoutExpired as exc:
+            timed_out = True
+            stdout = getattr(exc, "stdout", "") or ""
+            stderr = getattr(exc, "stderr", "") or ""
         except Exception as exc:  # noqa: BLE001 - one bad monitor must not starve the rest
-            print(f"Monitor crashed unexpectedly ({exc!r}): {' '.join(cmd)}", file=sys.stderr)
-            continue
-        if p.returncode != 0:
-            print(f"Monitor returned non-zero: {' '.join(cmd)}", file=sys.stderr)
-            print(p.stderr, file=sys.stderr)
+            crashed = repr(exc)
+        status, items, error = source_health.outcome_from_process(
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+            timed_out=timed_out,
+            crashed=crashed,
+        )
+        try:
+            source_health.record_source_health(
+                name,
+                status=status,
+                items=items,
+                error=error,
+                memory_dir=MEMORY,
+                alert_sender=_source_health_alert,
+            )
+        except Exception as exc:  # noqa: BLE001 - health bookkeeping must not starve monitors
+            print(f"source_health record failed source={name}: {exc!r}", file=sys.stderr)
 
 
 def _unique_items(items: List[dict], key_fields: tuple[str, ...] = ("id", "url", "link")) -> List[dict]:
