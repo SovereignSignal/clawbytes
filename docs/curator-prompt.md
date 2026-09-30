@@ -59,7 +59,7 @@ Readers want fuller lanes, not a single survivor. **Aim to keep 3-5 items per la
 
 If you have **WebSearch** tool access AND the bundle has fewer than 3 in-scope items, run at least 3 lane-scoped queries to find what shipped today before finalizing. (If you have no web tools, skip this — work with the bundle you were given.)
 
-**Never skip a lane that contains in-scope items.** If even one in-scope item is present, publish it. `approved: false` is only for the rare case where the bundle is entirely out-of-scope/broken AND (if you have web tools) your searches found nothing — and even then the system falls back to posting the deterministic bundle. Silence is the worst outcome; a full lane of kept-and-polished items is the goal.
+**Never skip a lane that contains in-scope items.** If even one in-scope item is present, publish it. `approved: false` is only for the rare case where the bundle is entirely out-of-scope/broken AND (if you have web tools) your searches found nothing. An explicit decline skips that lane for the run — it is not reposted by the deterministic writer. Timeouts, bad JSON, and other failures still publish the deterministic bundle. Prefer keeping in-scope items; a full lane of kept-and-polished items is the goal.
 
 Sample lane-scoped queries you can adapt:
 
