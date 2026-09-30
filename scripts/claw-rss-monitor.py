@@ -104,8 +104,9 @@ RSS_FEEDS = [
     # traps (bare "pi"⊂picoclaw/api, "agno"⊂agnostic, "tau"/"kilo"/"vibe").
     {"name": "Pi Coding Agent Releases", "url": "https://github.com/earendil-works/pi/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "Oh My Pi Releases", "url": "https://github.com/can1357/oh-my-pi/releases.atom", "tags": ["releases", "coding-agent"]},
-    # Compound name: bare "fx" is a substring trap (firefox). 0.0.x tags demote
-    # via is_minor_release; a .0 minor still Ships. Verified atom 2026-09-23.
+    # Compound name: bare "fx" is a substring trap (firefox). 0.0.x patch tags
+    # are low-signal and land in Read, not Ship. A .0 minor still Ships.
+    # Verified atom 2026-09-23.
     {"name": "fx Coding Agent Releases", "url": "https://github.com/vercel-labs/fx/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "Herdr Releases", "url": "https://github.com/herdrdev/herdr/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "Kilo Code Releases", "url": "https://github.com/Kilo-Org/kilocode/releases.atom", "tags": ["releases", "coding-agent"]},

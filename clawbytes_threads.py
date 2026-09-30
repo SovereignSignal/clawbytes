@@ -739,7 +739,8 @@ def classify_rss(item: dict) -> Optional[dict]:
         repo = repo_name_from_feed(feed)
         display_title = normalize_release_title(repo, title)
         base_score = REPO_PRIORITY.get(repo, 50)
-        # Penalize minor releases heavily
+        # Penalize minor releases that stay on Ship (CalVer day trains, prose
+        # like "minor"). Patch and pre-release rows are moved to Read at intake.
         if is_minor_release(title):
             base_score = max(20, base_score - 30)
         score = base_score + age_score(dt, 96) / 8
@@ -1530,7 +1531,17 @@ def audit_candidate(kind: str, item: dict, state: dict, backlog: dict) -> dict:
     elif key in seen_source_keys:
         row.update({"status": "skipped", "reason": "seen_source_key"})
     else:
-        row.update({"status": "would_add", "reason": "passes_classifier"})
+        low_signal = apply_ship_low_signal_policy(candidate)
+        if low_signal:
+            row["primaryCategory"] = candidate.get("primaryCategory")
+            row["categories"] = candidate.get("categories", [])
+            row["score"] = candidate.get("score")
+            row["summary"] = candidate.get("summary")
+            expires = candidate.get("expiresAt")
+            row["expiresAt"] = expires.isoformat() if hasattr(expires, "isoformat") else expires
+            row.update({"status": "would_add", "reason": f"ship_filtered:{low_signal}"})
+        else:
+            row.update({"status": "would_add", "reason": "passes_classifier"})
     return row
 
 
@@ -1706,6 +1717,147 @@ def print_audit(report: dict) -> None:
         print(f"- {row['status']}/{row['reason']} [{row['sourceType']}:{row['sourceName']}] {lane} score={score} — {title}")
 
 
+# How many new Ship items one collect may queue. Collect runs every 30
+# minutes; Ship posts at most twice a day. These bound a single run so one
+# atom dump cannot enqueue its whole page. Optional overrides follow the
+# same int-from-env pattern as CLAWBYTES_CURATOR_TIMEOUT / MAX_TOKENS.
+# Unset, blank, or non-integer values keep the defaults. Zero admits nothing.
+SHIP_INTAKE_PER_SOURCE = 2
+SHIP_INTAKE_PER_RUN = 6
+
+_CALVER_RE = re.compile(r"\b20\d{2}\.\d{1,2}\.\d{1,2}\b")
+_SEMVER_RE = re.compile(r"\bv?(\d+)\.(\d+)\.(\d+)\b")
+_DEV_PRERELEASE_RE = re.compile(
+    r"v?\d+\.\d+(?:\.\d+)?(?:[-._]+)dev\d*\b",
+    re.IGNORECASE,
+)
+_DATESTAMP_VER_RE = re.compile(r"20\d{6}\.\d+")
+_REGISTRY_DIFF_RE = re.compile(r"\b\d+\s+new models?\b", re.IGNORECASE)
+
+
+def _env_int(name: str, default: int) -> int:
+    """Integer env override. Blank or invalid keeps ``default``. Negatives too."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return default
+    if parsed < 0:
+        return default
+    return parsed
+
+
+def ship_intake_per_source() -> int:
+    return _env_int("CLAWBYTES_SHIP_INTAKE_PER_SOURCE", SHIP_INTAKE_PER_SOURCE)
+
+
+def ship_intake_per_run() -> int:
+    return _env_int("CLAWBYTES_SHIP_INTAKE_PER_RUN", SHIP_INTAKE_PER_RUN)
+
+
+def ship_low_signal_reason(candidate: dict) -> Optional[str]:
+    """Why a Ship candidate should not enter the Ship queue, or None.
+
+    Patch / pre-release / SDK patch / registry-diff items are low-signal.
+    Semver minors and majors (x.y.0, including the 0.0.1 first cut) stay.
+    OpenClaw-style CalVer ``YYYY.M.D`` is a real release train, not a semver
+    patch — the third component is the day. Leaderboard moves stay Ship.
+    """
+    if not isinstance(candidate, dict) or candidate.get("primaryCategory") != "ship":
+        return None
+    if candidate.get("sourceType") == "leaderboard":
+        return None
+    title = candidate.get("title") or ""
+    source = (candidate.get("sourceName") or "").lower()
+    if candidate.get("sourceType") == "registry" and "litellm" in source:
+        return "registry_diff"
+    if candidate.get("sourceType") == "registry" and _REGISTRY_DIFF_RE.search(title):
+        return "registry_diff"
+    if is_prerelease_title(title) or _DEV_PRERELEASE_RE.search(title):
+        return "prerelease"
+    # Leading "dev" tag ("dev build …"). "developer …" is not a boundary match.
+    if re.match(r"\s*dev\b", title.lower()):
+        return "prerelease"
+    if _DATESTAMP_VER_RE.search(title):
+        return "patch"
+    calver_spans = [match.span() for match in _CALVER_RE.finditer(title)]
+    for match in _SEMVER_RE.finditer(title):
+        span = match.span()
+        if any(start <= span[0] and span[1] <= end for start, end in calver_spans):
+            continue
+        major, _minor, patch = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        if major >= 2000:
+            continue
+        if (major, _minor, patch) == (0, 0, 1):
+            continue
+        if patch > 0:
+            return "patch"
+    return None
+
+
+def apply_ship_low_signal_policy(candidate: dict) -> Optional[str]:
+    """Move a low-signal Ship candidate to Read. Return the reason, or None.
+
+    Read is the existing lower lane. Watch and Community are different
+    topics, and there is no patch lane to add. The score stays under Read's
+    first publish bar so a version bump cannot open that lane by itself.
+    """
+    reason = ship_low_signal_reason(candidate)
+    if not reason:
+        return None
+    published = candidate.get("publishedAt")
+    if not isinstance(published, datetime):
+        published = now_utc()
+    candidate["primaryCategory"] = "read"
+    candidate["categories"] = ["read"]
+    candidate["expiresAt"] = published + timedelta(hours=CATEGORY_META["read"]["ttl_hours"])
+    ceiling = CATEGORY_META["read"]["min_top_score"][0] - 1
+    candidate["score"] = round(min(float(candidate.get("score") or 0), ceiling), 2)
+    summary = (candidate.get("summary") or "Release").strip()
+    candidate["summary"] = trim(f"{summary} (low-signal {reason})", 140)
+    return reason
+
+
+def format_ship_intake_line(by_source: Dict[str, Dict[str, int]]) -> str:
+    """One collect-run line: Ship added / capped / filtered, per source.
+
+    Sits beside ``source_health`` lines (same stdout, different prefix).
+    Counts are ``added/capped/filtered``. Sources with all zeros are omitted.
+    """
+    added = capped = filtered = 0
+    parts = []
+    for name in sorted(by_source):
+        counts = by_source[name]
+        got = int(counts.get("added") or 0)
+        held = int(counts.get("capped") or 0)
+        dropped = int(counts.get("filtered") or 0)
+        added += got
+        capped += held
+        filtered += dropped
+        if got or held or dropped:
+            token = re.sub(r"[\r\n;]+", " ", str(name)).strip() or "unknown"
+            parts.append(f"{token}={got}/{held}/{dropped}")
+    listing = ";".join(parts) if parts else "-"
+    return f"ship_intake added={added} capped={capped} filtered={filtered} by_source={listing}"
+
+
+def _ship_rank(row: tuple) -> tuple:
+    candidate = row[1]
+    published = candidate.get("publishedAt")
+    stamp = 0.0
+    if isinstance(published, datetime):
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+        stamp = published.timestamp()
+    return (-float(candidate.get("score") or 0), -stamp)
+
+
+def _empty_intake() -> Dict[str, int]:
+    return {"added": 0, "capped": 0, "filtered": 0}
+
+
 def collect_into_backlog() -> dict:
     ensure_files()
 
@@ -1718,6 +1870,27 @@ def collect_into_backlog() -> dict:
     added = []
     candidates = collect_candidates()
     acked_releases: List[dict] = []
+    intake: Dict[str, Dict[str, int]] = {}
+    pending_keys = set()
+    ship_ready: List[tuple] = []
+    other_ready: List[tuple] = []
+    per_source_cap = ship_intake_per_source()
+    per_run_cap = ship_intake_per_run()
+
+    def _bump(source: str, field: str) -> None:
+        bucket = intake.setdefault(source, _empty_intake())
+        bucket[field] += 1
+
+    def _queue(candidate: dict, key: str) -> bool:
+        """Mark seen and append when the backlog id is new. True if appended."""
+        seen_source_keys.add(key)
+        queued = backlog_item(candidate)
+        if queued["id"] in existing_ids:
+            return False
+        backlog["items"].append(queued)
+        existing_ids.add(queued["id"])
+        added.append(queued)
+        return True
 
     for kind, items in candidates.items():
         for item in items:
@@ -1726,23 +1899,67 @@ def collect_into_backlog() -> dict:
             except Exception as exc:  # noqa: BLE001 - one bad item must not abort collect
                 print(f"[collect] skipped {kind} item ({exc!r})", file=sys.stderr)
                 continue
-            if kind == "ecosystem_release":
-                # Handed to the classifier (even when it returns None). The
-                # shell left the tag unseen so a crash here retries next cycle.
-                acked_releases.append(item)
+            eco = item if kind == "ecosystem_release" else None
+            if eco is not None and not candidate:
+                # Handed to the classifier. The shell left the tag unseen so a
+                # crash before this ack retries next cycle. A reject is final.
+                acked_releases.append(eco)
             if not candidate:
                 continue
             if not is_fresh(candidate):
+                if eco is not None:
+                    acked_releases.append(eco)
                 continue
             key = source_key(kind, candidate["sourceId"], candidate["url"])
-            if key in seen_source_keys:
+            if key in seen_source_keys or key in pending_keys:
+                # Ack only when this tag was already handled. A duplicate of a
+                # row still waiting on the cap must not mark the tag seen.
+                if eco is not None and key in seen_source_keys:
+                    acked_releases.append(eco)
                 continue
-            seen_source_keys.add(key)
-            b = backlog_item(candidate)
-            if b["id"] not in existing_ids:
-                backlog["items"].append(b)
-                existing_ids.add(b["id"])
-                added.append(b)
+            pending_keys.add(key)
+            source = candidate.get("sourceName") or kind
+            low_signal = apply_ship_low_signal_policy(candidate)
+            row = (kind, candidate, key, source, eco)
+            if low_signal:
+                # Counted as filtered from Ship, then queued on Read.
+                _bump(source, "filtered")
+                other_ready.append(row)
+            elif candidate.get("primaryCategory") == "ship":
+                ship_ready.append(row)
+            else:
+                other_ready.append(row)
+
+    ship_ready.sort(key=_ship_rank)
+    admitted_run = 0
+    admitted_source: Dict[str, int] = {}
+    for _kind, candidate, key, source, eco in ship_ready:
+        if key in seen_source_keys:
+            if eco is not None:
+                acked_releases.append(eco)
+            continue
+        over_source = admitted_source.get(source, 0) >= per_source_cap
+        over_run = admitted_run >= per_run_cap
+        if over_source or over_run:
+            # Leave unseen so the next collect can admit it. Do not ack an
+            # ecosystem tag: the shell re-emits until collect takes it.
+            _bump(source, "capped")
+            continue
+        if _queue(candidate, key):
+            admitted_source[source] = admitted_source.get(source, 0) + 1
+            admitted_run += 1
+            _bump(source, "added")
+        if eco is not None:
+            acked_releases.append(eco)
+
+    for _kind, candidate, key, source, eco in other_ready:
+        if key in seen_source_keys:
+            if eco is not None:
+                acked_releases.append(eco)
+            continue
+        _queue(candidate, key)
+        if eco is not None:
+            acked_releases.append(eco)
 
     now = now_utc()
     for item in backlog["items"]:
@@ -1771,7 +1988,21 @@ def collect_into_backlog() -> dict:
     for item in added:
         counts[item["primaryCategory"]] += 1
 
-    return {"added": len(added), "counts": counts, "items": added}
+    print(format_ship_intake_line(intake), flush=True)
+    ship_added = sum(bucket["added"] for bucket in intake.values())
+    ship_capped = sum(bucket["capped"] for bucket in intake.values())
+    ship_filtered = sum(bucket["filtered"] for bucket in intake.values())
+    return {
+        "added": len(added),
+        "counts": counts,
+        "items": added,
+        "shipIntake": {
+            "added": ship_added,
+            "capped": ship_capped,
+            "filtered": ship_filtered,
+            "bySource": intake,
+        },
+    }
 
 
 def _flag_on(name: str) -> bool:
