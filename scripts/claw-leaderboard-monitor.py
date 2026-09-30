@@ -5,6 +5,8 @@ Watches coding-agent benchmark leaderboards and emits an item when the top
 of a board actually moves. Boards: SWE-bench (swebench.com), the Aider
 polyglot leaderboard (aider.chat/docs/leaderboards), LiveBench, and
 Terminal-Bench 2.1 (harbor-framework/terminal-bench-2-1 submissions).
+SWE-bench bash-only is no longer its own leaderboards.json board; the site
+keeps it as the Verified board filtered to agent mini-SWE-agent.
 
 Cheap by design: each board's backing file lives in a GitHub repo, so we
 poll the file's git sha via the contents API (tiny call) and only download
@@ -43,6 +45,8 @@ BOARDS = [
         "board_name": "Verified",
     },
     {
+        # The standalone bash-only array was removed. swebench.com now opens
+        # #bash-only as Verified with the agent filter set to mini-SWE-agent.
         "key": "swebench-bash-only",
         "label": "SWE-bench bash-only",
         "page": "https://www.swebench.com/",
@@ -50,7 +54,8 @@ BOARDS = [
         "path": "data/leaderboards.json",
         "ref": "master",
         "parser": "swebench",
-        "board_name": "bash-only",
+        "board_name": "Verified",
+        "agent": "mini-SWE-agent",
     },
     {
         "key": "aider-polyglot",
@@ -141,8 +146,12 @@ def fetch_raw(repo, path, ref):
         return ""
 
 
-def parse_swebench(text, board_name, top_n=TOP_N):
-    """Top entries of one named board from swebench leaderboards.json."""
+def parse_swebench(text, board_name, top_n=TOP_N, *, agent=None):
+    """Top entries of one named board from swebench leaderboards.json.
+
+    ``agent`` keeps a single harness when the site expresses that view as a
+    filter instead of a separate board (bash-only == Verified + mini-SWE-agent).
+    """
     try:
         boards = json.loads(text).get("leaderboards", [])
     except Exception:
@@ -152,6 +161,8 @@ def parse_swebench(text, board_name, top_n=TOP_N):
             continue
         entries = []
         for entry in board.get("results", []):
+            if agent and (entry.get("agent") or "") != agent:
+                continue
             name = (entry.get("name") or "").strip()
             try:
                 score = float(entry.get("resolved") or 0)
@@ -358,7 +369,7 @@ def check_boards(verbose=True):
                     print(f"  ! {board['label']}: fetch failed")
                 continue
             if board["parser"] == "swebench":
-                tops = parse_swebench(text, board["board_name"])
+                tops = parse_swebench(text, board["board_name"], agent=board.get("agent"))
             elif board["parser"] == "livebench":
                 tops = parse_livebench(text)
             else:

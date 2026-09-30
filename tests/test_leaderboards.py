@@ -177,3 +177,45 @@ def test_terminal_bench_check_boards_baselines_then_emits_on_new_leader(tmp_path
     assert len(items) == 1
     assert items[0]["change"] == "new_leader"
     assert "NewModel" in items[0]["title"]
+
+
+def test_bash_only_is_verified_filtered_to_mini_swe_agent():
+    """SWE-bench folded the bash-only board into Verified. The site's Bash Only
+    preset is that board with agent == mini-SWE-agent. A lookup for a board
+    named bash-only parses nothing and drops real movement."""
+    payload = json.dumps({"leaderboards": [
+        {"name": "Verified", "results": [
+            {"name": "Big Agent + Model", "agent": "OpenHands", "resolved": 90.0},
+            {"name": "Claude 4.5 Opus (high)", "agent": "mini-SWE-agent", "resolved": 76.8},
+            {"name": "Gemini 3 Flash (high)", "agent": "mini-SWE-agent", "resolved": 75.8},
+            {"name": "Other harness", "agent": "SWE-agent", "resolved": 80.0},
+        ]},
+    ]})
+    tops = lb.parse_swebench(payload, "Verified", agent="mini-SWE-agent")
+    assert [name for name, _ in tops] == [
+        "Claude 4.5 Opus (high)",
+        "Gemini 3 Flash (high)",
+    ]
+    board = next(b for b in lb.BOARDS if b["key"] == "swebench-bash-only")
+    assert board["board_name"] == "Verified"
+    assert board["agent"] == "mini-SWE-agent"
+
+
+def test_bash_only_check_boards_ranks_mini_swe_agent_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(lb, "STATE_FILE", tmp_path / "lb.json")
+    board = next(b for b in lb.BOARDS if b["key"] == "swebench-bash-only")
+    monkeypatch.setattr(lb, "BOARDS", [board])
+    monkeypatch.setattr(lb, "github_file_sha", lambda *a, **k: "sha-1")
+    payload = json.dumps({"leaderboards": [
+        {"name": "Verified", "results": [
+            {"name": "OpenHands top", "agent": "OpenHands", "resolved": 99.0},
+            {"name": "Mini top", "agent": "mini-SWE-agent", "resolved": 70.0},
+            {"name": "Mini second", "agent": "mini-SWE-agent", "resolved": 60.0},
+            {"name": "Mini third", "agent": "mini-SWE-agent", "resolved": 50.0},
+        ]},
+    ]})
+    monkeypatch.setattr(lb, "fetch_raw", lambda *a, **k: payload)
+    assert lb.check_boards(verbose=False) == []
+    stored = json.loads((tmp_path / "lb.json").read_text())
+    assert stored["tops"]["swebench-bash-only"][0][0] == "Mini top"
+    assert all("OpenHands" not in name for name, _ in stored["tops"]["swebench-bash-only"])
