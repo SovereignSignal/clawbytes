@@ -2997,16 +2997,47 @@ def _curator_enabled_for(category: str) -> bool:
     return category in {l.strip().lower() for l in lanes.split(",") if l.strip()}
 
 
+def _curator_lane_declined(meta: dict) -> bool:
+    """True only for an explicit editorial rejection of the whole lane.
+
+    A decline is a parsed curator result whose ``_curator.approved`` is JSON
+    false and that is not a fallback. Anything else still uses the deterministic
+    writer:
+
+    - subprocess failure (``run_curator_subprocess`` returns None): timeout,
+      nonzero exit, or unparseable stdout
+    - ``_curator.fallback`` true: backend error, bad JSON, missing prompt, or
+      dry-run inside curator.py — even if ``approved`` is also false
+    - ``approved`` omitted or true, including an approved empty item list
+    - content-gate or Telegram rejection of an approved curated post
+    """
+    if not isinstance(meta, dict):
+        return False
+    if meta.get("fallback"):
+        return False
+    return meta.get("approved") is False
+
+
+def _log_curator_lane_skipped(category: str, meta: dict) -> None:
+    """Log the #23 decline reason and a stable skip line. Does not post."""
+    reason = _format_curator_decline_reason(meta if isinstance(meta, dict) else {})
+    print(f"[autopublish] curator declined {category}: {reason}", file=sys.stderr)
+    print(
+        f"lane_skipped lane={category} reason=curator_declined detail={reason}",
+        file=sys.stderr,
+    )
+
+
 def _publish_lane(category: str, send: bool) -> tuple:
     """Publish one ready lane; return (sent, count).
 
     When the curator is enabled for the lane it runs the editorial pass and, on
-    a successful curated result, sends the consolidated curated message. ANY
-    curator failure, fallback marker, or whole-lane decline falls through to the
-    deterministic renderer — channel reliability always wins over editorial
-    purity. A whole-lane decline does NOT silence the lane; it posts the
-    deterministic bundle (the curator can still drop weak individual items on
-    approved lanes).
+    a successful curated result, sends the consolidated curated message. A
+    curator failure or fallback marker (timeout, backend error, unparseable
+    output) falls through to the deterministic writer. An explicit whole-lane
+    decline does not: that lane is skipped for this run, nothing is sent, and
+    queue/seen state is left untouched so the existing TTL can expire the
+    items. The curator can still drop weak individual items on approved lanes.
 
     Send failures (Telegram down, content-gate rejection) return (False, count)
     WITHOUT marking the lane posted, so it retries on the next autopublish cycle.
@@ -3017,12 +3048,18 @@ def _publish_lane(category: str, send: bool) -> tuple:
         curated = run_curator_subprocess(curator_input_bundle(category), timeout=timeout)
         if curated is not None:
             meta = curated.get("_curator") or {}
+            if _curator_lane_declined(meta):
+                # Not a failure. Skip this run and do not call mark_posted, so
+                # the items stay queued exactly as if the lane did not post.
+                _log_curator_lane_skipped(category, meta)
+                return (False, 0)
             fallback = bool(meta.get("fallback"))
             approved = bool(meta.get("approved", True)) and not fallback
             items = curated.get("items") or []
-            # An approved empty list is a whole-lane decline in practice
-            # (models often return items: [] with approved left true). A curated
-            # body the gate or Telegram rejects must not silence the lane either.
+            # An approved empty list is not an explicit decline (approved
+            # stayed true; models often return items: [] that way). A curated
+            # body the gate or Telegram rejects is a send failure, not a
+            # decline. Both still use the deterministic writer.
             if approved and items and send:
                 message = format_curated_html(curated, category)
                 ok, errs = validate_lane_for_publish(message)
@@ -3040,20 +3077,10 @@ def _publish_lane(category: str, send: bool) -> tuple:
             elif approved and not items:
                 print(f"[autopublish] curator returned no items for {category}; "
                       f"using deterministic bundle", file=sys.stderr)
-            elif not meta.get("approved", True):
-                # Breadth over purity: a whole-lane decline falls back to the
-                # deterministic post rather than going silent. The curator still
-                # improves approved lanes and drops weak *individual* items.
-                reason = _format_curator_decline_reason(meta)
-                print(
-                    f"[autopublish] curator declined {category}: {reason}; "
-                    f"using deterministic bundle",
-                    file=sys.stderr,
-                )
-            # fallback marker, empty items, gate rejection, or send failure
-            # → fall through to deterministic
+            # fallback marker, empty approved items, gate rejection, or send
+            # failure → fall through to the deterministic writer
         else:
-            # Curator subprocess error or empty result. Same fallback: post the
+            # Curator subprocess error or empty result. Not a decline: post the
             # deterministic bundle, and say so. Do not dump prompts or stderr.
             print(
                 f"[autopublish] curator error for {category}; using deterministic bundle",

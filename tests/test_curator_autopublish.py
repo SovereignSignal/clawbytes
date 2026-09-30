@@ -56,6 +56,10 @@ def test_publish_lane_sends_curated_when_approved(monkeypatch):
     monkeypatch.setattr(ct, "curator_input_bundle", lambda c, *a, **k: {"lane": c})
     monkeypatch.setattr(ct, "run_curator_subprocess", lambda *a, **k: curated)
     monkeypatch.setattr(ct, "format_curated_html", lambda cur, c: "ONE CONSOLIDATED MESSAGE")
+    monkeypatch.setattr(
+        ct, "format_category_bundle",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("accepted lane must not use the writer fallback")),
+    )
     n = {}
     # one consolidated send_telegram, NOT a per-item list
     monkeypatch.setattr(ct, "send_telegram", lambda m: n.setdefault("msg", m))
@@ -125,7 +129,20 @@ def test_format_curated_html_escapes_href():
     assert 'href="https://x.test/a?b=1&c=2"' not in out
 
 
-def test_publish_lane_decline_logs_reason_and_still_publishes(monkeypatch, capsys):
+def test_curator_lane_declined_is_explicit_approved_false_only():
+    """A decline is JSON approved:false with no fallback marker. Failures are not."""
+    assert ct._curator_lane_declined({"approved": False, "fallback": False, "skip_reason": "off scope"}) is True
+    assert ct._curator_lane_declined({"approved": False}) is True
+    # Failure shapes keep the writer fallback even if approved is also false.
+    assert ct._curator_lane_declined({"approved": False, "fallback": True, "fallback_kind": "bad_json"}) is False
+    assert ct._curator_lane_declined({"approved": True, "fallback": True, "fallback_kind": "timeout"}) is False
+    assert ct._curator_lane_declined({"approved": True, "fallback": False}) is False
+    assert ct._curator_lane_declined({}) is False  # omitted approved defaults to a pass
+    assert ct._curator_lane_declined({"fallback": False}) is False
+    assert ct._curator_lane_declined(None) is False
+
+
+def test_publish_lane_decline_skips_publish_and_logs_reason(monkeypatch, capsys):
     monkeypatch.setenv("CLAWBYTES_USE_CURATOR", "1")
     long_notes = "n" * 400
     declined = {
@@ -143,16 +160,19 @@ def test_publish_lane_decline_logs_reason_and_still_publishes(monkeypatch, capsy
     }
     monkeypatch.setattr(ct, "curator_input_bundle", lambda c, *a, **k: {"lane": c})
     monkeypatch.setattr(ct, "run_curator_subprocess", lambda *a, **k: declined)
-    monkeypatch.setattr(ct, "format_category_bundle", lambda c, *a, **k: "DET")
+
+    def _writer(*a, **k):
+        raise AssertionError("writer fallback must not run on an explicit decline")
+
+    monkeypatch.setattr(ct, "format_category_bundle", _writer)
     monkeypatch.setattr(ct, "bundle_for_category", lambda c, *a, **k: [{"id": "paper-1"}])
-    sent = {}
-    monkeypatch.setattr(ct, "send_telegram", lambda m: sent.setdefault("msg", m))
-    monkeypatch.setattr(ct, "mark_posted", lambda *a, **k: None)
+    monkeypatch.setattr(ct, "send_telegram", lambda m: (_ for _ in ()).throw(AssertionError("must not send")))
+    monkeypatch.setattr(ct, "mark_posted", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not mark posted")))
     ok, count = ct._publish_lane("community", send=True)
-    assert ok is True and count == 1 and sent["msg"] == "DET"
+    assert ok is False and count == 0
     err = capsys.readouterr().err
     assert "[autopublish] curator declined community:" in err
-    assert "using deterministic bundle" in err
+    assert "using deterministic bundle" not in err
     assert "lane is arXiv and HF papers with no community signal" in err
     assert "research paper, not a community discussion" in err
     assert "SECRET PROMPT" not in err
@@ -161,9 +181,10 @@ def test_publish_lane_decline_logs_reason_and_still_publishes(monkeypatch, capsy
     # notes are included but truncated to ~300 chars of the reason
     assert long_notes not in err
     decline_line = next(line for line in err.splitlines() if "curator declined community:" in line)
-    reason = decline_line.split("curator declined community:", 1)[1]
-    reason = reason.split("; using deterministic bundle", 1)[0].strip()
+    reason = decline_line.split("curator declined community:", 1)[1].strip()
     assert len(reason) <= 300
+    skip_line = next(line for line in err.splitlines() if line.startswith("lane_skipped "))
+    assert skip_line == f"lane_skipped lane=community reason=curator_declined detail={reason}"
 
 
 def test_publish_lane_curator_error_logs_and_falls_back(monkeypatch, capsys):
@@ -179,24 +200,39 @@ def test_publish_lane_curator_error_logs_and_falls_back(monkeypatch, capsys):
     assert ok is True and count == 1 and sent["msg"] == "DET"
     err = capsys.readouterr().err
     assert "[autopublish] curator error for community; using deterministic bundle" in err
+    assert "lane_skipped" not in err
 
 
-def test_publish_lane_decline_falls_back_to_deterministic(monkeypatch):
-    # Breadth over purity: a whole-lane decline must NOT silence the lane — it
-    # falls back to the deterministic post. The curator's per-item drops still
-    # apply on approved lanes; only a full decline triggers this.
+def test_publish_lane_fallback_marker_still_publishes(monkeypatch, capsys):
+    """Timeout / bad JSON inside curator.py set fallback and must still post.
+
+    A fallback marker is a failure, not a decline, even when approved is false.
+    """
     monkeypatch.setenv("CLAWBYTES_USE_CURATOR", "1")
-    declined = {"lane": "read", "items": [{"id": "x"}], "_curator": {"approved": False, "fallback": False}}
+    failed = {
+        "lane": "read",
+        "items": [{"id": "x", "title": "T", "url": "https://x"}],
+        "_curator": {
+            "approved": False,
+            "fallback": True,
+            "fallback_kind": "bad_json",
+            "notes": "FALLBACK: curator returned non-JSON",
+        },
+    }
     monkeypatch.setattr(ct, "curator_input_bundle", lambda c, *a, **k: {"lane": c})
-    monkeypatch.setattr(ct, "run_curator_subprocess", lambda *a, **k: declined)
-    monkeypatch.setattr(ct, "format_curated_messages", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not send curated")))
+    monkeypatch.setattr(ct, "run_curator_subprocess", lambda *a, **k: failed)
+    monkeypatch.setattr(ct, "format_curated_html", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not send the failed bundle as curated")))
     monkeypatch.setattr(ct, "format_category_bundle", lambda c, *a, **k: "DET")
     monkeypatch.setattr(ct, "bundle_for_category", lambda c, *a, **k: [{"id": "x"}])
     sent = {}
-    monkeypatch.setattr(ct, "send_telegram", lambda m: sent.setdefault("msg", m))
-    monkeypatch.setattr(ct, "mark_posted", lambda *a, **k: None)
+    monkeypatch.setattr(ct, "send_telegram", lambda m: sent.setdefault("msg", m) or True)
+    marked = {"n": 0}
+    monkeypatch.setattr(ct, "mark_posted", lambda *a, **k: marked.__setitem__("n", marked["n"] + 1))
     ok, count = ct._publish_lane("read", send=True)
-    assert ok is True and count == 1 and sent["msg"] == "DET"
+    assert ok is True and count == 1 and sent["msg"] == "DET" and marked["n"] == 1
+    err = capsys.readouterr().err
+    assert "lane_skipped" not in err
+    assert "curator declined" not in err
 
 
 def test_ollama_curator_config_gate(monkeypatch):
