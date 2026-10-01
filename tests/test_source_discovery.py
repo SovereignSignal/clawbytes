@@ -62,3 +62,17 @@ def test_existing_hn_queries_cover_live_monitor_queries():
 def test_discovery_crawls_cli_coding_agents_awesome_list():
     text = (SCRIPTS / "claw-ecosystem-monitor.sh").read_text()
     assert "bradAGI/awesome-cli-coding-agents" in text
+
+
+def test_subreddit_discovery_does_not_fetch_while_reddit_is_off(monkeypatch):
+    import source_health as sh
+
+    assert sh.reddit_fetch_enabled() is False
+
+    def _boom(*args, **kwargs):
+        raise AssertionError(f"unexpected fetch: {args!r}")
+
+    monkeypatch.setattr(disc, "urlopen", _boom)
+    state = {"discoveredSubreddits": []}
+    assert disc.discover_subreddits(state) == []
+    assert state["discoveredSubreddits"] == []

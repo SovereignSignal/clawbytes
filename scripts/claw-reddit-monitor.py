@@ -20,6 +20,14 @@ WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 STATE_FILE = MEMORY_DIR / "claw-reddit-state.json"
 
+# Off: www.reddit.com public JSON has returned HTTP 403 on every fetch
+# (zero items). Anonymous access is blocked. Collect, discovery, and
+# source_health all read this flag. Set it True only after Reddit OAuth
+# credentials (script-app client id/secret and a refresh token) are wired
+# into fetch_reddit and discover_subreddits — flipping the flag alone
+# 403s again and source_health will alert.
+REDDIT_FETCH_ENABLED = False
+
 # Subreddits to monitor. Harness-space realignment 2026-06: dedicated harness
 # subs ride hot.json (gated by passes_quality_filter thresholds); the two
 # broad subs keep targeted search queries.
@@ -202,6 +210,12 @@ def passes_quality_filter(post, subreddit_type):
 
 def check_subreddits(verbose=True):
     """Check all subreddits for new posts."""
+    if not REDDIT_FETCH_ENABLED:
+        # Fetcher stays; do not touch the network or the state file.
+        if verbose:
+            print("Reddit monitor is off (public JSON blocked; needs OAuth).")
+        return [], {}
+
     state = load_state()
     new_items = []
     sub_status = {}
@@ -317,7 +331,11 @@ def main():
     parser.add_argument("--telegram", action="store_true", help="Output Telegram message format")
     parser.add_argument("--status", action="store_true", help="Show subreddit status only")
     args = parser.parse_args()
-    
+
+    if not REDDIT_FETCH_ENABLED:
+        print("Reddit monitor is off (public JSON blocked; needs OAuth).")
+        return
+
     new_items, status = check_subreddits(verbose=not args.quiet)
     
     print(f"\n{'='*50}")

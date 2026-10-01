@@ -167,6 +167,17 @@ def save_dynamic_feeds(feeds):
 
 def discover_subreddits(state):
     """Discover new relevant subreddits."""
+    try:
+        import source_health
+        enabled = source_health.reddit_fetch_enabled()
+    except Exception:  # noqa: BLE001 - discovery must not hit Reddit if the flag cannot load
+        enabled = False
+    if not enabled:
+        # Same switch as REDDIT_FETCH_ENABLED. Public search JSON is blocked;
+        # re-enable only with Reddit OAuth wired into this function.
+        print("\n🔴 Reddit discovery is off (public JSON blocked; needs OAuth).")
+        return []
+
     print("\n🔴 Discovering new subreddits...")
     known_subs = set(KNOWN_SUBREDDITS)
     dynamic = load_dynamic_feeds()

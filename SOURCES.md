@@ -13,19 +13,19 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 | RSS/Atom feeds | 80 feeds: vendor blogs, changelogs that Ship (Cursor, GitHub Copilot, Amp News), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, fx, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau), research blogs, ArXiv cs.AI/cs.CL (harness-compound gate — bare `agent` is not enough). Warp, Replit, Augment, JetBrains, and Zed blogs stay in the list and route to Read. Windsurf Blog is not in the list (removed 2026-09-23, stale since 2026-05-12). A new feed name baselines silently. | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
 | GitHub releases (API) | Curated + auto-discovered repos, merged via `claw-ecosystem-sources.json`. First tag on a repo is a silent baseline. Later tags are classified on the release path; the tag is marked seen only after collect hands the item to the backlog. | `scripts/claw-ecosystem-monitor.sh` | 30 min |
 | HF Daily Papers | huggingface.co/papers via `api/daily_papers`, keyword-scored into lanes | `scripts/claw-hf-papers.py` | 30 min |
-| Reddit | r/openclaw, r/ClaudeAI, r/ClaudeCode, r/cursor, r/ChatGPTCoding, r/AI_Agents, r/mcp + targeted searches in r/LocalLLaMA, r/selfhosted | `scripts/claw-reddit-monitor.py` (`SUBREDDITS`) | 30 min |
 | Hacker News | Algolia queries (harness/agent/MCP terms), 14-day window | `scripts/claw-hn-monitor.py`, `claw-ecosystem-monitor.sh` | 30 min |
 | Moltbook | Community posts, HTML scrape | `scripts/claw-moltbook-monitor.py` | 30 min |
-| Discovery | GitHub topic/keyword search, awesome lists (awesome-ai-agents, awesome-agents, awesome-mcp-servers, awesome-claude-code, awesome-code-ai, awesome-cli-coding-agents); subreddit/HN discovery queries are harness-scoped (no "machine learning news") | `claw-ecosystem-monitor.sh --mode discover`, `claw-source-discovery.py` | weekly (Mon 14:10 UTC) |
+| Discovery | GitHub topic/keyword search, awesome lists (awesome-ai-agents, awesome-agents, awesome-mcp-servers, awesome-claude-code, awesome-code-ai, awesome-cli-coding-agents); HN discovery queries are harness-scoped (no "machine learning news"). Subreddit search does not run while Reddit is off | `claw-ecosystem-monitor.sh --mode discover`, `claw-source-discovery.py` | weekly (Mon 14:10 UTC) |
 | Leaderboards | SWE-bench (Verified, plus bash-only as the Verified mini-SWE-agent filter), Aider polyglot, LiveBench, Terminal-Bench 2.1 — emits only on top-3 movement, sha-gated fetches | `scripts/claw-leaderboard-monitor.py` (`BOARDS`) | 30 min |
 | Registries | OpenRouter model list (id diff, coding/agent family filter — same word-boundary pattern as HF trending), LiteLLM pricing registry (sha-gated key diff, URL fragment includes the new-key hash), HF trending (weekly, coding/agent filter) | `scripts/claw-registry-monitor.py` | 30 min |
 | GitHub advisories | Advisory Database, package-name allowlist (tracked repos, not `ecosystem=pip`), silent baseline, `html_url` per advisory, cap 2 Watch items per UTC day | `scripts/claw-advisory-monitor.py` | 30 min |
 | Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + HTML heading-hash (Antigravity, Kiro changelog) + sitemap slug diffs (Anthropic news/engineering, DeepSeek news) | `scripts/claw-pagewatch-monitor.py` | 30 min |
 | Bluesky | Phrase search ("claude code", "codex cli", "openclaw", "mcp server", "agent harness", plus Cursor/Devin/Antigravity/ACP/Kiro/Kilo/Kimi/Grok Build/Mistral Vibe), engagement-gated | `scripts/claw-bsky-monitor.py` | 30 min |
 
-Discovered repos/feeds/subreddits land in `claw-ecosystem-sources.json` /
+Discovered repos and feeds land in `claw-ecosystem-sources.json` /
 `clawbytes-dynamic-feeds.json` on the volume and are merged automatically —
-no code change needed for a discovery to start being watched.
+no code change needed for a discovery to start being watched. Subreddit
+discovery does not run while Reddit is off, so it does not add new subs.
 
 ## Candidate log
 
@@ -135,7 +135,7 @@ at 1/vendor/day they read as the same alert repeating, and they carried no
 production (its Brave key was unset, which short-circuited both halves before
 the GitHub pass, and that pass read the wrong REST fields anyway) and Brave is
 being deprecated. Security-relevant items still reach Watch/Read via the
-`SECURITY_TERMS` keyword routing on the RSS/Reddit/HN feeds.
+`SECURITY_TERMS` keyword routing on the RSS/HN feeds.
 
 ## How to propose a source
 
@@ -236,3 +236,16 @@ empty (no tags). The HTML changelog at `https://x.ai/build/changelog` is a
 no RSS and no `.md` sibling. A heading-hash watch would emit every patch into
 Ship at the pagewatch score, which clears the morning bar. Vocab for HN and
 Bluesky stays; no feed was added.
+
+### 2026-10-01 Reddit retired
+
+**Retired** — Reddit monitor and subreddit discovery. Public `www.reddit.com`
+JSON has returned HTTP 403 on every fetch (zero items, zero posts). The
+fetcher stays in `scripts/claw-reddit-monitor.py`; `REDDIT_FETCH_ENABLED`
+is false, so collect and `claw-source-discovery.py` do not call it.
+`source_health` does not track or alert on `reddit`. An existing streak
+entry in `claw-source-health.json` is left as stored. Re-enable by setting
+`REDDIT_FETCH_ENABLED = True` only after Reddit OAuth credentials (script-app
+client id/secret and a refresh token) are wired into `fetch_reddit` and
+`discover_subreddits`. Flipping the flag alone resumes the 403s and the
+24h source alert.

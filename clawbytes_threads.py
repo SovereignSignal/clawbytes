@@ -1328,6 +1328,8 @@ def run_monitors() -> None:
     source_health = _import_source_health()
     monitors = [
         ("rss", ["python3", "scripts/claw-rss-monitor.py"]),
+        # Stays in the list so REDDIT_FETCH_ENABLED (claw-reddit-monitor.py)
+        # puts it back. Off: public JSON is HTTP 403; needs Reddit OAuth.
         ("reddit", ["python3", "scripts/claw-reddit-monitor.py"]),
         ("hn", ["python3", "scripts/claw-hn-monitor.py", "--quiet"]),
         ("moltbook", ["python3", "scripts/claw-moltbook-monitor.py"]),
@@ -1338,6 +1340,8 @@ def run_monitors() -> None:
         ("advisory", ["python3", "scripts/claw-advisory-monitor.py", "--quiet"]),
         ("ecosystem", ["bash", "scripts/claw-ecosystem-monitor.sh", "--mode", "check"]),
     ]
+    if not source_health.reddit_fetch_enabled():
+        monitors = [item for item in monitors if item[0] != "reddit"]
     for name, cmd in monitors:
         stdout = stderr = ""
         returncode = None
