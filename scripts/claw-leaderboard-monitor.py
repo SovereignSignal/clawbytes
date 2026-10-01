@@ -92,6 +92,18 @@ BOARDS = [
     },
 ]
 
+FAILURES = []
+
+
+def _fail(message):
+    """A failed fetch or parse goes to stderr even under --quiet; main() exits 1.
+
+    No movement is this monitor's resting state, so the exit code is the
+    only thing that tells a broken board from a quiet day.
+    """
+    FAILURES.append(message)
+    print(f"  ! {message}", file=sys.stderr)
+
 
 def _github_headers():
     headers = {"User-Agent": "ClawBytes/1.0", "Accept": "application/vnd.github+json"}
@@ -325,16 +337,14 @@ def check_boards(verbose=True):
         if board.get("parser") == "terminal_bench":
             listing = github_contents(board["repo"], board["dir"], board["ref"])
             if not listing:
-                if verbose:
-                    print(f"  ! {board['label']}: could not list submissions")
+                _fail(f"{board['label']}: could not list submissions")
                 continue
             path = board["dir"]
             sha = submissions_listing_sha(listing)
         elif "pattern" in board:
             resolved = resolve_dynamic_path(board)
             if not resolved:
-                if verbose:
-                    print(f"  ! {board['label']}: could not resolve data file")
+                _fail(f"{board['label']}: could not resolve data file")
                 continue
             path, sha = resolved
         else:
@@ -365,8 +375,7 @@ def check_boards(verbose=True):
                 raw_cache[file_key] = fetch_raw(board["repo"], path, board["ref"])
             text = raw_cache[file_key]
             if not text:
-                if verbose:
-                    print(f"  ! {board['label']}: fetch failed")
+                _fail(f"{board['label']}: fetch failed")
                 continue
             if board["parser"] == "swebench":
                 tops = parse_swebench(text, board["board_name"], agent=board.get("agent"))
@@ -375,8 +384,7 @@ def check_boards(verbose=True):
             else:
                 tops = parse_aider_polyglot(text)
         if not tops:
-            if verbose:
-                print(f"  ! {board['label']}: no entries parsed")
+            _fail(f"{board['label']}: no entries parsed")
             continue
 
         old = [tuple(pair) for pair in state["tops"].get(board["key"], [])]
@@ -407,7 +415,7 @@ def main():
     args = parser.parse_args()
     items = check_boards(verbose=not args.quiet)
     print(f"Leaderboards: {len(items)} new movement item(s)")
-    return 0
+    return 1 if FAILURES else 0
 
 
 if __name__ == "__main__":

@@ -40,6 +40,18 @@ HF_CHECK_EVERY_DAYS = 6        # trending churns daily; weekly diff is signal
 # Word boundaries so "encoder" and "client" do not match code/cli.
 HF_CODE_AGENT = re.compile(r"\b(?:code|coder|coding|agent|cli|swe)\b", re.IGNORECASE)
 
+FAILURES = []
+
+
+def _fail(message):
+    """A failed fetch goes to stderr even under --quiet; main() exits 1.
+
+    Zero new items is this monitor's resting state, so the exit code is the
+    only thing that tells a broken registry from a quiet day.
+    """
+    FAILURES.append(message)
+    print(f"  ! {message}", file=sys.stderr)
+
 
 def _fetch_json(url, headers=None, timeout=30):
     base = {"User-Agent": "ClawBytes/1.0"}
@@ -102,8 +114,7 @@ def check_openrouter(state, now_iso, verbose):
     try:
         models = _fetch_json(OPENROUTER_URL).get("data", [])
     except Exception as e:
-        if verbose:
-            print(f"  ! OpenRouter fetch failed: {e}")
+        _fail(f"OpenRouter fetch failed: {e}")
         return []
     by_id = {m.get("id"): m for m in models if m.get("id")}
     old = state.get("openrouterIds", [])
@@ -150,8 +161,7 @@ def check_litellm(state, now_iso, verbose):
     try:
         data = _fetch_json(f"https://raw.githubusercontent.com/{LITELLM_REPO}/main/{LITELLM_PATH}", timeout=60)
     except Exception as e:
-        if verbose:
-            print(f"  ! LiteLLM fetch failed: {e}")
+        _fail(f"LiteLLM fetch failed: {e}")
         return []
     keys = [k for k in data.keys() if k != "sample_spec"]
     old = state.get("litellmKeys", [])
@@ -191,8 +201,7 @@ def check_hf_trending(state, now_iso, verbose):
     try:
         models = _fetch_json(HF_TRENDING_URL)
     except Exception as e:
-        if verbose:
-            print(f"  ! HF trending fetch failed: {e}")
+        _fail(f"HF trending fetch failed: {e}")
         return []
     known = set(state.get("hfTrendingSeen", []))
     first_run = not known
@@ -251,7 +260,7 @@ def main():
     args = parser.parse_args()
     items = check_registries(verbose=not args.quiet)
     print(f"Registries: {len(items)} new item(s)")
-    return 0
+    return 1 if FAILURES else 0
 
 
 if __name__ == "__main__":

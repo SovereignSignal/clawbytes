@@ -8,6 +8,9 @@ corrupt file is treated as an empty record and rewritten.
 Sustained empty/error (24h+) alerts through the caller's existing admin
 sender when one is configured. This module does not read or invent env
 vars of its own beyond the admin channel the process already uses.
+
+Sources in EMPTY_IS_HEALTHY are the exception: a clean run with nothing
+new is their resting state and never alerts.
 """
 from __future__ import annotations
 
@@ -24,6 +27,20 @@ from typing import Callable, Optional
 HEALTH_FILENAME = "claw-source-health.json"
 REASON_LIMIT = 200
 UNHEALTHY_ALERT_AFTER = timedelta(hours=24)
+
+# Diff-style monitors and weekly discovery report only what changed, so a
+# clean run with zero items is healthy and resets the streak. The four
+# monitors exit nonzero on a failed fetch, which is recorded as an error and
+# still alerts. The discovery scripts print their failures, and an empty run
+# that carries a diagnostic reason still counts toward the alert.
+EMPTY_IS_HEALTHY = frozenset({
+    "leaderboard",
+    "registry",
+    "pagewatch",
+    "advisory",
+    "ecosystem-discover",
+    "source-discovery",
+})
 
 _log = logging.getLogger("clawbytes.source_health")
 
@@ -392,6 +409,10 @@ def record_source_health(
         rec["consecutiveEmpties"] = 0
         if _parse_iso(rec.get("unhealthySince")) is None:
             rec["unhealthySince"] = now.isoformat()
+    elif source in EMPTY_IS_HEALTHY and error == "-":
+        rec["consecutiveEmpties"] = int(rec["consecutiveEmpties"]) + 1
+        rec["consecutiveFailures"] = 0
+        rec["unhealthySince"] = None
     else:
         rec["consecutiveEmpties"] = int(rec["consecutiveEmpties"]) + 1
         rec["consecutiveFailures"] = 0
