@@ -7,6 +7,7 @@ failure has to be distinguishable from a quiet day: stderr even under
 import importlib.util
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import source_health as sh
@@ -25,6 +26,7 @@ reg = _load("claw_registry_failures", "claw-registry-monitor.py")
 lb = _load("claw_leaderboard_failures", "claw-leaderboard-monitor.py")
 pw = _load("claw_pagewatch_failures", "claw-pagewatch-monitor.py")
 adv = _load("claw_advisory_failures", "claw-advisory-monitor.py")
+hn = _load("claw_hn_failures", "claw-hn-monitor.py")
 
 
 def _bind(monkeypatch, tmp_path, mod):
@@ -129,6 +131,39 @@ def test_advisory_failed_fetch_exits_1(monkeypatch, tmp_path, capsys):
     _bind(monkeypatch, tmp_path, adv)
     monkeypatch.setattr(adv, "fetch_advisories", _boom)
     _assert_reported(capsys, adv.main(), "advisories fetch failed")
+
+
+def test_hn_failed_fetch_is_not_a_clean_empty_and_still_alerts(monkeypatch, tmp_path, capsys):
+    """HN is in EMPTY_IS_HEALTHY because it matches a handful of stories a
+    day. That is safe only while a failed search leaves a reason behind."""
+    assert "hn" in sh.EMPTY_IS_HEALTHY
+    monkeypatch.setattr(hn, "MEMORY_DIR", tmp_path)
+    monkeypatch.setattr(hn, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(hn, "urlopen", _boom)
+    monkeypatch.setattr(hn.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(sys, "argv", ["monitor", "--quiet"])
+    hn.main()
+    captured = capsys.readouterr()
+    status, items, error = sh.outcome_from_process(
+        returncode=0, stdout=captured.out, stderr=captured.err,
+    )
+    assert (status, items) == ("empty", 0)
+    assert "HN fetch error" in error
+
+    monkeypatch.setattr(sh, "admin_channel_configured", lambda: True)
+    now = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
+    sh.save_health(tmp_path / sh.HEALTH_FILENAME, {"sources": {"hn": {
+        "lastOkAt": None, "consecutiveFailures": 0, "consecutiveEmpties": 48,
+        "unhealthySince": (now - timedelta(hours=24)).isoformat(), "lastAlertAt": None,
+    }}})
+    sent = []
+    sh.record_source_health(
+        "hn", status=status, items=items, error=error,
+        memory_dir=tmp_path, now=now, alert_sender=lambda text: sent.append(text) or True,
+    )
+    assert len(sent) == 1
+    assert "HN fetch error" in sent[0]
+    capsys.readouterr()
 
 
 def test_advisory_clean_run_exits_0(monkeypatch, tmp_path, capsys):

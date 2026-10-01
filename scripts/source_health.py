@@ -33,11 +33,16 @@ UNHEALTHY_ALERT_AFTER = timedelta(hours=24)
 # monitors exit nonzero on a failed fetch, which is recorded as an error and
 # still alerts. The discovery scripts print their failures, and an empty run
 # that carries a diagnostic reason still counts toward the alert.
+#
+# hn is here for a different reason: the search matches a handful of stories
+# a day, so a 24h gap is ordinary. Its fetch errors print even under --quiet,
+# which keeps a failed search from reading as a clean empty.
 EMPTY_IS_HEALTHY = frozenset({
     "leaderboard",
     "registry",
     "pagewatch",
     "advisory",
+    "hn",
     "ecosystem-discover",
     "source-discovery",
 })
