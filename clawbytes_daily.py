@@ -590,7 +590,8 @@ def send_telegram_messages(messages: List[str]) -> None:
 def run_monitors() -> None:
     cmds = [
         'python3 scripts/claw-rss-monitor.py',
-        'python3 scripts/claw-reddit-monitor.py',
+        # Reddit is not fetched. REDDIT_FETCH_ENABLED in claw-reddit-monitor.py
+        # is off: public JSON returns HTTP 403 and would need OAuth.
         'python3 scripts/claw-moltbook-monitor.py',
         # claw-security-monitor.py entry removed: that script was deleted.
         'bash scripts/claw-ecosystem-monitor.sh --mode check',

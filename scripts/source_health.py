@@ -11,10 +11,12 @@ vars of its own beyond the admin channel the process already uses.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import os
 import re
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Optional
@@ -72,6 +74,37 @@ _SAVED = re.compile(
 
 def health_path(memory_dir: Path) -> Path:
     return Path(memory_dir) / HEALTH_FILENAME
+
+
+_REDDIT_MONITOR_NAME = "claw_reddit_monitor"
+
+
+def _reddit_monitor():
+    """Load claw-reddit-monitor.py once. The fetch flag lives there."""
+    cached = sys.modules.get(_REDDIT_MONITOR_NAME)
+    if cached is not None and hasattr(cached, "REDDIT_FETCH_ENABLED"):
+        return cached
+    path = Path(__file__).resolve().parent / "claw-reddit-monitor.py"
+    spec = importlib.util.spec_from_file_location(_REDDIT_MONITOR_NAME, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {path}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[_REDDIT_MONITOR_NAME] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def reddit_fetch_enabled() -> bool:
+    """Same switch as REDDIT_FETCH_ENABLED. False when the module cannot load.
+
+    Public Reddit JSON is HTTP 403 without OAuth. While this is false,
+    collect and discovery do not fetch, and record_source_health does not
+    track or alert on the reddit source.
+    """
+    try:
+        return bool(_reddit_monitor().REDDIT_FETCH_ENABLED)
+    except Exception:  # noqa: BLE001 - a broken loader must not resume fetches
+        return False
 
 
 def admin_channel_configured() -> bool:
@@ -309,7 +342,17 @@ def record_source_health(
     ``source_health ALERT`` warning is logged instead, at most once per
     source per 24h. A configured channel that fails to deliver is not
     deduped, so the next run can retry.
+
+    ``reddit`` is skipped while ``reddit_fetch_enabled()`` is false: no
+    health line, no alert, and no rewrite of the health file. An existing
+    reddit streak entry is left as stored (same document shape).
     """
+    if source == "reddit" and not reddit_fetch_enabled():
+        existing = load_health(health_path(memory_dir))["sources"].get("reddit")
+        if isinstance(existing, dict):
+            return existing
+        return _blank_record()
+
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)

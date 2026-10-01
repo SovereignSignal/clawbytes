@@ -56,7 +56,7 @@ def test_logs_one_line_and_redacts_truncated_stderr(monkeypatch, tmp_path, capsy
 
     monkeypatch.setattr(sh, "admin_channel_configured", lambda: False)
     sh.record_source_health(
-        "reddit",
+        "leaderboard",
         status=status,
         items=items,
         error=error,
@@ -65,7 +65,7 @@ def test_logs_one_line_and_redacts_truncated_stderr(monkeypatch, tmp_path, capsy
         alert_sender=lambda text: True,
     )
     lines = _lines(capsys)
-    assert lines == [f"source_health source=reddit status=error items=0 error={error}"]
+    assert lines == [f"source_health source=leaderboard status=error items=0 error={error}"]
     assert TOKEN not in lines[0]
     assert ENV_SECRET not in lines[0]
     assert len(lines[0].split(" error=", 1)[1]) <= sh.REASON_LIMIT
@@ -123,13 +123,13 @@ def test_no_alert_before_24h(monkeypatch, tmp_path, capsys):
     sent = []
     _seed(
         tmp_path,
-        "reddit",
+        "leaderboard",
         empties=4,
         failures=2,
         since=NOW - timedelta(hours=23, minutes=59),
     )
     sh.record_source_health(
-        "reddit",
+        "leaderboard",
         status="empty",
         items=0,
         error="HTTP 403: denied",
@@ -138,18 +138,18 @@ def test_no_alert_before_24h(monkeypatch, tmp_path, capsys):
         alert_sender=lambda text: sent.append(text) or True,
     )
     assert sent == []
-    rec = _rec(tmp_path, "reddit")
+    rec = _rec(tmp_path, "leaderboard")
     assert rec["consecutiveEmpties"] == 5
     assert rec["consecutiveFailures"] == 0
     assert rec["lastAlertAt"] is None
     assert rec["lastOkAt"] is None
-    assert _lines(capsys)[0].startswith("source_health source=reddit status=empty items=0 ")
+    assert _lines(capsys)[0].startswith("source_health source=leaderboard status=empty items=0 ")
 
 
 def test_alert_at_24h_deduped_until_next_day(monkeypatch, tmp_path, capsys, caplog):
     monkeypatch.setattr(sh, "admin_channel_configured", lambda: True)
     sent = []
-    _seed(tmp_path, "reddit", empties=3, since=NOW - timedelta(hours=24))
+    _seed(tmp_path, "leaderboard", empties=3, since=NOW - timedelta(hours=24))
 
     def _send(text):
         sent.append(text)
@@ -157,11 +157,11 @@ def test_alert_at_24h_deduped_until_next_day(monkeypatch, tmp_path, capsys, capl
 
     with caplog.at_level(logging.WARNING, logger="clawbytes.source_health"):
         sh.record_source_health(
-            "reddit", status="empty", items=0, error="HTTP 403: denied",
+            "leaderboard", status="empty", items=0, error="HTTP 403: denied",
             memory_dir=tmp_path, now=NOW, alert_sender=_send,
         )
         sh.record_source_health(
-            "reddit", status="error", items=0, error="exit 1: HTTP 403: denied",
+            "leaderboard", status="error", items=0, error="exit 1: HTTP 403: denied",
             memory_dir=tmp_path, now=NOW + timedelta(hours=1), alert_sender=_send,
         )
         sh.record_source_health(
@@ -169,11 +169,11 @@ def test_alert_at_24h_deduped_until_next_day(monkeypatch, tmp_path, capsys, capl
             memory_dir=tmp_path, now=NOW, alert_sender=_send,
         )
     assert len(sent) == 1
-    assert "reddit" in sent[0]
+    assert "leaderboard" in sent[0]
     assert "24h" in sent[0]
     assert ENV_SECRET not in sent[0]
     assert not any(r.message.startswith("source_health ALERT") for r in caplog.records)
-    rec = _rec(tmp_path, "reddit")
+    rec = _rec(tmp_path, "leaderboard")
     assert rec["lastAlertAt"] == NOW.isoformat()
     assert rec["consecutiveFailures"] == 1
     assert rec["consecutiveEmpties"] == 0
@@ -181,7 +181,7 @@ def test_alert_at_24h_deduped_until_next_day(monkeypatch, tmp_path, capsys, capl
 
     capsys.readouterr()
     sh.record_source_health(
-        "reddit", status="empty", items=0, error="HTTP 403: denied",
+        "leaderboard", status="empty", items=0, error="HTTP 403: denied",
         memory_dir=tmp_path, now=NOW + timedelta(hours=24), alert_sender=_send,
     )
     assert len(sent) == 2
@@ -218,26 +218,26 @@ def test_undelivered_alert_is_not_deduped(monkeypatch, tmp_path, caplog, capsys)
 def test_no_admin_channel_logs_warn_once_per_24h(monkeypatch, tmp_path, caplog, capsys):
     monkeypatch.setattr(sh, "admin_channel_configured", lambda: False)
     sent = []
-    _seed(tmp_path, "reddit", empties=1, since=NOW - timedelta(hours=25))
+    _seed(tmp_path, "leaderboard", empties=1, since=NOW - timedelta(hours=25))
     with caplog.at_level(logging.WARNING, logger="clawbytes.source_health"):
         sh.record_source_health(
-            "reddit", status="empty", items=0, error="HTTP 403: denied",
+            "leaderboard", status="empty", items=0, error="HTTP 403: denied",
             memory_dir=tmp_path, now=NOW, alert_sender=lambda text: sent.append(text) or True,
         )
         first = [r.message for r in caplog.records if r.message.startswith("source_health ALERT")]
         caplog.clear()
         sh.record_source_health(
-            "reddit", status="empty", items=0, error="HTTP 403: denied",
+            "leaderboard", status="empty", items=0, error="HTTP 403: denied",
             memory_dir=tmp_path, now=NOW + timedelta(hours=1),
             alert_sender=lambda text: sent.append(text) or True,
         )
         second = [r.message for r in caplog.records if r.message.startswith("source_health ALERT")]
     assert sent == []
     assert len(first) == 1
-    assert "source=reddit" in first[0]
+    assert "source=leaderboard" in first[0]
     assert "status=empty" in first[0]
     assert second == []
-    assert _rec(tmp_path, "reddit")["lastAlertAt"] == NOW.isoformat()
+    assert _rec(tmp_path, "leaderboard")["lastAlertAt"] == NOW.isoformat()
     capsys.readouterr()
 
 
@@ -291,7 +291,7 @@ def test_corrupt_health_file_is_tolerated(tmp_path, capsys):
 def test_ok_clears_empty_and_failure_streak(tmp_path, capsys):
     _seed(
         tmp_path,
-        "reddit",
+        "leaderboard",
         empties=9,
         failures=4,
         since=NOW - timedelta(hours=48),
@@ -300,10 +300,10 @@ def test_ok_clears_empty_and_failure_streak(tmp_path, capsys):
     )
     sent = []
     sh.record_source_health(
-        "reddit", status="ok", items=2, error="-",
+        "leaderboard", status="ok", items=2, error="-",
         memory_dir=tmp_path, now=NOW, alert_sender=lambda text: sent.append(text) or True,
     )
-    rec = _rec(tmp_path, "reddit")
+    rec = _rec(tmp_path, "leaderboard")
     assert sent == []
     assert rec["consecutiveEmpties"] == 0
     assert rec["consecutiveFailures"] == 0
@@ -336,11 +336,6 @@ def test_run_monitors_logs_one_line_per_source(monkeypatch, capsys):
     token = "ghp_" + "c" * 36
     scripts = {
         "claw-rss-monitor.py": (0, "Found 4 new relevant items\n", ""),
-        "claw-reddit-monitor.py": (
-            0,
-            "  HTTP 403: https://www.reddit.com/r/openclaw/hot.json\nFound 0 quality posts\n",
-            "",
-        ),
         "claw-hn-monitor.py": (0, "Found 3 new HN items\n", ""),
         "claw-moltbook-monitor.py": (0, "Found 1 new relevant items\n", ""),
         "claw-leaderboard-monitor.py": (0, "Leaderboards: 0 new movement item(s)\n", ""),
@@ -374,21 +369,21 @@ def test_run_monitors_logs_one_line_per_source(monkeypatch, capsys):
     monkeypatch.setattr(ct.subprocess, "run", _fake_run)
     monkeypatch.setattr(ct, "_source_health_alert", lambda text: alerts.append(text) or True)
     ct.run_monitors()
-    assert len(ran) == 10
+    assert len(ran) == 9
+    assert not any("claw-reddit-monitor.py" in " ".join(cmd) for cmd in ran)
     lines = _lines(capsys)
-    assert len(lines) == 10
+    assert len(lines) == 9
     by_source = {}
     for line in lines:
         name = line.split()[1].split("=", 1)[1]
         assert name not in by_source
         by_source[name] = line
     assert set(by_source) == {
-        "rss", "reddit", "hn", "moltbook", "leaderboard",
+        "rss", "hn", "moltbook", "leaderboard",
         "registry", "pagewatch", "bsky", "advisory", "ecosystem",
     }
+    assert "reddit" not in by_source
     assert by_source["rss"] == "source_health source=rss status=ok items=4 error=-"
-    assert "status=empty" in by_source["reddit"] and "items=0" in by_source["reddit"]
-    assert "HTTP 403" in by_source["reddit"]
     assert by_source["ecosystem"] == "source_health source=ecosystem status=ok items=3 error=-"
     assert "status=error" in by_source["advisory"] and "items=0" in by_source["advisory"]
     assert token not in "\n".join(lines)
@@ -396,7 +391,7 @@ def test_run_monitors_logs_one_line_per_source(monkeypatch, capsys):
     assert len(by_source["advisory"].split(" error=", 1)[1]) <= sh.REASON_LIMIT
     assert alerts == []
     stored = json.loads((ct.MEMORY / sh.HEALTH_FILENAME).read_text())
-    assert stored["sources"]["reddit"]["consecutiveEmpties"] >= 1
+    assert "reddit" not in stored["sources"]
     assert stored["sources"]["rss"]["lastOkAt"]
     assert stored["sources"]["rss"]["consecutiveFailures"] == 0
 
@@ -438,3 +433,118 @@ def test_discover_logs_one_line_per_source_and_captures_output(monkeypatch, tmp_
     assert stored["sources"]["ecosystem-discover"]["lastOkAt"]
     assert stored["sources"]["source-discovery"]["consecutiveFailures"] == 1
     assert stored["sources"]["source-discovery"]["lastAlertAt"] is None
+
+
+def test_reddit_streak_is_not_tracked_or_alerted(monkeypatch, tmp_path, capsys, caplog):
+    """An existing reddit entry stays byte-for-byte and never pages."""
+    monkeypatch.setattr(sh, "admin_channel_configured", lambda: True)
+    assert sh.reddit_fetch_enabled() is False
+    sent = []
+    _seed(tmp_path, "reddit", empties=9, since=NOW - timedelta(hours=48))
+    before = (tmp_path / sh.HEALTH_FILENAME).read_bytes()
+    with caplog.at_level(logging.WARNING, logger="clawbytes.source_health"):
+        returned = sh.record_source_health(
+            "reddit",
+            status="empty",
+            items=0,
+            error="HTTP 403: denied",
+            memory_dir=tmp_path,
+            now=NOW,
+            alert_sender=lambda text: sent.append(text) or True,
+        )
+    assert sent == []
+    assert (tmp_path / sh.HEALTH_FILENAME).read_bytes() == before
+    assert _lines(capsys) == []
+    assert not any(r.message.startswith("source_health ALERT") for r in caplog.records)
+    assert returned["consecutiveEmpties"] == 9
+    assert returned["lastAlertAt"] is None
+
+
+def test_reddit_health_record_is_not_created_when_absent(tmp_path, capsys):
+    sh.record_source_health(
+        "reddit",
+        status="empty",
+        items=0,
+        error="HTTP 403: denied",
+        memory_dir=tmp_path,
+        now=NOW,
+        alert_sender=lambda text: True,
+    )
+    assert not (tmp_path / sh.HEALTH_FILENAME).exists()
+    assert _lines(capsys) == []
+
+
+def test_other_source_update_leaves_reddit_streak_untouched(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(sh, "admin_channel_configured", lambda: True)
+    sent = []
+    _seed(tmp_path, "reddit", empties=12, since=NOW - timedelta(hours=72))
+    original = _rec(tmp_path, "reddit")
+    sh.record_source_health(
+        "rss",
+        status="ok",
+        items=4,
+        error="-",
+        memory_dir=tmp_path,
+        now=NOW,
+        alert_sender=lambda text: sent.append(text) or True,
+    )
+    assert sent == []
+    assert _rec(tmp_path, "reddit") == original
+    assert not any("source=reddit" in line for line in _lines(capsys))
+
+
+def test_run_monitors_does_not_alert_on_existing_reddit_streak(monkeypatch, tmp_path, capsys, caplog):
+    monkeypatch.setattr(ct, "MEMORY", tmp_path)
+    monkeypatch.setattr(sh, "admin_channel_configured", lambda: True)
+    alerts = []
+    _seed(tmp_path, "reddit", empties=20, since=NOW - timedelta(hours=48))
+    original = _rec(tmp_path, "reddit")
+
+    class _P:
+        def __init__(self):
+            self.returncode = 0
+            self.stdout = "Found 1 new relevant items\n"
+            self.stderr = ""
+
+    monkeypatch.setattr(ct.subprocess, "run", lambda cmd, **kwargs: _P())
+    monkeypatch.setattr(ct, "_source_health_alert", lambda text: alerts.append(text) or True)
+    with caplog.at_level(logging.WARNING, logger="clawbytes.source_health"):
+        ct.run_monitors()
+    assert alerts == []
+    assert not any(r.message.startswith("source_health ALERT") for r in caplog.records)
+    assert _rec(tmp_path, "reddit") == original
+    assert not any("source=reddit" in line for line in _lines(capsys))
+
+
+def test_reddit_returns_to_health_and_collect_when_enabled(monkeypatch, tmp_path, capsys):
+    mod = sh._reddit_monitor()
+    monkeypatch.setattr(mod, "REDDIT_FETCH_ENABLED", True)
+    monkeypatch.setattr(sh, "admin_channel_configured", lambda: False)
+    sh.record_source_health(
+        "reddit",
+        status="ok",
+        items=2,
+        error="-",
+        memory_dir=tmp_path,
+        now=NOW,
+        alert_sender=lambda text: True,
+    )
+    assert _lines(capsys) == ["source_health source=reddit status=ok items=2 error=-"]
+
+    monkeypatch.setattr(ct, "MEMORY", tmp_path)
+    ran = []
+
+    class _P:
+        def __init__(self):
+            self.returncode = 0
+            self.stdout = "Found 1 quality posts\n"
+            self.stderr = ""
+
+    def _fake_run(cmd, **kwargs):
+        ran.append(cmd)
+        return _P()
+
+    monkeypatch.setattr(ct.subprocess, "run", _fake_run)
+    ct.run_monitors()
+    assert any("claw-reddit-monitor.py" in " ".join(cmd) for cmd in ran)
+    assert len(ran) == 10

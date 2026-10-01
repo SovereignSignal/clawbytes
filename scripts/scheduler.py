@@ -138,8 +138,9 @@ def _run_observed_source(source: str, label: str, cmd: list[str]) -> None:
 
 def discover() -> None:
     """Weekly source discovery. New repos land in claw-ecosystem-sources.json
-    (merged into release checks by get_all_repos) and new feeds/subreddits in
-    clawbytes-dynamic-feeds.json (merged by the rss/reddit monitors)."""
+    (merged into release checks by get_all_repos) and new feeds in
+    clawbytes-dynamic-feeds.json (merged by the rss monitor). Subreddit
+    discovery is off with REDDIT_FETCH_ENABLED (public JSON HTTP 403)."""
     _run_observed_source(
         "ecosystem-discover",
         "discover_ecosystem",
