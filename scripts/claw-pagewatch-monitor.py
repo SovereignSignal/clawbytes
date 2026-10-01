@@ -101,6 +101,18 @@ SITEMAP_WATCHES = [
     },
 ]
 
+FAILURES = []
+
+
+def _fail(message):
+    """A failed fetch or parse goes to stderr even under --quiet; main() exits 1.
+
+    No change is this monitor's resting state, so the exit code is the only
+    thing that tells a broken watch from a quiet day.
+    """
+    FAILURES.append(message)
+    print(f"  ! {message}", file=sys.stderr)
+
 
 def watch_fetch_url(watch):
     return watch.get("md") or watch.get("html")
@@ -255,8 +267,7 @@ def check_pages(verbose=True):
         try:
             text = fetch_text(url)
         except Exception as e:
-            if verbose:
-                print(f"  ! {watch['label']}: fetch failed ({e})")
+            _fail(f"{watch['label']}: fetch failed ({e})")
             continue
         heading = first_heading(text, watch["heading"])
         entry = newest_entry_fingerprint(text, watch) if heading else None
@@ -302,13 +313,11 @@ def check_pages(verbose=True):
         try:
             xml_text = fetch_text(watch["url"])
         except Exception as e:
-            if verbose:
-                print(f"  ! {watch['label']} sitemap: fetch failed ({e})")
+            _fail(f"{watch['label']} sitemap: fetch failed ({e})")
             continue
         slugs = sitemap_slugs(xml_text, watch["prefixes"])
         if not slugs:
-            if verbose:
-                print(f"  ! {watch['label']} sitemap: no matching URLs parsed")
+            _fail(f"{watch['label']} sitemap: no matching URLs parsed")
             continue
         old = state["slugs"].get(watch["key"], [])
         fresh = [u for u in slugs if u not in set(old)] if old else []
@@ -356,7 +365,7 @@ def main():
     args = parser.parse_args()
     items = check_pages(verbose=not args.quiet)
     print(f"Pagewatch: {len(items)} new item(s)")
-    return 0
+    return 1 if FAILURES else 0
 
 
 if __name__ == "__main__":

@@ -312,6 +312,41 @@ def test_ok_clears_empty_and_failure_streak(tmp_path, capsys):
     capsys.readouterr()
 
 
+def test_clean_empty_on_diff_source_is_healthy_and_never_alerts(monkeypatch, tmp_path, capsys):
+    """Zero new items is the resting state of a diff-style source."""
+    monkeypatch.setattr(sh, "admin_channel_configured", lambda: True)
+    for source in sorted(sh.EMPTY_IS_HEALTHY):
+        sent = []
+        _seed(tmp_path, source, empties=48, failures=2, since=NOW - timedelta(hours=30))
+        sh.record_source_health(
+            source, status="empty", items=0, error="-",
+            memory_dir=tmp_path, now=NOW, alert_sender=lambda text: sent.append(text) or True,
+        )
+        rec = _rec(tmp_path, source)
+        assert sent == [], source
+        assert rec["unhealthySince"] is None
+        assert rec["consecutiveFailures"] == 0
+        assert rec["consecutiveEmpties"] == 49
+        assert rec["lastAlertAt"] is None
+    assert {"leaderboard", "registry", "pagewatch", "advisory"} <= sh.EMPTY_IS_HEALTHY
+    capsys.readouterr()
+
+
+def test_clean_empty_on_feed_source_still_alerts_at_24h(monkeypatch, tmp_path, capsys):
+    """A steady feed going silent for a day is still worth a page."""
+    monkeypatch.setattr(sh, "admin_channel_configured", lambda: True)
+    sent = []
+    _seed(tmp_path, "bsky", empties=48, since=NOW - timedelta(hours=24))
+    sh.record_source_health(
+        "bsky", status="empty", items=0, error="-",
+        memory_dir=tmp_path, now=NOW, alert_sender=lambda text: sent.append(text) or True,
+    )
+    assert len(sent) == 1
+    assert "bsky" in sent[0] and "no detail" in sent[0]
+    assert _rec(tmp_path, "bsky")["unhealthySince"] == (NOW - timedelta(hours=24)).isoformat()
+    capsys.readouterr()
+
+
 def test_admin_channel_uses_existing_env_only(monkeypatch):
     for key in (
         "TELEGRAM_BOT_TOKEN",

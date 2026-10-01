@@ -27,6 +27,19 @@ STATE_FILE = MEMORY_DIR / "claw-advisory-state.json"
 ADVISORY_URL = "https://api.github.com/advisories?per_page=50&sort=updated&direction=desc"
 DAILY_CAP = 2
 
+FAILURES = []
+
+
+def _fail(message):
+    """A failed fetch goes to stderr even under --quiet; main() exits 1.
+
+    No new advisory is this monitor's resting state, so the exit code is
+    the only thing that tells a broken fetch from a quiet day.
+    """
+    FAILURES.append(message)
+    print(f"  ! {message}", file=sys.stderr)
+
+
 # Exact package names (lowercase). Scoped names match on the full string or
 # the segment after the last "/". Drawn from repos we already watch, plus
 # the framework packages the coverage plan names. Not a free-text search.
@@ -206,8 +219,7 @@ def check_advisories(verbose=True, fetch=None):
     try:
         advisories = fetch()
     except Exception as exc:
-        if verbose:
-            print(f"  ! advisories fetch failed: {exc}")
+        _fail(f"advisories fetch failed: {exc}")
         return []
     first = not state.get("baselined")
     items = select_advisories(advisories, state, now_iso)
@@ -229,7 +241,7 @@ def main():
     args = parser.parse_args()
     items = check_advisories(verbose=not args.quiet)
     print(f"Advisories: {len(items)} new item(s)")
-    return 0
+    return 1 if FAILURES else 0
 
 
 if __name__ == "__main__":
