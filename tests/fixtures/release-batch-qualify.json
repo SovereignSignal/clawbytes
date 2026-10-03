@@ -1,0 +1,147 @@
+{
+  "timestamp": "2026-10-03T18:00:00Z",
+  "mode": "check",
+  "newReleases": [
+    {
+      "repo": "qwibitai/nanoclaw",
+      "tag": "v1.2.3",
+      "name": "Source tracking",
+      "url": "https://github.com/qwibitai/nanoclaw/releases/tag/v1.2.3",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "stable notes",
+      "prerelease": false,
+      "draft": false
+    },
+    {
+      "repo": "nearai/ironclaw",
+      "tag": "v2.0.0",
+      "name": "Architecture overhaul",
+      "url": "https://github.com/nearai/ironclaw/releases/tag/v2.0.0",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "stable notes",
+      "prerelease": false,
+      "draft": false
+    },
+    {
+      "repo": "RightNow-AI/openfang",
+      "tag": "v3.0.0",
+      "name": "March release",
+      "url": "https://github.com/RightNow-AI/openfang/releases/tag/v3.0.0",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "stable notes",
+      "prerelease": false,
+      "draft": false
+    },
+    {
+      "repo": "qwibitai/nanoclaw",
+      "tag": "v1.2.0-rc.1",
+      "name": "v1.2.0-rc.1",
+      "url": "https://github.com/qwibitai/nanoclaw/releases/tag/v1.2.0-rc.1",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "rc",
+      "prerelease": true,
+      "draft": false
+    },
+    {
+      "repo": "nearai/ironclaw",
+      "tag": "v2.0.0-beta",
+      "name": "v2.0.0-beta",
+      "url": "https://github.com/nearai/ironclaw/releases/tag/v2.0.0-beta",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "beta",
+      "prerelease": true,
+      "draft": false
+    },
+    {
+      "repo": "sipeed/picoclaw",
+      "tag": "nightly-2026-10-03",
+      "name": "nightly-2026-10-03",
+      "url": "https://github.com/sipeed/picoclaw/releases/tag/nightly-2026-10-03",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "nightly",
+      "prerelease": true,
+      "draft": false
+    },
+    {
+      "repo": "moltis-org/moltis",
+      "tag": "inputs-abc",
+      "name": "inputs-abc",
+      "url": "https://github.com/moltis-org/moltis/releases/tag/inputs-abc",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "inputs",
+      "prerelease": false,
+      "draft": false
+    },
+    {
+      "repo": "qwibitai/nanoclaw",
+      "tag": "v9.9.9",
+      "name": "Draft drop",
+      "url": "https://github.com/qwibitai/nanoclaw/releases/tag/v9.9.9",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "draft",
+      "prerelease": false,
+      "draft": true
+    },
+    {
+      "repo": "nearai/ironclaw",
+      "tag": "v8.8.8",
+      "name": "Baseline",
+      "url": "https://github.com/nearai/ironclaw/releases/tag/v8.8.8",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "baseline",
+      "prerelease": false,
+      "draft": false,
+      "baseline": true
+    },
+    {
+      "repo": "openai/codex",
+      "tag": "rust-v0.161.0",
+      "name": "Codex rust-v0.161.0",
+      "url": "https://github.com/openai/codex/releases/tag/rust-v0.161.0",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "legacy owned",
+      "prerelease": false,
+      "draft": false
+    },
+    {
+      "repo": "acme/not-reviewed",
+      "tag": "v1.2.3",
+      "name": "Source tracking",
+      "url": "https://github.com/acme/not-reviewed/releases/tag/v1.2.3",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "unknown repo",
+      "prerelease": false,
+      "draft": false
+    },
+    {
+      "repo": "qwibitai/nanoclaw",
+      "tag": "v1.0.0",
+      "name": "Old stable",
+      "url": "https://github.com/qwibitai/nanoclaw/releases/tag/v1.0.0",
+      "published": "2026-10-03T16:00:00Z",
+      "body": "before watermark",
+      "prerelease": false,
+      "draft": false
+    },
+    {
+      "repo": "RightNow-AI/openfang",
+      "tag": "v4.0.0",
+      "name": "Marked pre",
+      "url": "https://github.com/RightNow-AI/openfang/releases/tag/v4.0.0",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "github prerelease flag",
+      "prerelease": true,
+      "draft": false
+    },
+    {
+      "repo": "openclaw/openclaw",
+      "tag": "v2026.10.1",
+      "name": "OpenClaw 2026.10.1",
+      "url": "https://github.com/openclaw/openclaw/releases/tag/v2026.10.1",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "legacy owned",
+      "prerelease": false,
+      "draft": false
+    }
+  ]
+}

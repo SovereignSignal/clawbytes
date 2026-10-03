@@ -1,6 +1,9 @@
 """Scheduler job table: yield snapshot is weekly, file-only, no success DM."""
+from types import SimpleNamespace
+
 from apscheduler.schedulers.blocking import BlockingScheduler
 
+import release_forwarding
 import scheduler
 
 
@@ -26,3 +29,79 @@ def test_yield_snapshot_job_runs_cli_and_does_not_notify_on_success(monkeypatch)
     )
     scheduler.yield_snapshot()
     assert calls == [("yield_snapshot", ["yield-snapshot"])]
+
+
+def _fake_collect(monkeypatch, returncode):
+    commands = []
+
+    def _run(cmd, cwd=None, check=False, **kwargs):
+        commands.append(list(cmd))
+        return SimpleNamespace(returncode=returncode)
+
+    monkeypatch.setattr(scheduler.subprocess, "run", _run)
+    return commands
+
+
+def test_collect_invokes_forwarding_once_after_exit_zero(monkeypatch, caplog):
+    commands = _fake_collect(monkeypatch, 0)
+    forwarded = []
+    monkeypatch.setattr(
+        release_forwarding,
+        "forward_release_events",
+        lambda: forwarded.append("once") or "disabled",
+    )
+    dms = []
+    monkeypatch.setattr(scheduler, "_send_admin_dm", lambda *args, **kwargs: dms.append(args))
+    with caplog.at_level("INFO", logger="clawbytes.scheduler"):
+        scheduler.collect()
+    assert forwarded == ["once"]
+    assert len(commands) == 1
+    assert commands[0][1].endswith("clawbytes_threads.py")
+    assert commands[0][2:] == ["collect", "--run-monitors", "--summary"]
+    assert all("forward-release-events.py" not in part for part in commands[0])
+    assert dms == []
+    assert "forward_release_events: disabled" in caplog.text
+
+
+def test_collect_skips_forwarding_when_collect_exits_nonzero(monkeypatch):
+    _fake_collect(monkeypatch, 1)
+    forwarded = []
+    monkeypatch.setattr(
+        release_forwarding,
+        "forward_release_events",
+        lambda: forwarded.append("once"),
+    )
+    dms = []
+    monkeypatch.setattr(scheduler, "_send_admin_dm", lambda *args, **kwargs: dms.append(args))
+    scheduler.collect()
+    assert forwarded == []
+    assert [item[0] for item in dms] == ["alert:collect"]
+
+
+def test_forward_failure_does_not_page_collect(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAWBYTES_MEMORY_DIR", str(tmp_path))
+    _fake_collect(monkeypatch, 0)
+
+    def _boom():
+        raise RuntimeError("receiver down")
+
+    monkeypatch.setattr(release_forwarding, "forward_release_events", _boom)
+    dms = []
+    monkeypatch.setattr(scheduler, "_send_admin_dm", lambda *args, **kwargs: dms.append(args) or False)
+    scheduler.collect()
+    assert dms == []
+    assert (tmp_path / scheduler.FORWARD_FAILURE_STATE).exists()
+
+
+def test_sustained_forward_failures_use_a_separate_ops_note(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAWBYTES_MEMORY_DIR", str(tmp_path))
+    monkeypatch.setattr(scheduler, "FORWARD_FAILURES_BEFORE_NOTE", 2)
+    _fake_collect(monkeypatch, 0)
+    monkeypatch.setattr(release_forwarding, "forward_release_events", lambda: "retryable")
+    dms = []
+    monkeypatch.setattr(scheduler, "_send_admin_dm", lambda *args, **kwargs: dms.append(args) or True)
+    scheduler.collect()
+    assert dms == []
+    scheduler.collect()
+    assert [item[0] for item in dms] == ["forward_release_events"]
+    assert all(item[0] != "alert:collect" for item in dms)

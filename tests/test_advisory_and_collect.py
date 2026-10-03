@@ -209,10 +209,14 @@ def test_ecosystem_release_classifies_and_baseline_is_silent(tmp_path, monkeypat
         "html_url": "https://github.com/acme/widget/releases/tag/v2.0.0",
         "published_at": "2026-09-23T12:00:00Z",
         "body": "second",
+        "prerelease": True,
+        "draft": False,
     }]))
     second = run()
     assert len(second["newReleases"]) == 1
     assert second["newReleases"][0]["tag"] == "v2.0.0"
+    assert second["newReleases"][0]["prerelease"] is True
+    assert second["newReleases"][0]["draft"] is False
     state = json.loads((memory / "claw-ecosystem-state.json").read_text())
     assert state["lastSeenReleases"]["acme/widget"] == "v1.0.0"
 

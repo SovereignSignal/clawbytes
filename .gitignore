@@ -7,3 +7,6 @@ CREDS.md
 state/
 *.json
 !config.json
+!release_targets.json
+!tests/fixtures/*.json
+!tests/fixtures/**/*.json

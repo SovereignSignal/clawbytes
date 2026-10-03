@@ -1,0 +1,229 @@
+{
+  "policy": "forward-only-listed-targets",
+  "targets": {
+    "openclaw/openclaw": {
+      "name": "OpenClaw",
+      "prereleases": true,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": false,
+      "legacy_owned": true
+    },
+    "NousResearch/hermes-agent": {
+      "name": "Hermes Agent",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": false,
+      "legacy_owned": true
+    },
+    "openai/codex": {
+      "name": "Codex",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": false,
+      "legacy_owned": true
+    },
+    "anthropics/claude-code": {
+      "name": "Claude Code",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": false,
+      "legacy_owned": true
+    },
+    "qwibitai/nanoclaw": {
+      "name": "Nanoclaw",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "nearai/ironclaw": {
+      "name": "IronClaw",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "RightNow-AI/openfang": {
+      "name": "OpenFang",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "sipeed/picoclaw": {
+      "name": "PicoClaw",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "moltis-org/moltis": {
+      "name": "Moltis",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "anomalyco/opencode": {
+      "name": "OpenCode",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "google-gemini/gemini-cli": {
+      "name": "Gemini CLI",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "Aider-AI/aider": {
+      "name": "Aider",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "cline/cline": {
+      "name": "Cline",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "RooCodeInc/Roo-Code": {
+      "name": "Roo Code",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "aaif-goose/goose": {
+      "name": "Goose",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "All-Hands-AI/OpenHands": {
+      "name": "OpenHands",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "charmbracelet/crush": {
+      "name": "Crush",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "QwenLM/qwen-code": {
+      "name": "Qwen Code",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "continuedev/continue": {
+      "name": "Continue",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "earendil-works/pi": {
+      "name": "Pi",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "can1357/oh-my-pi": {
+      "name": "Oh My Pi",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "vercel-labs/fx": {
+      "name": "fx",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "herdrdev/herdr": {
+      "name": "Herdr",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "Kilo-Org/kilocode": {
+      "name": "Kilo Code",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "MoonshotAI/kimi-code": {
+      "name": "Kimi Code",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "mistralai/mistral-vibe": {
+      "name": "Mistral Vibe",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "openinterpreter/openinterpreter": {
+      "name": "Open Interpreter",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "langchain-ai/deepagents": {
+      "name": "Deep Agents",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "Hmbown/CodeWhale": {
+      "name": "Codewhale",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "XiaomiMiMo/MiMo-Code": {
+      "name": "MiMo Code",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "agno-agi/agno": {
+      "name": "AGNO",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    },
+    "huggingface/tau": {
+      "name": "Tau",
+      "prereleases": false,
+      "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
+      "forward": true,
+      "legacy_owned": false
+    }
+  }
+}

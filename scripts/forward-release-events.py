@@ -1,43 +1,24 @@
 #!/usr/bin/env python3
-"""Forward qualified ClawBytes GitHub releases to Release Bot."""
+"""Forward qualified ClawBytes GitHub releases to Release Bot.
+
+Thin CLI. The script directory is what Python puts on ``sys.path`` when this
+file is launched as ``python3 scripts/forward-release-events.py``, so the
+repo-root modules are inserted before import. Exit 0 always: a forward
+failure must not look like a failed collect.
+"""
 from __future__ import annotations
-import json, os, re
+
+import sys
 from pathlib import Path
-from release_events import emit_release_event
 
-ROOT=Path(__file__).resolve().parent.parent
-MEMORY=Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(ROOT/"memory")))
-INPUT=MEMORY/"claw-ecosystem-new-items.json"
-VERSION=re.compile(r"^(?:rust-)?v?\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$")
-BAD=re.compile(r"(?i)(preview|nightly|snapshot|canary|alpha|beta|rc\d*|inputs[-_])")
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS = Path(__file__).resolve().parent
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-def normalize(tag):
-    return re.sub(r"^(?:rust-)?v","",tag or "",flags=re.I)
+from release_forwarding import main  # noqa: E402
 
-def qualified(item):
-    tag=str(item.get("tag") or "").strip()
-    title=str(item.get("name") or "")
-    if not VERSION.match(tag): return False
-    if BAD.search(tag+" "+title): return False
-    return bool(item.get("repo") and item.get("url"))
-
-def main():
-    try: data=json.loads(INPUT.read_text())
-    except Exception: return 0
-    sent=0
-    for item in data.get("newReleases",[]) if isinstance(data,dict) else []:
-        if not qualified(item): continue
-        repo=item["repo"]; tag=item["tag"]
-        event={
-          "id":f"software:github:{repo.lower()}:{tag.lower()}",
-          "kind":"software","name":(item.get("name") or repo.split("/")[-1]).strip(),
-          "version":normalize(tag),"source":"clawbytes","source_type":"github_release",
-          "url":item["url"],"published_at":item.get("published"),
-          "summary":str(item.get("body") or "")[:1200],
-          "metadata":{"repo":repo,"tag":tag},
-        }
-        sent += 1 if emit_release_event(event) else 0
-    print(f"[release-events] forwarded {sent} qualified software release(s)")
-    return 0
-
-if __name__=="__main__": raise SystemExit(main())
+if __name__ == "__main__":
+    raise SystemExit(main())
