@@ -21,6 +21,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -43,11 +44,12 @@ def _publish_enabled() -> bool:
     return os.environ.get("CLAWBYTES_PUBLISH", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _run_cmd(label: str, cmd: list[str]) -> None:
+def _run_cmd(label: str, cmd: list[str]) -> int:
     """Run a subprocess job, logging start/finish; never raises.
 
     A nonzero exit is "things are not going well" — the one case ops DMs
-    exist for — so it alerts the admin immediately.
+    exist for — so it alerts the admin immediately. Returns the exit code
+    (1 when the process could not be started).
     """
     log.info("START %s: %s", label, " ".join(cmd))
     try:
@@ -55,18 +57,116 @@ def _run_cmd(label: str, cmd: list[str]) -> None:
         log.info("DONE %s: exit=%s", label, result.returncode)
         if result.returncode != 0:
             _send_admin_dm(f"alert:{label}", f"⚠️ ClawBytes job '{label}' exited {result.returncode}. Check Railway logs.")
+        return result.returncode
     except Exception:  # noqa: BLE001 - a job failure must not kill the scheduler
         log.exception("ERROR %s crashed", label)
         _send_admin_dm(f"alert:{label}", f"⚠️ ClawBytes job '{label}' crashed before completing. Check Railway logs.")
+        return 1
 
 
-def _run(label: str, args: list[str]) -> None:
-    """Run a clawbytes_threads.py subcommand."""
-    _run_cmd(label, [sys.executable, THREADS, *args])
+def _run(label: str, args: list[str]) -> int:
+    """Run a clawbytes_threads.py subcommand. Returns the exit code."""
+    return _run_cmd(label, [sys.executable, THREADS, *args])
+
+
+# A full day of 30-minute collects. One blip must not page; a day of
+# transport failures is an ops note, still not an alert:collect page.
+FORWARD_FAILURES_BEFORE_NOTE = 48
+FORWARD_NOTE_REPEAT = timedelta(hours=24)
+FORWARD_FAILURE_KINDS = frozenset({"retryable", "config_error", "error"})
+FORWARD_FAILURE_STATE = "release-forwarding-failures.json"
 
 
 def collect() -> None:
-    _run("collect", ["collect", "--run-monitors", "--summary"])
+    code = _run("collect", ["collect", "--run-monitors", "--summary"])
+    if code != 0:
+        log.info("forward_release_events: skipped collect_failed")
+        return
+    _forward_after_collect()
+
+
+def _forward_after_collect() -> None:
+    """Run the release forwarder in-process. Never pages ``alert:collect``.
+
+    The forwarder is not a ``_run_cmd`` job: a nonzero exit there would DM
+    the admin on every collect. Import and transport failures are logged
+    and, after a sustained streak, a separate ops note.
+    """
+    try:
+        scripts_dir = str(REPO_ROOT / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        if str(REPO_ROOT) not in sys.path:
+            sys.path.insert(0, str(REPO_ROOT))
+        import release_forwarding
+
+        outcome = release_forwarding.forward_release_events()
+    except Exception:
+        log.exception("forward_release_events: error")
+        outcome = "error"
+    else:
+        log.info("forward_release_events: %s", outcome)
+    if outcome == "disabled":
+        return
+    try:
+        _note_forward_failure(outcome)
+    except Exception:
+        log.exception("forward_release_events: failure note crashed")
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        raise
+
+
+def _note_forward_failure(outcome: str) -> None:
+    """Rate-limit a private ops note. This is not the collect alert path."""
+    kind = (outcome or "").split()[0]
+    memory = _memory_dir()
+    path = memory / FORWARD_FAILURE_STATE
+    try:
+        state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, json.JSONDecodeError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    if kind not in FORWARD_FAILURE_KINDS:
+        if not state.get("consecutive"):
+            return
+        state["consecutive"] = 0
+        _write_json_atomic(path, state)
+        return
+    consecutive = int(state.get("consecutive") or 0) + 1
+    state["consecutive"] = consecutive
+    now = datetime.now(timezone.utc)
+    last = _parse_iso(state.get("lastNoteAt"))
+    if consecutive >= FORWARD_FAILURES_BEFORE_NOTE and (
+        last is None or now - last >= FORWARD_NOTE_REPEAT
+    ):
+        sent = _send_admin_dm(
+            "forward_release_events",
+            "⚠️ Release forwarding failed "
+            f"{consecutive} collects in a row ({kind}). "
+            "Editorial collect is unaffected.",
+        )
+        if sent:
+            state["lastNoteAt"] = now.isoformat()
+    _write_json_atomic(path, state)
 
 
 def autopublish() -> None:

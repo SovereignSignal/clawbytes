@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-10-03T15:00:00Z",
+  "mode": "check",
+  "newReleases": [
+    {
+      "repo": "qwibitai/nanoclaw",
+      "tag": "v1.2.3",
+      "name": "Source tracking",
+      "url": "https://github.com/qwibitai/nanoclaw/releases/tag/v1.2.3",
+      "published": "2026-10-03T15:00:00Z",
+      "body": "would qualify if the batch were fresh",
+      "prerelease": false,
+      "draft": false
+    }
+  ]
+}

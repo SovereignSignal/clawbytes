@@ -807,7 +807,9 @@ check_github_releases() {
                             name: .name,
                             url: .html_url,
                             published: .published_at,
-                            body: (.body | if . then .[0:500] else "" end)
+                            body: (.body | if . then .[0:500] else "" end),
+                            prerelease: .prerelease,
+                            draft: .draft
                         }' > "$tmpdir/${safe_name}.json"
                     fi
                 fi

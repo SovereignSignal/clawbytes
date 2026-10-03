@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-10-03T18:00:00Z",
+  "mode": "check",
+  "newReleases": [
+    {
+      "repo": "openai/codex",
+      "tag": "rust-v0.161.0",
+      "name": "Codex rust-v0.161.0",
+      "url": "https://github.com/openai/codex/releases/tag/rust-v0.161.0",
+      "published": "2026-10-03T18:00:00Z",
+      "body": "legacy poller owns this repo",
+      "prerelease": false,
+      "draft": false
+    }
+  ]
+}
