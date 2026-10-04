@@ -105,3 +105,37 @@ def test_sustained_forward_failures_use_a_separate_ops_note(monkeypatch, tmp_pat
     scheduler.collect()
     assert [item[0] for item in dms] == ["forward_release_events"]
     assert all(item[0] != "alert:collect" for item in dms)
+
+
+def test_autopublish_waits_for_a_running_collect(monkeypatch):
+    """A collect that runs past :05 must not overlap autopublish's backlog write."""
+    import threading
+
+    collect_started = threading.Event()
+    release_collect = threading.Event()
+    order = []
+
+    def _run(cmd, cwd=None, check=False, **kwargs):
+        sub = cmd[2]
+        order.append(f"start {sub}")
+        if sub == "collect":
+            collect_started.set()
+            release_collect.wait(5)
+        order.append(f"end {sub}")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(scheduler.subprocess, "run", _run)
+    monkeypatch.setattr(release_forwarding, "forward_release_events", lambda: "disabled")
+    monkeypatch.setattr(scheduler, "_send_admin_dm", lambda *a, **k: None)
+
+    collect = threading.Thread(target=scheduler.collect)
+    collect.start()
+    assert collect_started.wait(5)
+    publish = threading.Thread(target=scheduler.autopublish)
+    publish.start()
+    publish.join(0.2)
+    assert publish.is_alive()
+    release_collect.set()
+    collect.join(5)
+    publish.join(5)
+    assert order == ["start collect", "end collect", "start autopublish", "end autopublish"]

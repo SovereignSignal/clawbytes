@@ -16,12 +16,14 @@ posting to the live @clawbytes channel:
 """
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -64,6 +66,23 @@ def _run_cmd(label: str, cmd: list[str]) -> int:
         return 1
 
 
+# collect and autopublish both run collect_into_backlog, a read-modify-write of
+# the backlog through one fixed .tmp path. APScheduler's max_instances is per
+# job, so a collect that runs past :05 overlaps autopublish: one rename takes
+# the other's .tmp and that job exits 1 (or a write is lost). Jobs that write
+# shared state take this lock and run one at a time.
+_STATE_LOCK = threading.Lock()
+
+
+def _serialized(job):
+    @functools.wraps(job)
+    def wrapper(*args, **kwargs):
+        with _STATE_LOCK:
+            return job(*args, **kwargs)
+
+    return wrapper
+
+
 def _run(label: str, args: list[str]) -> int:
     """Run a clawbytes_threads.py subcommand. Returns the exit code."""
     return _run_cmd(label, [sys.executable, THREADS, *args])
@@ -77,6 +96,7 @@ FORWARD_FAILURE_KINDS = frozenset({"retryable", "config_error", "error"})
 FORWARD_FAILURE_STATE = "release-forwarding-failures.json"
 
 
+@_serialized
 def collect() -> None:
     code = _run("collect", ["collect", "--run-monitors", "--summary"])
     if code != 0:
@@ -169,6 +189,7 @@ def _note_forward_failure(outcome: str) -> None:
     _write_json_atomic(path, state)
 
 
+@_serialized
 def autopublish() -> None:
     args = ["autopublish"]
     if _publish_enabled():
@@ -236,6 +257,7 @@ def _run_observed_source(source: str, label: str, cmd: list[str]) -> None:
         )
 
 
+@_serialized
 def discover() -> None:
     """Weekly source discovery. New repos land in claw-ecosystem-sources.json
     (merged into release checks by get_all_repos) and new feeds in
@@ -253,6 +275,7 @@ def discover() -> None:
     )
 
 
+@_serialized
 def yield_snapshot() -> None:
     """Weekly per-source yield file. Success is silent (no DM, no Slack).
 
