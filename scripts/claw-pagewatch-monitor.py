@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+from title_text import flatten_inline_markup
+
 WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 STATE_FILE = MEMORY_DIR / "claw-pagewatch-state.json"
@@ -68,7 +70,7 @@ HTML_WATCHES = [
         "label": "Google Antigravity",
         "html": "https://antigravity.google/changelog",
         "page": "https://antigravity.google/changelog",
-        "heading": r"<h3[^>]*>([^<]+)</h3>",
+        "heading": r"<h3[^>]*>(.*?)</h3>",
         "fingerprint": "headings",
         "lane": "ship",
     },
@@ -118,12 +120,23 @@ def watch_fetch_url(watch):
     return watch.get("md") or watch.get("html")
 
 
+def _heading_search(pattern, html):
+    """Regex plus flags. HTML headings include text inside inline tags."""
+    flags = re.MULTILINE | re.IGNORECASE
+    compiled = pattern or ""
+    if html:
+        flags |= re.DOTALL
+        compiled = compiled.replace(r"([^<]+)", r"(.*?)")
+    return compiled, flags
+
+
 def watch_fingerprint(text, watch):
     """Stable content for hashing. Heading-only for HTML SPAs."""
     if watch.get("fingerprint") == "headings":
         pattern = watch.get("heading") or ""
-        found = re.findall(pattern, text, re.MULTILINE | re.IGNORECASE)
-        cleaned = [re.sub(r"<[^>]+>", "", h).strip() for h in found]
+        compiled, flags = _heading_search(pattern, True)
+        found = re.findall(compiled, text, flags)
+        cleaned = [flatten_inline_markup(h) for h in found]
         return "\n".join(c for c in cleaned if c)
     return text
 
@@ -135,10 +148,13 @@ def fetch_text(url, timeout=30):
 
 
 def first_heading(text, pattern):
-    m = re.search(pattern, text, re.MULTILINE | re.IGNORECASE)
+    if not text or not pattern:
+        return ""
+    compiled, flags = _heading_search(pattern, "<" in pattern)
+    m = re.search(compiled, text, flags)
     if not m:
         return ""
-    return re.sub(r"<[^>]+>", "", m.group(1)).strip()
+    return flatten_inline_markup(m.group(1))
 
 
 def _is_html_watch(watch):
@@ -173,11 +189,9 @@ def newest_entry_fingerprint(text, watch):
     pattern = watch.get("heading") or ""
     if not pattern or not text:
         return None
-    flags = re.MULTILINE | re.IGNORECASE
     html = _is_html_watch(watch)
-    if html:
-        flags |= re.DOTALL
-    matches = list(re.finditer(pattern, text, flags))
+    compiled, flags = _heading_search(pattern, html)
+    matches = list(re.finditer(compiled, text, flags))
     if not matches:
         return None
     heading = first_heading(text, pattern)

@@ -34,6 +34,12 @@ from zoneinfo import ZoneInfo
 
 from ss_publish import Publisher as _SsPublisher
 
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent / "scripts")
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+from completion_diag import empty_content_message  # noqa: E402
+from title_text import flatten_inline_markup  # noqa: E402
+
 # Vendored shared publish core (ss_publish/). _publisher is constructed lazily
 # in _ensure_publisher() (creds come from cred() / env, resolved at call time,
 # not import time). send_telegram / mirror_to_slack / the scheduler's ops-alert
@@ -490,13 +496,11 @@ def display_repo_name(repo: str) -> str:
 
 
 def normalize_release_title(repo: str, title: str) -> str:
-    clean = (title or "").strip()
+    clean = flatten_inline_markup(title or "")
     repo_label = display_repo_name(repo)
 
     if not clean:
         return repo_label
-
-    low = clean.lower()
 
     # OpenClaw-style date versions
     datever = re.search(r"\b(20\d{2}\.\d{1,2}\.\d{1,2}(?:-\d+)?)\b", clean)
@@ -511,12 +515,17 @@ def normalize_release_title(repo: str, title: str) -> str:
         version = version.replace("..", ".").rstrip(".")
         return f"{repo_label} {version}"
 
-    # Fallback for titles that already mention the repo but still need cleanup
-    if repo_label.lower() in low:
-        normalized = clean
-        for alias in [repo.lower(), repo_label.lower()]:
-            normalized = re.sub(rf"\b{re.escape(alias)}\b", "", normalized, flags=re.IGNORECASE).strip(" -–:()")
-        return f"{repo_label} {normalized}".strip()
+    # A changelog sentence often uses the product name in the middle
+    # ("Dynamic workflows in Copilot CLI and the Copilot app"). Deleting
+    # every occurrence leaves "in  CLI and the  app". Match whole words so
+    # a short repo key does not hit inside an unrelated word.
+    named = False
+    for label in (repo_label, repo):
+        if label and re.search(rf"\b{re.escape(label)}\b", clean, re.IGNORECASE):
+            named = True
+            break
+    if named:
+        return clean
 
     if re.match(r"^(v?\d+[\w.\-]*(?:\s*[-–]\s*\d{4}-\d{2}-\d{2})?)$", clean):
         return f"{repo_label} {clean}"
@@ -1753,6 +1762,12 @@ def _env_int(name: str, default: int) -> int:
     return parsed
 
 
+def _positive_env_int(name: str, default: int) -> int:
+    """Positive integer env override. Blank, zero, and invalid keep ``default``."""
+    value = _env_int(name, default)
+    return value if value > 0 else default
+
+
 def ship_intake_per_source() -> int:
     return _env_int("CLAWBYTES_SHIP_INTAKE_PER_SOURCE", SHIP_INTAKE_PER_SOURCE)
 
@@ -2524,7 +2539,7 @@ def _completion_text(result: dict) -> str:
         raise ValueError("empty content")
     content = message.get("content")
     if not isinstance(content, str) or not content.strip():
-        raise ValueError("empty content")
+        raise ValueError(empty_content_message(result))
     return content.strip()
 
 
@@ -2596,12 +2611,18 @@ Items:"""
 
 
 def _writer_complete(prompt: str, model: str) -> str:
-    data = json.dumps({
+    # Reasoning models on Ollama's OpenAI-compatible endpoint count thinking
+    # tokens against max_tokens. 1200 came back as empty content.
+    payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 1200,
+        "max_tokens": _positive_env_int("CLAWBYTES_LLM_MAX_TOKENS", 6000),
         "temperature": 0.2,
-    }).encode()
+    }
+    effort = os.environ.get("CLAWBYTES_LLM_REASONING_EFFORT", "").strip()
+    if effort:
+        payload["reasoning_effort"] = effort
+    data = json.dumps(payload).encode()
     req = Request(
         f"{LLM_URL}/chat/completions",
         data=data,
@@ -2610,7 +2631,7 @@ def _writer_complete(prompt: str, model: str) -> str:
             "Authorization": f"Bearer {LLM_API_KEY}",
         },
     )
-    with urlopen(req, timeout=45) as resp:
+    with urlopen(req, timeout=_positive_env_int("CLAWBYTES_LLM_TIMEOUT", 90)) as resp:
         result = json.loads(resp.read().decode())
     return _completion_text(result)
 
@@ -2808,6 +2829,75 @@ def lane_ready(category: str, state: Optional[dict] = None, dt_local: Optional[d
     }
 
 
+# Opaque publisher ids such as release-publish/004549970362-1790888386.
+# A human title has spaces, or it is a version. This shape is neither.
+_MACHINE_ID_TITLE = re.compile(r"[A-Za-z][A-Za-z0-9._-]*/\d{6,}(?:-\d+)+")
+_TEMPLATE_VERSION = re.compile(
+    r"\bv?(\d+\.\d+\.\d+(?:[-.]?(?:alpha|beta|rc)[-.]?\d+)?)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_machine_id_title(title: str) -> bool:
+    text = (title or "").strip()
+    if not text or any(ch.isspace() for ch in text):
+        return False
+    return _MACHINE_ID_TITLE.fullmatch(text) is not None
+
+
+def _version_in_text(text: str) -> str:
+    """A date version or semver, including a leading v glued to the number."""
+    dated = re.search(r"(20\d{2}\.\d{1,2}\.\d{1,2}(?:-\d+)?)", text or "")
+    if dated:
+        return dated.group(1)
+    semver = _TEMPLATE_VERSION.search(text or "")
+    return semver.group(1) if semver else ""
+
+
+def _template_product_label(item: dict) -> str:
+    source = item.get("sourceName") or ""
+    repo = repo_name_from_feed(source)
+    if repo in REPO_PRIORITY:
+        return display_repo_name(repo)
+    url = item.get("url") or ""
+    match = re.search(r"github\.com/[^/]+/([^/#?]+)", url)
+    if match:
+        slug = match.group(1)
+        known = repo_name_from_feed(slug.replace("-", " ").replace("_", " "))
+        if known in REPO_PRIORITY:
+            return display_repo_name(known)
+        pretty = re.sub(r"[-_]+", " ", slug).strip()
+        if pretty:
+            return pretty[:1].upper() + pretty[1:]
+    if repo and repo != "misc":
+        label = display_repo_name(repo)
+        if label and not _is_machine_id_title(label):
+            return label
+    return ""
+
+
+def template_item_title(item: dict) -> Optional[str]:
+    """Headline for the deterministic renderer.
+
+    A raw machine id is replaced with the product name plus a version from
+    the url, summary, or feed. When those are missing, the line is skipped.
+    """
+    raw = item.get("title") or ""
+    shown = display_title(item)
+    if not _is_machine_id_title(raw) and not _is_machine_id_title(shown):
+        text = (shown or "").strip()
+        return text or None
+    label = _template_product_label(item)
+    version = _version_in_text(" ".join([
+        str(item.get("url") or ""),
+        str(item.get("summary") or ""),
+        str(item.get("sourceName") or ""),
+    ]))
+    if label and version:
+        return f"{label} {version}"
+    return None
+
+
 def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: bool = True) -> str:
     """Format category bundle with optional LLM enrichment."""
     meta = CATEGORY_META[category]
@@ -2829,14 +2919,16 @@ def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: 
             # "1 items" for a single-item lane; fix the singular.
             return re.sub(r"\b1 items\b", "1 item", llm_result)
     
-    # Fallback: static template format
-    lines = [f"{meta['emoji']} <b>{meta['label']}</b> — {len(bundle)} item{'s' if len(bundle) > 1 else ''}"]
-    lines.append("")
-    
+    # Fallback: static template format. Skip lines whose only title is a
+    # machine id we cannot turn into product + version.
+    emoji = "📦" if category == "ship" else "🚨" if category == "watch" else "📚" if category == "read" else "💬"
+    body: List[str] = []
     for item in bundle:
-        title = display_title(item)
+        title = template_item_title(item)
+        if not title:
+            continue
         url = item['url']
-        
+
         # Short summary: first sentence, max 80 chars
         # Truncate at a word boundary with an ellipsis — a hard [:80] slice
         # published mid-word lines ("…from VLMs to wo") when enrichment fell
@@ -2846,11 +2938,15 @@ def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: 
             summary = summary[:110].rsplit(" ", 1)[0] + "…"
         if summary:
             summary = f" — {summary}"
-        
-        # Format: emoji Title — summary [link]
-        emoji = "📦" if category == "ship" else "🚨" if category == "watch" else "📚" if category == "read" else "💬"
-        lines.append(f"{emoji} <a href=\"{url}\">{html_escape(title)}</a>{html_escape(summary)}")
-    
+
+        body.append(f"{emoji} <a href=\"{url}\">{html_escape(title)}</a>{html_escape(summary)}")
+
+    if not body:
+        return f"{meta['emoji']} <b>{meta['label']}</b> — Nothing new"
+
+    count = len(body)
+    lines = [f"{meta['emoji']} <b>{meta['label']}</b> — {count} item{'s' if count > 1 else ''}", ""]
+    lines.extend(body)
     return "\n".join(lines)
 
 

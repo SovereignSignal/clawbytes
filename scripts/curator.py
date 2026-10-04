@@ -4,7 +4,8 @@
 Reads a candidate bundle JSON from stdin, asks the configured model to review it,
 and returns the (possibly modified) bundle JSON on stdout. The OpenAI-compatible
 backend tries CLAWBYTES_CURATOR_MODEL_FALLBACK once on timeout, HTTP error, empty
-content, or unparseable JSON. If that also fails, the original bundle is returned
+content, unparseable JSON, or a post that introduces a number, version, or
+date that was not in the bundle. If that also fails, the original bundle is returned
 with a fallback marker so the publisher can keep posting.
 
 The publisher (clawbytes_threads.py with --use-curator) invokes this and uses
@@ -38,6 +39,7 @@ from claude_common import (  # noqa: E402
     load_scope,
     parse_json_from_text,
 )
+from completion_diag import empty_content_message  # noqa: E402
 
 
 # Second OpenAI-compatible model tried once after the primary fails.
@@ -65,6 +67,18 @@ def _ollama_curator_configured() -> bool:
         and os.environ.get("CLAWBYTES_CURATOR_MODEL")
         and (os.environ.get("CLAWBYTES_CURATOR_API_KEY") or os.environ.get("CLAWBYTES_LLM_API_KEY"))
     )
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    """Positive integer env override. Blank, zero, and invalid keep ``default``."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 def _curator_models() -> list[str]:
@@ -108,7 +122,7 @@ def _openai_message_content(data: dict) -> str:
         raise ValueError("empty content: message was not an object")
     content = message.get("content")
     if not isinstance(content, str) or not content.strip():
-        raise ValueError("empty content")
+        raise ValueError(empty_content_message(data))
     return content.strip()
 
 
@@ -147,14 +161,14 @@ def _curate_via_openai(system_prompt: str, user_prompt: str, timeout: int, model
 
     base = os.environ["CLAWBYTES_CURATOR_URL"].rstrip("/")
     key = os.environ.get("CLAWBYTES_CURATOR_API_KEY") or os.environ.get("CLAWBYTES_LLM_API_KEY", "")
-    max_tokens = int(os.environ.get("CLAWBYTES_CURATOR_MAX_TOKENS", "8000"))
+    max_tokens = _positive_int_env("CLAWBYTES_CURATOR_MAX_TOKENS", 16000)
 
     user = (
         user_prompt
         + "\n\nNOTE: You have no web access on this backend — curate strictly from "
         "the bundle above. Return ONLY the curated bundle JSON, no prose or markdown."
     )
-    body = json.dumps({
+    payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -162,7 +176,11 @@ def _curate_via_openai(system_prompt: str, user_prompt: str, timeout: int, model
         ],
         "max_tokens": max_tokens,
         "temperature": 0.3,
-    }).encode()
+    }
+    effort = os.environ.get("CLAWBYTES_CURATOR_REASONING_EFFORT", "").strip()
+    if effort:
+        payload["reasoning_effort"] = effort
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(
         f"{base}/chat/completions",
         data=body,
@@ -190,7 +208,7 @@ def _curate_via_openai(system_prompt: str, user_prompt: str, timeout: int, model
     except ValueError as e:
         raise CuratorBackendError("empty_reply", str(e)) from e
     if not content:
-        raise CuratorBackendError("empty_reply", "empty content")
+        raise CuratorBackendError("empty_reply", empty_content_message(data))
     usage = data.get("usage", {})
     return ClaudeResult(
         text=content,
@@ -230,8 +248,86 @@ def build_user_prompt(bundle: dict) -> str:
         "Review this ClawBytes lane bundle. Apply the editorial scope and curator "
         "responsibilities defined in your system prompt. Return only the curated "
         "bundle JSON on stdout — no prose, no markdown, no commentary.\n\n"
+        "Use only facts present in the bundle. Copy numbers, version strings, and "
+        "dates verbatim. Do not add opinion.\n\n"
         f"BUNDLE:\n{json.dumps(bundle, indent=2)}"
     )
+
+
+_CURATOR_FACT_KEYS = (
+    "title",
+    "url",
+    "source",
+    "source_name",
+    "summary",
+    "existing_blurb",
+    "published_at",
+    "blurb",
+)
+
+
+def _curator_fact_source(bundle: dict) -> str:
+    """Facts the number guard may cite. Prompt examples are not facts."""
+    items = bundle.get("items") if isinstance(bundle, dict) else None
+    if not isinstance(items, list):
+        items = []
+    parts = [str(len(items))]
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        chunks = []
+        for key in _CURATOR_FACT_KEYS:
+            value = item.get(key)
+            if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+                chunks.append(str(value))
+        score = item.get("score")
+        if isinstance(score, (int, float)) and not isinstance(score, bool):
+            chunks.append(str(score))
+        fetched = item.get("fetched")
+        if isinstance(fetched, dict):
+            for value in fetched.values():
+                if isinstance(value, str):
+                    chunks.append(value)
+        elif isinstance(fetched, str):
+            chunks.append(fetched)
+        parts.append("\n".join(chunks))
+    return "\n".join(parts)
+
+
+def _curator_post_text(curated: dict) -> str:
+    """Channel copy the curator wrote: titles, blurbs, lead, and take."""
+    if not isinstance(curated, dict):
+        return ""
+    parts = []
+    for key in ("lead_signal", "take"):
+        value = curated.get(key)
+        if isinstance(value, str):
+            parts.append(value)
+    for item in curated.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        for key in ("title", "blurb"):
+            value = item.get(key)
+            if isinstance(value, str):
+                parts.append(value)
+    return "\n".join(parts)
+
+
+def _reject_ungrounded_post(curated: dict, bundle: dict, model: str) -> None:
+    """Same facts-only number/version/date guard as the writer.
+
+    Raises CuratorBackendError so the OpenAI path can try the fallback model.
+    """
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    import clawbytes_threads as threads
+
+    missing = threads._ungrounded_numbers(_curator_post_text(curated), _curator_fact_source(bundle))
+    if not missing:
+        return
+    listed = ", ".join(sorted(missing))
+    print(f"[curator] number guard rejected model={model} missing={listed}", file=sys.stderr)
+    raise CuratorBackendError("ungrounded_number", f"number guard missing={listed}")
 
 
 def build_system_prompt() -> str:
@@ -318,9 +414,9 @@ def curate(bundle: dict, *, timeout: int = 180, dry_run: bool = False) -> dict:
         return fallback_bundle(bundle, f"missing prompt file: {e}", "missing_prompt")
 
     if _ollama_curator_configured():
-        # Timeout, HTTP error, empty content, or unparseable JSON from the
-        # primary tries the fallback model once. After both fail, the bundle
-        # still carries the posting fallback marker.
+        # Timeout, HTTP error, empty content, unparseable JSON, or an
+        # ungrounded number from the primary tries the fallback model once.
+        # After both fail, the bundle still carries the posting fallback marker.
         result = None
         curated = None
         failures: list[tuple[str, CuratorBackendError]] = []
@@ -343,6 +439,7 @@ def curate(bundle: dict, *, timeout: int = 180, dry_run: bool = False) -> dict:
                     raise CuratorBackendError(
                         "bad_json", "curator JSON was not an object", result.text
                     )
+                _reject_ungrounded_post(parsed, bundle, model)
                 curated = parsed
             except Exception as e:  # noqa: BLE001 - unknown backend failure still falls back
                 if not isinstance(e, CuratorBackendError):
@@ -391,6 +488,12 @@ def curate(bundle: dict, *, timeout: int = 180, dry_run: bool = False) -> dict:
             log_degraded(lane, "bad_json", "curator JSON was not an object")
             _log_bad_json(result.text, ValueError("curator JSON was not an object"))
             return fallback_bundle(bundle, "curator JSON was not an object", "bad_json")
+        try:
+            _reject_ungrounded_post(curated, bundle, result.model or "")
+        except CuratorBackendError as e:
+            log_degraded(lane, e.kind, str(e))
+            print(f"[curator] model={result.model} failed ({e.kind}): {e}", file=sys.stderr)
+            return fallback_bundle(bundle, f"claude error: {e}", e.kind)
 
     # Enrich curator metadata with telemetry
     meta = curated.setdefault("_curator", {})

@@ -171,3 +171,21 @@ def test_missing_heading_falls_back_to_whole_page(tmp_path, monkeypatch):
     assert items[0]["url"].startswith("https://example.com/notes#updated-")
     state = json.loads(pw.STATE_FILE.read_text())
     assert "topEntries" not in state or "plain" not in state.get("topEntries", {})
+
+
+def test_heading_keeps_words_inside_links_and_inline_markup():
+    html = (
+        '<h2>Dynamic workflows in <a href="https://docs.github.com/copilot/cli">Copilot CLI</a> '
+        "and the <em>Copilot app</em></h2>"
+    )
+    expected = "Dynamic workflows in Copilot CLI and the Copilot app"
+    assert pw.first_heading(html, r"<h2[^>]*>(.*?)</h2>") == expected
+    markdown = (
+        "### Dynamic workflows in [Copilot CLI](https://docs.github.com/copilot/cli) "
+        "and the **Copilot app**"
+    )
+    assert pw.first_heading(markdown, r"^###\s+(.+)$") == expected
+    antigravity = next(w for w in pw.HTML_WATCHES if w["key"] == "antigravity-changelog")
+    nested = '<h3>Ship <a href="https://example.com/hooks">hooks</a> in the <code>CLI</code></h3>'
+    assert pw.first_heading(nested, antigravity["heading"]) == "Ship hooks in the CLI"
+    assert "in  CLI" not in expected

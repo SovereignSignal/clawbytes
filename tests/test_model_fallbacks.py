@@ -423,6 +423,251 @@ def test_curator_timeout_budget_reserves_a_fallback_slice():
     assert curator._curator_call_timeout(290, index=1, count=2, elapsed=2) >= 200
 
 
+def test_writer_default_budget_omits_reasoning_effort(monkeypatch):
+    _enable_writer(monkeypatch)
+    monkeypatch.delenv("CLAWBYTES_LLM_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("CLAWBYTES_LLM_TIMEOUT", raising=False)
+    monkeypatch.delenv("CLAWBYTES_LLM_REASONING_EFFORT", raising=False)
+    seen = {}
+
+    def urlopen(req, timeout=0):
+        seen["timeout"] = timeout
+        seen["body"] = _req_json(req)
+        return _Resp(_completion(GROUNDED))
+
+    monkeypatch.setattr(ct, "urlopen", urlopen)
+    assert ct.llm_summarize([ITEM], "read") == GROUNDED
+    assert seen["body"]["max_tokens"] == 6000
+    assert seen["timeout"] == 90
+    assert "reasoning_effort" not in seen["body"]
+
+
+def test_writer_budget_and_reasoning_effort_follow_env(monkeypatch):
+    _enable_writer(monkeypatch)
+    monkeypatch.setenv("CLAWBYTES_LLM_MAX_TOKENS", "7000")
+    monkeypatch.setenv("CLAWBYTES_LLM_TIMEOUT", "30")
+    monkeypatch.setenv("CLAWBYTES_LLM_REASONING_EFFORT", "low")
+    seen = {}
+
+    def urlopen(req, timeout=0):
+        seen["timeout"] = timeout
+        seen["body"] = _req_json(req)
+        return _Resp(_completion(GROUNDED))
+
+    monkeypatch.setattr(ct, "urlopen", urlopen)
+    assert ct.llm_summarize([ITEM], "read") == GROUNDED
+    assert seen["body"]["max_tokens"] == 7000
+    assert seen["timeout"] == 30
+    assert seen["body"]["reasoning_effort"] == "low"
+
+
+def test_writer_blank_budget_and_effort_keep_defaults(monkeypatch):
+    _enable_writer(monkeypatch)
+    monkeypatch.setenv("CLAWBYTES_LLM_MAX_TOKENS", "0")
+    monkeypatch.setenv("CLAWBYTES_LLM_TIMEOUT", "nope")
+    monkeypatch.setenv("CLAWBYTES_LLM_REASONING_EFFORT", "  ")
+    seen = {}
+
+    def urlopen(req, timeout=0):
+        seen["timeout"] = timeout
+        seen["body"] = _req_json(req)
+        return _Resp(_completion(GROUNDED))
+
+    monkeypatch.setattr(ct, "urlopen", urlopen)
+    ct.llm_summarize([ITEM], "read")
+    assert seen["body"]["max_tokens"] == 6000
+    assert seen["timeout"] == 90
+    assert "reasoning_effort" not in seen["body"]
+
+
+def test_writer_empty_content_logs_finish_reason_and_usage(monkeypatch, capsys):
+    _enable_writer(monkeypatch)
+    payload = {
+        "choices": [{
+            "finish_reason": "length",
+            "message": {"role": "assistant", "content": "", "reasoning": "think" * 3},
+        }],
+        "usage": {
+            "completion_tokens": 1200,
+            "completion_tokens_details": {"reasoning_tokens": 1190},
+        },
+    }
+    calls, _, _ = _route_writer(monkeypatch, json.dumps(payload).encode())
+    assert ct.llm_summarize([ITEM], "ship") == GROUNDED
+    assert calls == [PRIMARY_WRITER, FALLBACK_WRITER]
+    err = capsys.readouterr().err
+    assert "len=0" in err
+    assert "finish_reason=length" in err
+    assert "completion_tokens=1200" in err
+    assert "reasoning_tokens=1190" in err
+    assert "reasoning_len=15" in err
+
+
+def test_curator_default_max_tokens_and_no_reasoning_effort(monkeypatch):
+    _enable_curator(monkeypatch)
+    monkeypatch.delenv("CLAWBYTES_CURATOR_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("CLAWBYTES_CURATOR_REASONING_EFFORT", raising=False)
+    seen = {}
+
+    def urlopen(req, timeout=0):
+        seen["body"] = _req_json(req)
+        return _Resp(_completion(_curated_json("from-primary")))
+
+    _patch_urllib(monkeypatch, urlopen)
+    out = curator.curate({"lane": "read", "items": [{"id": "1", "title": "Aider 0.86.0"}]})
+    assert out["items"][0]["title"] == "from-primary"
+    assert seen["body"]["max_tokens"] == 16000
+    assert "reasoning_effort" not in seen["body"]
+
+
+def test_curator_max_tokens_and_reasoning_effort_follow_env(monkeypatch):
+    _enable_curator(monkeypatch)
+    monkeypatch.setenv("CLAWBYTES_CURATOR_MAX_TOKENS", "9000")
+    monkeypatch.setenv("CLAWBYTES_CURATOR_REASONING_EFFORT", "none")
+    seen = {}
+
+    def urlopen(req, timeout=0):
+        seen["body"] = _req_json(req)
+        return _Resp(_completion(_curated_json("from-primary")))
+
+    _patch_urllib(monkeypatch, urlopen)
+    curator.curate({"lane": "read", "items": [{"id": "1", "title": "Aider 0.86.0"}]})
+    assert seen["body"]["max_tokens"] == 9000
+    assert seen["body"]["reasoning_effort"] == "none"
+
+
+def test_curator_blank_reasoning_effort_is_omitted(monkeypatch):
+    _enable_curator(monkeypatch)
+    monkeypatch.setenv("CLAWBYTES_CURATOR_REASONING_EFFORT", "")
+    seen = {}
+
+    def urlopen(req, timeout=0):
+        seen["body"] = _req_json(req)
+        return _Resp(_completion(_curated_json("from-primary")))
+
+    _patch_urllib(monkeypatch, urlopen)
+    curator.curate({"lane": "read", "items": [{"id": "1"}]})
+    assert "reasoning_effort" not in seen["body"]
+
+
+def test_curator_empty_content_logs_finish_reason_and_usage(monkeypatch, capsys):
+    _enable_curator(monkeypatch)
+    payload = {
+        "choices": [{
+            "finish_reason": "length",
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "x" * 8,
+            },
+        }],
+        "usage": {"completion_tokens": 8000, "reasoning_tokens": 8000},
+    }
+    calls = _route_curator(monkeypatch, json.dumps(payload).encode())
+    out = curator.curate({"lane": "ship", "items": [{"id": "1", "title": "kept"}]})
+    assert calls == [PRIMARY_CURATOR, FALLBACK_CURATOR]
+    assert out["items"][0]["title"] == "from-fallback"
+    err = capsys.readouterr().err
+    assert "len=0" in err
+    assert "finish_reason=length" in err
+    assert "completion_tokens=8000" in err
+    assert "reasoning_tokens=8000" in err
+    assert "reasoning_len=8" in err
+
+
+def test_curator_prompt_is_facts_only_and_forbids_opinion():
+    prompt = (curator.CURATOR_PROMPT_FILE).read_text()
+    user = curator.build_user_prompt({"lane": "community", "items": []})
+    assert "Use only facts present" in prompt
+    assert "verbatim" in prompt
+    assert "skews hard skeptical" in prompt
+    assert "opinionated" not in prompt.lower()
+    assert "facts" in user.lower()
+    assert "opinion" in user.lower()
+
+
+def test_curator_ungrounded_number_retries_fallback(monkeypatch, capsys):
+    _enable_curator(monkeypatch)
+    invented = json.dumps({
+        "lane": "read",
+        "take": "the thread skews hard skeptical about 9.9.9",
+        "items": [{"id": "1", "title": "Aider 0.86.0", "blurb": "capped at 150"}],
+    })
+    grounded = json.dumps({
+        "lane": "read",
+        "take": "",
+        "items": [{"id": "1", "title": "Aider 0.86.0", "blurb": "adds diff mode on 2026-04-01"}],
+    })
+    calls = []
+
+    def urlopen(req, timeout=0):
+        body = _req_json(req)
+        calls.append(body["model"])
+        if body["model"] == PRIMARY_CURATOR:
+            return _Resp(_completion(invented))
+        return _Resp(_completion(grounded))
+
+    _patch_urllib(monkeypatch, urlopen)
+    bundle = {
+        "lane": "read",
+        "items": [{
+            "id": "1",
+            "title": "Aider 0.86.0",
+            "existing_blurb": "adds diff mode on 2026-04-01",
+        }],
+    }
+    out = curator.curate(bundle)
+    assert calls == [PRIMARY_CURATOR, FALLBACK_CURATOR]
+    assert out["items"][0]["blurb"] == "adds diff mode on 2026-04-01"
+    assert out["_curator"]["fallback"] is False
+    err = capsys.readouterr().err
+    assert "number guard rejected" in err
+    assert "150" in err
+    assert "9.9.9" in err
+
+
+def test_curator_ungrounded_numbers_on_both_models_use_posting_fallback(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAWBYTES_MEMORY_DIR", str(tmp_path))
+    _enable_curator(monkeypatch)
+    invented = json.dumps({
+        "lane": "read",
+        "items": [{"id": "1", "title": "Aider 9.9.9", "blurb": "ships 9.9.9"}],
+    })
+
+    def urlopen(req, timeout=0):
+        return _Resp(_completion(invented))
+
+    _patch_urllib(monkeypatch, urlopen)
+    bundle = {"lane": "read", "items": [{"id": "1", "title": "Aider 0.86.0"}]}
+    out = curator.curate(bundle)
+    assert out["_curator"]["fallback"] is True
+    assert out["_curator"]["approved"] is True
+    assert out["items"][0]["title"] == "Aider 0.86.0"
+    assert "9.9.9" not in json.dumps(out["items"])
+
+
+def test_curator_grounded_post_does_not_call_fallback(monkeypatch):
+    _enable_curator(monkeypatch)
+    grounded = json.dumps({
+        "lane": "read",
+        "lead_signal": "",
+        "take": "adds diff mode on 2026-04-01",
+        "items": [{"id": "1", "title": "Aider 0.86.0", "blurb": "adds diff mode on 2026-04-01"}],
+    })
+    calls = _route_curator(monkeypatch, _completion(grounded))
+    bundle = {
+        "lane": "read",
+        "items": [{
+            "id": "1",
+            "title": "Aider 0.86.0",
+            "existing_blurb": "adds diff mode on 2026-04-01",
+        }],
+    }
+    out = curator.curate(bundle)
+    assert calls == [PRIMARY_CURATOR]
+    assert out["items"][0]["blurb"] == "adds diff mode on 2026-04-01"
+
+
 def test_curator_requested_timeouts_fit_the_process_budget(monkeypatch):
     _enable_curator(monkeypatch)
     seen = []
