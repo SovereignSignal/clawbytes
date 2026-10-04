@@ -62,9 +62,16 @@ There are **no routine status reports**. Ops DMs are exception-only: the admin h
 | `CLAWBYTES_SLACK_CHANNEL_ID` + `SLACK_BOT_TOKEN` | Slack mirror target (audience copy of channel posts) | for mirror |
 | `CLAWBYTES_OPS_SLACK_CHANNEL_ID` + `SLACK_BOT_TOKEN` | Slack ops fallback for admin alerts when the Telegram DM can't be delivered (e.g. a Telegram outage) | for alert resilience |
 | `CLAWBYTES_LLM_URL` / `CLAWBYTES_LLM_API_KEY` / `CLAWBYTES_LLM_MODEL` | Per-item enrichment LLM (OpenAI-compatible) | for enriched summaries |
+| `CLAWBYTES_LLM_MODEL_FALLBACK` | Writer model tried once after the primary times out, errors, returns empty content, or emits a number that was not in the item. Default `glm-5.3-flash`. Set to empty to skip the extra call. | optional |
+| `CLAWBYTES_LLM_MAX_TOKENS` | Writer completion cap. Reasoning models count thinking tokens against this. Default `6000`. | optional |
+| `CLAWBYTES_LLM_TIMEOUT` | Writer HTTP timeout in seconds. Default `90`. | optional |
+| `CLAWBYTES_LLM_REASONING_EFFORT` | Optional `reasoning_effort` on the writer request. Unset omits the field. | optional |
 | `OPENAI_API_KEY` | Fallback for `CLAWBYTES_LLM_API_KEY` if that's unset | optional |
 | `CLAWBYTES_USE_CURATOR` | `1` to run the per-lane curator editorial pass in autopublish | optional |
 | `CLAWBYTES_CURATOR_URL` / `CLAWBYTES_CURATOR_MODEL` / `CLAWBYTES_CURATOR_API_KEY` | Curator backend (OpenAI-compatible; key falls back to `CLAWBYTES_LLM_API_KEY`). If unset, the curator uses the Claude CLI. | optional |
+| `CLAWBYTES_CURATOR_MODEL_FALLBACK` | Curator model tried once after the primary times out, returns an HTTP error, returns empty content, returns unparseable JSON, or writes a number that was not in the bundle. Default `deepseek-v4.1-flash`. Set to empty to skip the extra call. | optional |
+| `CLAWBYTES_CURATOR_MAX_TOKENS` | Curator completion cap. Default `16000`. | optional |
+| `CLAWBYTES_CURATOR_REASONING_EFFORT` | Optional `reasoning_effort` on the curator request. Unset omits the field. | optional |
 | `CLAWBYTES_CURATOR_LANES` | Comma-separated lanes to curate (default all four) | optional |
 | `GITHUB_TOKEN` | Lifts GitHub API rate limits (release-note grounding, leaderboard/registry sha checks, discovery) | recommended |
 | `CLAWBYTES_NORMALIZE_SCORES` | `1` to rank a lane by within-source percentile (top-of-each-source is comparable) instead of raw score. Code default is off; recommended on in production. | optional |

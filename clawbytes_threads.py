@@ -34,6 +34,12 @@ from zoneinfo import ZoneInfo
 
 from ss_publish import Publisher as _SsPublisher
 
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent / "scripts")
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+from completion_diag import empty_content_message  # noqa: E402
+from title_text import flatten_inline_markup  # noqa: E402
+
 # Vendored shared publish core (ss_publish/). _publisher is constructed lazily
 # in _ensure_publisher() (creds come from cred() / env, resolved at call time,
 # not import time). send_telegram / mirror_to_slack / the scheduler's ops-alert
@@ -490,13 +496,11 @@ def display_repo_name(repo: str) -> str:
 
 
 def normalize_release_title(repo: str, title: str) -> str:
-    clean = (title or "").strip()
+    clean = flatten_inline_markup(title or "")
     repo_label = display_repo_name(repo)
 
     if not clean:
         return repo_label
-
-    low = clean.lower()
 
     # OpenClaw-style date versions
     datever = re.search(r"\b(20\d{2}\.\d{1,2}\.\d{1,2}(?:-\d+)?)\b", clean)
@@ -511,12 +515,17 @@ def normalize_release_title(repo: str, title: str) -> str:
         version = version.replace("..", ".").rstrip(".")
         return f"{repo_label} {version}"
 
-    # Fallback for titles that already mention the repo but still need cleanup
-    if repo_label.lower() in low:
-        normalized = clean
-        for alias in [repo.lower(), repo_label.lower()]:
-            normalized = re.sub(rf"\b{re.escape(alias)}\b", "", normalized, flags=re.IGNORECASE).strip(" -–:()")
-        return f"{repo_label} {normalized}".strip()
+    # A changelog sentence often uses the product name in the middle
+    # ("Dynamic workflows in Copilot CLI and the Copilot app"). Deleting
+    # every occurrence leaves "in  CLI and the  app". Match whole words so
+    # a short repo key does not hit inside an unrelated word.
+    named = False
+    for label in (repo_label, repo):
+        if label and re.search(rf"\b{re.escape(label)}\b", clean, re.IGNORECASE):
+            named = True
+            break
+    if named:
+        return clean
 
     if re.match(r"^(v?\d+[\w.\-]*(?:\s*[-–]\s*\d{4}-\d{2}-\d{2})?)$", clean):
         return f"{repo_label} {clean}"
@@ -1753,6 +1762,12 @@ def _env_int(name: str, default: int) -> int:
     return parsed
 
 
+def _positive_env_int(name: str, default: int) -> int:
+    """Positive integer env override. Blank, zero, and invalid keep ``default``."""
+    value = _env_int(name, default)
+    return value if value > 0 else default
+
+
 def ship_intake_per_source() -> int:
     return _env_int("CLAWBYTES_SHIP_INTAKE_PER_SOURCE", SHIP_INTAKE_PER_SOURCE)
 
@@ -2484,38 +2499,84 @@ def strip_banned_verbs(text: str) -> str:
     return result
 
 
-def llm_summarize(items: List[dict], category: str) -> Optional[str]:
-    """Use LLM to generate 'why it matters' summaries for a bundle of items."""
-    if not LLM_API_KEY:
-        return None
-    if not items:
-        return None
+# Second writer model, tried once after the primary fails or the number guard
+# rejects its draft. Unset uses this default. An empty value skips the extra call.
+DEFAULT_LLM_FALLBACK_MODEL = "glm-5.3-flash"
+# Comma groups and hyphen/slash/dot runs are one token so a reordered date
+# or a split thousands-group is not treated as grounded.
+_NUMBER_TOKEN = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[./\-]\d+)+|\d+")
 
-    # Build the prompt
+
+def _ungrounded_numbers(output: str, source: str) -> set[str]:
+    """Number and version tokens in output that are absent from source."""
+    return set(_NUMBER_TOKEN.findall(output or "")) - set(_NUMBER_TOKEN.findall(source or ""))
+
+
+def numbers_grounded(output: str, source: str) -> bool:
+    """True when every number or version token in output also appears in source."""
+    return not _ungrounded_numbers(output, source)
+
+
+def _writer_models() -> List[str]:
+    primary = LLM_MODEL
+    fallback = os.environ.get("CLAWBYTES_LLM_MODEL_FALLBACK", DEFAULT_LLM_FALLBACK_MODEL).strip()
+    if fallback and fallback != primary:
+        return [primary, fallback]
+    return [primary]
+
+
+def _completion_text(result: dict) -> str:
+    """Assistant `content` only. Empty content is a failure.
+
+    Reasoning models may fill `reasoning` or `reasoning_content` while leaving
+    `content` empty. That is not a post.
+    """
+    try:
+        message = result["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise ValueError(f"empty content: malformed completion ({e})") from e
+    if not isinstance(message, dict):
+        raise ValueError("empty content")
+    content = message.get("content")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError(empty_content_message(result))
+    return content.strip()
+
+
+def _writer_inputs(items: List[dict], category: str) -> Tuple[str, str]:
+    """Return the writer prompt and the fact text the number guard may cite.
+
+    The fact text is the item count plus the fields the model is shown. Prompt
+    instructions and item indexes are not facts, so a number that appears only
+    there does not license the post.
+    """
     meta = CATEGORY_META[category]
     item_emoji = {"ship": "📦", "watch": "🚨", "read": "📚", "community": "💬"}.get(category, meta["emoji"])
-    prompt = f"""You write @clawbytes on Telegram — covering the AI agent ecosystem. Short, sharp, opinionated. No corporate filler.
+    prompt = f"""You write @clawbytes on Telegram — covering the AI agent ecosystem. Short, sharp, factual. No corporate filler.
 
 Write a {meta['label']} lane post with {len(items)} items.
 
 FORMAT (strict HTML):
 {meta['emoji']} <b>{meta['label']}</b> — N items
 
-{item_emoji} <a href="URL">ACTUAL TITLE</a> — 1 punchy sentence on why this matters
+{item_emoji} <a href="URL">ACTUAL TITLE</a> — one factual sentence drawn from the item
 
 Rules:
 - Use <b> for bold, <a href="URL">title text</a> for links — use the ACTUAL model/project name as link text, never "Link" or "thread"
-- Ship: what changed, why operators care. Use the release notes if provided — don't invent features.
-- Watch: the risk, what to check, what breaks
-- Read: describe WHAT the piece IS (paper, framework, deep-dive, critique) and its core claim — but only if the source data states it. Never invent numbers, percentages, or specific findings. "A paper proposing formal metrics for agent reliability" beats "Defines 3 key metrics for agent failure rates" if you don't actually know there are 3.
-- Community: the sentiment, the discovery, the real user signal. If multiple threads cover the same topic, MERGE them into one bullet (e.g. "3 threads on cost and access (58↑ total)") instead of listing each separately. NEVER repeat the raw summary text — write fresh, specific descriptions.
+- Use only facts present in the item lines below. Do not add claims, context, or background from anywhere else.
+- Copy numbers, version strings, and dates verbatim. Do not round, shorten, reformat, or invent them.
+- Keep the source's own verbs. Do not write "launches" or "opens" unless the source text says so.
+- No hype or opinion words: massive, game-changing, groundbreaking, revolutionary, unprecedented, one of the largest.
+- Ship: what changed, using the release notes if provided. Do not invent features.
+- Watch: the risk, what to check, what breaks — only when the item text says so.
+- Read: describe what the piece is and its core claim only when the source data states it.
+- Community: the sentiment and the user signal that are in the item. If multiple threads cover the same topic, merge them into one bullet using counts that appear in the item lines.
 - MAX 150 chars per item summary. No filler. No "notable" or "worth watching." No "offering insights" or "highlights." No soft verbs: "breaks down", "unpacks", "dives into", "rages on", "sparks debate" are all banned.
-- Do NOT parrot the raw summary text provided in the item data. Write original descriptions based on the actual title and topic.
-- If release notes are missing or say nothing: just state what the project IS and what version dropped. 1 sentence max. Never speculate with "might," "could," or "should." Example: "IronClaw 0.1.0 — First skills release from the NEAR AI safety team." 
+- Reuse the source's wording when it states the fact. Do not add a claim that is not in the item line.
+- If release notes are missing or say nothing: state what the project is and the version string copied from the title. One sentence max. Never speculate with "might," "could," or "should."
 - Start EVERY item with {item_emoji} (this lane\u2019s emoji) and use the SAME emoji for every item. Never use another lane\u2019s emoji or a topical/decorative emoji.
-- For HN items: reference the community signal (e.g. "171 points on HN") when it adds weight
-- NEVER fabricate statistics, metrics, or specific findings. If unsure, describe the piece's ambition, not its results.
-- Copy version numbers character-for-character from the item title or release notes. Never shorten, round, or invent a version.
+- For HN items: include the point and comment counts from the item line when they are present.
+- NEVER fabricate statistics, metrics, or specific findings.
 
 Items:"""
 
@@ -2526,55 +2587,91 @@ Items:"""
     with ThreadPoolExecutor(max_workers=4) as pool:
         groundings = list(pool.map(lambda it: grounding_for_item(category, it), items))
 
+    fact_parts = [str(len(items))]
     for i, item in enumerate(items):
         title = display_title(item)
-        url = item.get("url", "")
-        raw_summary = item.get("summary", "")
-        source = item.get("sourceType", "")
+        url = item.get("url", "") or ""
+        raw_summary = item.get("summary", "") or ""
+        source = item.get("sourceType", "") or ""
         # Add HN engagement data to help LLM contextualize
         if source == "hackernews":
             pts = item.get("rawScore", 0)
             comments = item.get("rawComments", 0)
             raw_summary = f"{pts}pts / {comments} comments on HN"
-        item_line = f"\n{i+1}. {title} | {url} | {raw_summary} | source: {source}"
+        body = f"{title} | {url} | {raw_summary} | source: {source}"
         if groundings[i]:
-            item_line += f" | {groundings[i]}"
-        prompt += item_line
+            body += f" | {groundings[i]}"
+        # The item index stays out of fact_parts. Separators add no digits, so
+        # the guard sees the same number tokens as the fields themselves.
+        fact_parts.append(body)
+        prompt += f"\n{i+1}. {body}"
 
     prompt += "\n\nWrite the post now:"
+    return prompt, "\n".join(fact_parts)
 
-    data = json.dumps({
-        "model": LLM_MODEL,
+
+def _writer_complete(prompt: str, model: str) -> str:
+    # Reasoning models on Ollama's OpenAI-compatible endpoint count thinking
+    # tokens against max_tokens. 1200 came back as empty content.
+    payload = {
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 1200,
-        "temperature": 0.4,
-    }).encode()
+        "max_tokens": _positive_env_int("CLAWBYTES_LLM_MAX_TOKENS", 6000),
+        "temperature": 0.2,
+    }
+    effort = os.environ.get("CLAWBYTES_LLM_REASONING_EFFORT", "").strip()
+    if effort:
+        payload["reasoning_effort"] = effort
+    data = json.dumps(payload).encode()
+    req = Request(
+        f"{LLM_URL}/chat/completions",
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {LLM_API_KEY}",
+        },
+    )
+    with urlopen(req, timeout=_positive_env_int("CLAWBYTES_LLM_TIMEOUT", 90)) as resp:
+        result = json.loads(resp.read().decode())
+    return _completion_text(result)
 
-    # One retry: enrichment failures degrade the channel to the bare fallback
-    # renderer, so a transient proxy hiccup is worth a second attempt — and a
-    # logged reason, since a silent None made this failure mode invisible.
-    for attempt in range(2):
+
+def llm_summarize(items: List[dict], category: str) -> Optional[str]:
+    """Use LLM to generate lane copy from the item facts only.
+
+    The primary model is tried once. Timeout, HTTP error, empty content, a
+    rejected draft, or a number that was not in the item text tries
+    CLAWBYTES_LLM_MODEL_FALLBACK once. If that also fails, return None so the
+    caller renders the deterministic template.
+    """
+    if not LLM_API_KEY:
+        return None
+    if not items:
+        return None
+
+    prompt, fact_source = _writer_inputs(items, category)
+    for model in _writer_models():
         try:
-            req = Request(
-                f"{LLM_URL}/chat/completions",
-                data=data,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {LLM_API_KEY}",
-                },
-            )
-            with urlopen(req, timeout=45) as resp:
-                result = json.loads(resp.read().decode())
-            content = result["choices"][0]["message"]["content"].strip()
-            # Strip banned soft verbs
-            content = strip_banned_verbs(content)
-            # Basic sanity check
-            if len(content) < 50 or "I cannot" in content:
-                print(f"llm_summarize({category}): rejected output (len={len(content)})", file=sys.stderr)
-                return None
-            return content
+            content = _writer_complete(prompt, model)
         except Exception as e:
-            print(f"llm_summarize({category}) attempt {attempt + 1} failed: {e}", file=sys.stderr)
+            print(f"llm_summarize({category}) model={model} failed: {e}", file=sys.stderr)
+            continue
+        content = strip_banned_verbs(content)
+        if len(content) < 50 or "I cannot" in content:
+            print(
+                f"llm_summarize({category}): rejected output from model={model} (len={len(content)})",
+                file=sys.stderr,
+            )
+            continue
+        missing = _ungrounded_numbers(content, fact_source)
+        if missing:
+            print(
+                f"llm_summarize({category}): number guard rejected model={model} missing={', '.join(sorted(missing))}",
+                file=sys.stderr,
+            )
+            continue
+        print(f"llm_summarize({category}): answered by model={model}", file=sys.stderr)
+        return content
     return None
 
 
@@ -2732,6 +2829,75 @@ def lane_ready(category: str, state: Optional[dict] = None, dt_local: Optional[d
     }
 
 
+# Opaque publisher ids such as release-publish/004549970362-1790888386.
+# A human title has spaces, or it is a version. This shape is neither.
+_MACHINE_ID_TITLE = re.compile(r"[A-Za-z][A-Za-z0-9._-]*/\d{6,}(?:-\d+)+")
+_TEMPLATE_VERSION = re.compile(
+    r"\bv?(\d+\.\d+\.\d+(?:[-.]?(?:alpha|beta|rc)[-.]?\d+)?)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_machine_id_title(title: str) -> bool:
+    text = (title or "").strip()
+    if not text or any(ch.isspace() for ch in text):
+        return False
+    return _MACHINE_ID_TITLE.fullmatch(text) is not None
+
+
+def _version_in_text(text: str) -> str:
+    """A date version or semver, including a leading v glued to the number."""
+    dated = re.search(r"(20\d{2}\.\d{1,2}\.\d{1,2}(?:-\d+)?)", text or "")
+    if dated:
+        return dated.group(1)
+    semver = _TEMPLATE_VERSION.search(text or "")
+    return semver.group(1) if semver else ""
+
+
+def _template_product_label(item: dict) -> str:
+    source = item.get("sourceName") or ""
+    repo = repo_name_from_feed(source)
+    if repo in REPO_PRIORITY:
+        return display_repo_name(repo)
+    url = item.get("url") or ""
+    match = re.search(r"github\.com/[^/]+/([^/#?]+)", url)
+    if match:
+        slug = match.group(1)
+        known = repo_name_from_feed(slug.replace("-", " ").replace("_", " "))
+        if known in REPO_PRIORITY:
+            return display_repo_name(known)
+        pretty = re.sub(r"[-_]+", " ", slug).strip()
+        if pretty:
+            return pretty[:1].upper() + pretty[1:]
+    if repo and repo != "misc":
+        label = display_repo_name(repo)
+        if label and not _is_machine_id_title(label):
+            return label
+    return ""
+
+
+def template_item_title(item: dict) -> Optional[str]:
+    """Headline for the deterministic renderer.
+
+    A raw machine id is replaced with the product name plus a version from
+    the url, summary, or feed. When those are missing, the line is skipped.
+    """
+    raw = item.get("title") or ""
+    shown = display_title(item)
+    if not _is_machine_id_title(raw) and not _is_machine_id_title(shown):
+        text = (shown or "").strip()
+        return text or None
+    label = _template_product_label(item)
+    version = _version_in_text(" ".join([
+        str(item.get("url") or ""),
+        str(item.get("summary") or ""),
+        str(item.get("sourceName") or ""),
+    ]))
+    if label and version:
+        return f"{label} {version}"
+    return None
+
+
 def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: bool = True) -> str:
     """Format category bundle with optional LLM enrichment."""
     meta = CATEGORY_META[category]
@@ -2753,14 +2919,16 @@ def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: 
             # "1 items" for a single-item lane; fix the singular.
             return re.sub(r"\b1 items\b", "1 item", llm_result)
     
-    # Fallback: static template format
-    lines = [f"{meta['emoji']} <b>{meta['label']}</b> — {len(bundle)} item{'s' if len(bundle) > 1 else ''}"]
-    lines.append("")
-    
+    # Fallback: static template format. Skip lines whose only title is a
+    # machine id we cannot turn into product + version.
+    emoji = "📦" if category == "ship" else "🚨" if category == "watch" else "📚" if category == "read" else "💬"
+    body: List[str] = []
     for item in bundle:
-        title = display_title(item)
+        title = template_item_title(item)
+        if not title:
+            continue
         url = item['url']
-        
+
         # Short summary: first sentence, max 80 chars
         # Truncate at a word boundary with an ellipsis — a hard [:80] slice
         # published mid-word lines ("…from VLMs to wo") when enrichment fell
@@ -2770,11 +2938,15 @@ def format_category_bundle(category: str, limit: Optional[int] = None, use_llm: 
             summary = summary[:110].rsplit(" ", 1)[0] + "…"
         if summary:
             summary = f" — {summary}"
-        
-        # Format: emoji Title — summary [link]
-        emoji = "📦" if category == "ship" else "🚨" if category == "watch" else "📚" if category == "read" else "💬"
-        lines.append(f"{emoji} <a href=\"{url}\">{html_escape(title)}</a>{html_escape(summary)}")
-    
+
+        body.append(f"{emoji} <a href=\"{url}\">{html_escape(title)}</a>{html_escape(summary)}")
+
+    if not body:
+        return f"{meta['emoji']} <b>{meta['label']}</b> — Nothing new"
+
+    count = len(body)
+    lines = [f"{meta['emoji']} <b>{meta['label']}</b> — {count} item{'s' if count > 1 else ''}", ""]
+    lines.extend(body)
     return "\n".join(lines)
 
 
