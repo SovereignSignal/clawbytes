@@ -1361,6 +1361,23 @@ def _source_health_alert(text: str) -> bool:
         return False
 
 
+_WATCHLIST_FETCH_LOGS = (
+    "INFO deepseek-harness:",
+    "INFO claude.dev:",
+    "INFO anthropic-research:",
+)
+
+
+def _reprint_watchlist_fetch_logs(stdout: str) -> None:
+    """Monitor stdout is captured. These lines are the fetch confirmation."""
+    if not isinstance(stdout, str):
+        return
+    for raw in stdout.splitlines():
+        text = raw.strip()
+        if text.startswith(_WATCHLIST_FETCH_LOGS):
+            print(text, flush=True)
+
+
 def run_monitors() -> None:
     """Run source monitors to refresh state files before collecting.
 
@@ -1373,6 +1390,8 @@ def run_monitors() -> None:
 
     stdout/stderr are captured (not discarded). Each source then emits one
     ``source_health`` line and updates the on-disk health record.
+    Watchlist fetch lines are reprinted from that capture so a collect log
+    shows whether deepseek-harness, claude.dev, and anthropic-research returned.
     """
     source_health = _import_source_health()
     monitors = [
@@ -1414,6 +1433,7 @@ def run_monitors() -> None:
             stderr = getattr(exc, "stderr", "") or ""
         except Exception as exc:  # noqa: BLE001 - one bad monitor must not starve the rest
             crashed = repr(exc)
+        _reprint_watchlist_fetch_logs(stdout)
         status, items, error = source_health.outcome_from_process(
             returncode=returncode,
             stdout=stdout,
