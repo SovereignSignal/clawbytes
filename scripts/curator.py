@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """ClawBytes curator — per-publish editorial review.
 
-Reads a candidate bundle JSON from stdin, asks Claude Code to review it, returns
-the (possibly modified) bundle JSON on stdout. Falls back to passing the bundle
-through unchanged on any error so the publisher can keep posting.
+Reads a candidate bundle JSON from stdin, asks the configured model to review it,
+and returns the (possibly modified) bundle JSON on stdout. The OpenAI-compatible
+backend tries CLAWBYTES_CURATOR_MODEL_FALLBACK once on timeout, HTTP error, empty
+content, or unparseable JSON. If that also fails, the original bundle is returned
+with a fallback marker so the publisher can keep posting.
 
 The publisher (clawbytes_threads.py with --use-curator) invokes this and uses
 the returned bundle. See docs/curator-prompt.md for the system prompt; see
@@ -20,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -37,6 +40,20 @@ from claude_common import (  # noqa: E402
 )
 
 
+# Second OpenAI-compatible model tried once after the primary fails.
+# Unset uses this default. An empty value skips the extra call.
+DEFAULT_CURATOR_FALLBACK_MODEL = "deepseek-v4.1-flash"
+
+
+class CuratorBackendError(Exception):
+    """A retryable OpenAI-compatible curator failure."""
+
+    def __init__(self, kind: str, message: str, text: str = ""):
+        super().__init__(message)
+        self.kind = kind
+        self.text = text
+
+
 def _ollama_curator_configured() -> bool:
     """True when an OpenAI-compatible curator backend is configured.
 
@@ -50,18 +67,85 @@ def _ollama_curator_configured() -> bool:
     )
 
 
-def _curate_via_openai(system_prompt: str, user_prompt: str, timeout: int) -> ClaudeResult:
+def _curator_models() -> list[str]:
+    """Primary model, then one fallback when it names a different model."""
+    primary = os.environ["CLAWBYTES_CURATOR_MODEL"]
+    fallback = os.environ.get(
+        "CLAWBYTES_CURATOR_MODEL_FALLBACK", DEFAULT_CURATOR_FALLBACK_MODEL
+    ).strip()
+    if fallback and fallback != primary:
+        return [primary, fallback]
+    return [primary]
+
+
+def _curator_call_timeout(total: int, index: int, count: int, elapsed: float) -> int:
+    """Seconds for this attempt inside curate()'s timeout.
+
+    The parent process is killed about 10s after that timeout, so a primary
+    hang must not be given the whole budget. Later attempts keep a slice, and
+    the last attempt receives whatever time is still left after a fast failure.
+    """
+    reserve = 15
+    remaining = int(max(0, total - reserve - elapsed))
+    later = count - index - 1
+    if later <= 0:
+        return remaining
+    hold = max(30, remaining // (later + 1))
+    return max(0, remaining - hold * later)
+
+
+def _openai_message_content(data: dict) -> str:
+    """Assistant `content` only. Empty content is a failure.
+
+    Reasoning models (GLM and others) may fill `reasoning` or
+    `reasoning_content` and leave `content` empty. That is not a reply.
+    """
+    try:
+        message = data["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise ValueError(f"empty content: malformed completion ({e})") from e
+    if not isinstance(message, dict):
+        raise ValueError("empty content: message was not an object")
+    content = message.get("content")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("empty content")
+    return content.strip()
+
+
+def _strip_json_fence(content: str) -> str:
+    if content.startswith("```"):
+        content = content.split("\n", 1)[-1]
+        if content.rstrip().endswith("```"):
+            content = content.rstrip()[:-3]
+    return content.strip()
+
+
+def _log_bad_json(text: str, error: BaseException) -> None:
+    print(f"[curator] BAD JSON parse error: {error}", file=sys.stderr)
+    print(f"[curator] text length: {len(text)}", file=sys.stderr)
+    print(f"[curator] text[:400]: {text[:400]!r}", file=sys.stderr)
+    match = re.search(r"char (\d+)", str(error))
+    if match:
+        pos = int(match.group(1))
+        lo = max(0, pos - 200)
+        hi = min(len(text), pos + 200)
+        print(f"[curator] text[{lo}:{hi}] (error at char {pos}): {text[lo:hi]!r}", file=sys.stderr)
+    print(f"[curator] text[-400:]: {text[-400:]!r}", file=sys.stderr)
+
+
+def _curate_via_openai(system_prompt: str, user_prompt: str, timeout: int, model: str) -> ClaudeResult:
     """Run the curator pass against an OpenAI-compatible chat endpoint.
 
     Returns a ClaudeResult so the rest of curate() is backend-agnostic. This
     backend has NO web tools (unlike the Claude path), so the prompt tells the
     model to curate strictly from the provided bundle. Reasoning models put
-    chain-of-thought in a separate field; we read only `content`.
+    chain-of-thought in a separate field; we read only `content`. Empty
+    content raises CuratorBackendError so the caller can try the fallback model.
     """
+    import urllib.error
     import urllib.request
 
     base = os.environ["CLAWBYTES_CURATOR_URL"].rstrip("/")
-    model = os.environ["CLAWBYTES_CURATOR_MODEL"]
     key = os.environ.get("CLAWBYTES_CURATOR_API_KEY") or os.environ.get("CLAWBYTES_LLM_API_KEY", "")
     max_tokens = int(os.environ.get("CLAWBYTES_CURATOR_MAX_TOKENS", "8000"))
 
@@ -85,15 +169,28 @@ def _curate_via_openai(system_prompt: str, user_prompt: str, timeout: int) -> Cl
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
     start = time.time()
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+    except TimeoutError as e:
+        raise CuratorBackendError("timeout", str(e) or "timeout") from e
+    except urllib.error.HTTPError as e:
+        raise CuratorBackendError("http_error", f"HTTP {e.code}: {e.reason}") from e
+    except urllib.error.URLError as e:
+        reason = getattr(e, "reason", None)
+        kind = "timeout" if isinstance(reason, TimeoutError) else "http_error"
+        raise CuratorBackendError(kind, str(e)) from e
     duration_ms = int((time.time() - start) * 1000)
-    content = (data["choices"][0]["message"].get("content") or "").strip()
-    # Strip a leading/trailing markdown code fence if the model added one.
-    if content.startswith("```"):
-        content = content.split("\n", 1)[-1]
-        if content.rstrip().endswith("```"):
-            content = content.rstrip()[:-3]
+    try:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError as e:
+        raise CuratorBackendError("bad_json", f"completion was not JSON: {e}") from e
+    try:
+        content = _strip_json_fence(_openai_message_content(data))
+    except ValueError as e:
+        raise CuratorBackendError("empty_reply", str(e)) from e
+    if not content:
+        raise CuratorBackendError("empty_reply", "empty content")
     usage = data.get("usage", {})
     return ClaudeResult(
         text=content,
@@ -221,12 +318,48 @@ def curate(bundle: dict, *, timeout: int = 180, dry_run: bool = False) -> dict:
         return fallback_bundle(bundle, f"missing prompt file: {e}", "missing_prompt")
 
     if _ollama_curator_configured():
-        try:
-            result = _curate_via_openai(system_prompt, user_prompt, timeout)
-        except Exception as e:  # noqa: BLE001 - any backend failure → safe fallback
-            log_degraded(lane, "ollama_curator_error", str(e))
-            print(f"[curator] ollama backend error: {e}", file=sys.stderr)
-            return fallback_bundle(bundle, f"ollama curator error: {e}", "ollama_error")
+        # Timeout, HTTP error, empty content, or unparseable JSON from the
+        # primary tries the fallback model once. After both fail, the bundle
+        # still carries the posting fallback marker.
+        result = None
+        curated = None
+        failures: list[tuple[str, CuratorBackendError]] = []
+        models = _curator_models()
+        started = time.monotonic()
+        for index, model in enumerate(models):
+            call_timeout = _curator_call_timeout(timeout, index, len(models), time.monotonic() - started)
+            if call_timeout < 15:
+                err = CuratorBackendError("timeout", "not enough time left for this model")
+                failures.append((model, err))
+                print(f"[curator] model={model} failed (timeout): {err}", file=sys.stderr)
+                continue
+            try:
+                result = _curate_via_openai(system_prompt, user_prompt, call_timeout, model)
+                try:
+                    parsed = parse_json_from_text(result.text)
+                except (json.JSONDecodeError, ValueError) as e:
+                    raise CuratorBackendError("bad_json", str(e), result.text) from e
+                if not isinstance(parsed, dict):
+                    raise CuratorBackendError(
+                        "bad_json", "curator JSON was not an object", result.text
+                    )
+                curated = parsed
+            except Exception as e:  # noqa: BLE001 - unknown backend failure still falls back
+                if not isinstance(e, CuratorBackendError):
+                    e = CuratorBackendError("ollama_error", str(e))
+                failures.append((model, e))
+                print(f"[curator] model={model} failed ({e.kind}): {e}", file=sys.stderr)
+                continue
+            print(f"[curator] answered by model={result.model}", file=sys.stderr)
+            break
+        if curated is None:
+            detail = "; ".join(f"{model} {err.kind}: {err}" for model, err in failures)
+            last = failures[-1][1]
+            log_degraded(lane, last.kind, detail)
+            print(f"[curator] ollama backend error: {detail}", file=sys.stderr)
+            if last.kind == "bad_json" and last.text:
+                _log_bad_json(last.text, last)
+            return fallback_bundle(bundle, f"ollama curator error: {detail}", last.kind)
     else:
         try:
             result = call_claude(
@@ -248,26 +381,16 @@ def curate(bundle: dict, *, timeout: int = 180, dry_run: bool = False) -> dict:
                 print(f"[curator] claude stderr (first 2000 chars):\n{e.stderr[:2000]}", file=sys.stderr)
             return fallback_bundle(bundle, f"claude error: {e}", e.kind)
 
-    try:
-        curated = parse_json_from_text(result.text)
-    except (json.JSONDecodeError, ValueError) as e:
-        log_degraded(lane, "bad_json", f"curator returned non-JSON: {result.text[:300]!r}")
-        # Dump start/middle/end of the offending text so we can see what Claude actually wrote.
-        # Many bad_json errors are unescaped quotes in a blurb or a trailing comma.
-        print(f"[curator] BAD JSON parse error: {e}", file=sys.stderr)
-        print(f"[curator] text length: {len(result.text)}", file=sys.stderr)
-        print(f"[curator] text[:400]: {result.text[:400]!r}", file=sys.stderr)
-        # Print 200 chars around the error position
-        msg = str(e)
-        import re
-        m = re.search(r'char (\d+)', msg)
-        if m:
-            pos = int(m.group(1))
-            lo = max(0, pos - 200)
-            hi = min(len(result.text), pos + 200)
-            print(f"[curator] text[{lo}:{hi}] (error at char {pos}): {result.text[lo:hi]!r}", file=sys.stderr)
-        print(f"[curator] text[-400:]: {result.text[-400:]!r}", file=sys.stderr)
-        return fallback_bundle(bundle, f"curator returned non-JSON: {e}", "bad_json")
+        try:
+            curated = parse_json_from_text(result.text)
+        except (json.JSONDecodeError, ValueError) as e:
+            log_degraded(lane, "bad_json", f"curator returned non-JSON: {result.text[:300]!r}")
+            _log_bad_json(result.text, e)
+            return fallback_bundle(bundle, f"curator returned non-JSON: {e}", "bad_json")
+        if not isinstance(curated, dict):
+            log_degraded(lane, "bad_json", "curator JSON was not an object")
+            _log_bad_json(result.text, ValueError("curator JSON was not an object"))
+            return fallback_bundle(bundle, "curator JSON was not an object", "bad_json")
 
     # Enrich curator metadata with telemetry
     meta = curated.setdefault("_curator", {})
