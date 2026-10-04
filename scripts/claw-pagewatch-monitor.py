@@ -115,6 +115,16 @@ SITEMAP_WATCHES = [
 FAILURES = []
 
 
+def _log_fetch(key, detail):
+    """One INFO line for the research sitemap, including under --quiet.
+
+    Collect captures this script's stdout. The line is how we confirm the
+    new watch fetched: baseline on first sighting, otherwise the slug count.
+    """
+    if key == "anthropic-research":
+        print(f"INFO {key}: {detail}", flush=True)
+
+
 def _fail(message):
     """A failed fetch or parse goes to stderr even under --quiet; main() exits 1.
 
@@ -351,6 +361,10 @@ def check_pages(verbose=True):
             _fail(f"{watch['label']} sitemap: no matching URLs parsed")
             continue
         old = state["slugs"].get(watch["key"], [])
+        if old:
+            _log_fetch(watch["key"], f"{len(slugs)} items")
+        else:
+            _log_fetch(watch["key"], "baseline written")
         fresh = [u for u in slugs if u not in set(old)] if old else []
         # The cap is a rate limit. Persist only what we emitted plus the
         # previous baseline; overflow stays unseen for the next run.

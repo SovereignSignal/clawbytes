@@ -229,7 +229,9 @@ def _diagnostic_snippet(text: str) -> str:
     lines = []
     for raw in (text or "").splitlines():
         line = raw.strip()
-        if not line or re.match(r"^Found\s+\d+", line):
+        # INFO lines are watchlist fetch logs. A slug count of 500 would
+        # otherwise match the HTTP-status pattern and mark a quiet source unhealthy.
+        if not line or re.match(r"^Found\s+\d+", line) or line.startswith("INFO "):
             continue
         if _INTERESTING.search(line):
             lines.append(line)

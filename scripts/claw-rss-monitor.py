@@ -22,6 +22,14 @@ WORKSPACE = Path(__file__).parent.parent
 MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 STATE_FILE = MEMORY_DIR / "claw-rss-state.json"
 
+# One INFO line so a collect log can confirm these feeds actually returned.
+# First sighting says the baseline was written; later runs say how many
+# entries the fetch parsed. Other feeds stay quiet.
+_FETCH_LOG_NAMES = {
+    "DeepSeek Harness Releases": "deepseek-harness",
+    "claude.dev Blog": "claude.dev",
+}
+
 # RSS feeds to monitor
 RSS_FEEDS = [
     # Primary/maintainer sources — feed Read lane
@@ -365,6 +373,13 @@ def is_relevant(entry, feed_name, tags=None):
     
     return False
 
+
+def _log_fetch(name, detail):
+    label = _FETCH_LOG_NAMES.get(name)
+    if label:
+        print(f"INFO {label}: {detail}", flush=True)
+
+
 def check_feeds(filter_relevant=True, verbose=True):
     """Check all RSS feeds for new content."""
     state = load_state()
@@ -411,6 +426,7 @@ def check_feeds(filter_relevant=True, verbose=True):
         if name not in seen_map:
             seen_ids = [e.get("id") or e.get("link") for e in entries[:50]]
             seen_map[name] = seen_ids
+            _log_fetch(name, "baseline written")
             if verbose:
                 print(f"  baseline recorded ({len(seen_ids)} ids), emitting nothing")
             continue
@@ -441,7 +457,9 @@ def check_feeds(filter_relevant=True, verbose=True):
             if verbose:
                 signal = "🔥 HIGH SIGNAL: " if high_signal else "  → "
                 print(f"{signal}{entry.get('title', 'No title')[:60]}")
-        
+
+        _log_fetch(name, f"{len(entries)} items")
+
         # Update last seen (keep last 50 IDs per feed)
         seen_ids = [e.get("id") or e.get("link") for e in entries[:50]]
         seen_map[name] = seen_ids

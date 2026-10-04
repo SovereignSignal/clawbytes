@@ -108,6 +108,22 @@ _OR_SPLIT = re.compile(r"\s+OR\s+")
 ALGOLIA_URL = "https://hn.algolia.com/api/v1/search"
 
 
+def _encode_query(params):
+    """URL-encode a dict or a list of ``(key, value)`` pairs.
+
+    Pre-#37 passed a dict straight to ``urlencode``. The query string has to
+    stay that encoding: interpolating the params object puts spaces in the
+    path, and urllib rejects it.
+    """
+    if isinstance(params, dict):
+        pairs = params
+    elif isinstance(params, (list, tuple)):
+        pairs = params
+    else:
+        raise TypeError("Algolia params must be a dict or a list of pairs")
+    return urlencode(pairs)
+
+
 def load_state():
     if STATE_FILE.exists():
         with open(STATE_FILE) as f:
@@ -183,16 +199,16 @@ def fetch_hn(query, tags="story", page=0, timeout=15, days=14, hits_per_page=20)
     the current page). ``hits_per_page`` is 20 for search and larger for the
     front page, which is one screen of stories.
     """
-    params = {
-        "query": query,
-        "tags": tags,
-        "page": page,
-        "hitsPerPage": hits_per_page,
-    }
+    params = [
+        ("query", query),
+        ("tags", tags),
+        ("page", page),
+        ("hitsPerPage", hits_per_page),
+    ]
     if days:
         min_created = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
-        params["numericFilters"] = f"created_at_i>{min_created}"
-    url = f"{ALGOLIA_URL}?{params}"
+        params.append(("numericFilters", f"created_at_i>{min_created}"))
+    url = f"{ALGOLIA_URL}?{_encode_query(params)}"
     req = Request(url, headers={"User-Agent": "ClawBytes/1.0"})
     try:
         with urlopen(req, timeout=timeout) as resp:
