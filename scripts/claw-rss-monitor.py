@@ -78,6 +78,8 @@ RSS_FEEDS = [
     {"name": "Claude Agent SDK Python Releases", "url": "https://github.com/anthropics/claude-agent-sdk-python/releases.atom", "tags": ["releases", "agent-sdk"], "high_signal": True},
     {"name": "Claude Agent SDK TypeScript Releases", "url": "https://github.com/anthropics/claude-agent-sdk-typescript/releases.atom", "tags": ["releases", "agent-sdk"]},
     {"name": "Zed Blog", "url": "https://zed.dev/blog.rss", "tags": ["coding-agent", "official"]},
+    # claude.dev/rss.xml (verified 2026-10-04). Not a changelog: posts are Read.
+    {"name": "claude.dev Blog", "url": "https://claude.dev/rss.xml", "tags": ["official", "coding-agent"]},
     # 2026-06-12 widening round 2 — vendor changelogs/blogs (all endpoint-verified)
     {"name": "Devin Release Notes", "url": "https://docs.devin.ai/release-notes/overview/rss.xml", "tags": ["coding-agent", "official"], "high_signal": True},
     {"name": "Factory Release Notes", "url": "https://docs.factory.ai/changelog/release-notes/rss.xml", "tags": ["coding-agent", "official"]},
@@ -104,6 +106,9 @@ RSS_FEEDS = [
     # Feed names stay compound so repo_name_from_feed never keys on substring
     # traps (bare "pi"⊂picoclaw/api, "agno"⊂agnostic, "tau"/"kilo"/"vibe").
     {"name": "Pi Coding Agent Releases", "url": "https://github.com/earendil-works/pi/releases.atom", "tags": ["releases", "coding-agent"]},
+    # npm @deepseek-ai/dsh publishes from this repo (verified 2026-10-04).
+    # Current tags are alphas; the existing prerelease filter still drops those.
+    {"name": "DeepSeek Harness Releases", "url": "https://github.com/deepseek-ai/deepseek-harness/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "Oh My Pi Releases", "url": "https://github.com/can1357/oh-my-pi/releases.atom", "tags": ["releases", "coding-agent"]},
     # Compound name: bare "fx" is a substring trap (firefox). 0.0.x patch tags
     # are low-signal and land in Read, not Ship. A .0 minor still Ships.
@@ -339,6 +344,10 @@ def is_relevant(entry, feed_name, tags=None):
     if "changelog" in low_name and any(v in low_name for v in ("cursor", "copilot")):
         return True
     if low_name == "amp news":
+        return True
+    # First-party Claude build log. Post titles often omit the keyword list
+    # ("Building with Claude Sonnet 5.5") and would otherwise never be emitted.
+    if low_name == "claude.dev blog":
         return True
 
     # ArXiv is a research firehose. Bare "agent" (and the general keyword

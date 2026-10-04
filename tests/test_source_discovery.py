@@ -55,8 +55,9 @@ def test_hn_topic_keywords_drop_generic_ml_and_cover_harnesses():
 def test_existing_hn_queries_cover_live_monitor_queries():
     live = {q["query"] for q in hn.HN_QUERIES}
     assert live <= disc.EXISTING_HN_QUERIES
-    assert any("antigravity" in q and "devin desktop" in q for q in disc.EXISTING_HN_QUERIES)
-    assert any("kiro" in q and "kilo code" in q for q in disc.EXISTING_HN_QUERIES)
+    assert all(" OR " not in query for query in live)
+    assert "antigravity" in live and '"devin desktop"' in live
+    assert "kiro" in live and '"kilo code"' in live
 
 
 def test_discovery_crawls_cli_coding_agents_awesome_list():
