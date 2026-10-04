@@ -6,6 +6,7 @@ Monitors RSS/Atom feeds for OpenClaw ecosystem content.
 State file: memory/claw-rss-state.json
 """
 
+import gzip
 import json
 import os
 import re
@@ -214,7 +215,12 @@ def fetch_feed(url, timeout=15):
     req = Request(url, headers=headers)
     try:
         with urlopen(req, timeout=timeout) as response:
-            return response.read().decode("utf-8")
+            body = response.read()
+            # Some feed hosts gzip the body without being asked; urllib
+            # hands it back still compressed.
+            if response.headers.get("Content-Encoding") == "gzip" or body[:2] == b"\x1f\x8b":
+                body = gzip.decompress(body)
+            return body.decode("utf-8")
     except HTTPError as e:
         print(f"  HTTP {e.code}: {url}")
         return None
