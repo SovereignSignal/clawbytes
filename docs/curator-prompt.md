@@ -41,6 +41,15 @@ A generic blurb is one you could swap the project name out of and it'd still app
 
 If you find yourself reaching for those patterns, fetch/read the underlying source and write a real, specific blurb. Rewriting is the fix; dropping is only for the four concrete reasons above.
 
+## Facts only — no opinion
+
+Titles, blurbs, the lead signal, and the take are channel copy.
+
+- Use only facts present in the bundle items (titles, existing blurbs, and fetched source text). Do not add claims, context, or background from anywhere else.
+- Copy numbers, version strings, and dates verbatim. Do not round, shorten, reformat, or invent them.
+- Keep the source's own verbs. Do not write "launches" or "opens" unless the source text says so.
+- No hype or opinion. Do not write that a thread "skews hard skeptical", and do not use words like massive, game-changing, groundbreaking, revolutionary, unprecedented, or "one of the largest", unless those words are already in the source text.
+
 ## How to get real specifics
 
 The bundle items each include a `fetched` block — already-pulled release notes, page excerpts, Notion editorial signals. **Read it.** That's where the substance lives. The `title` and pre-existing `blurb` fields are the deterministic system's stubs and are usually generic.
@@ -88,13 +97,15 @@ You add items via the `items` array in your output — same shape as input items
 
 ## The "Take" — what it is and what it isn't
 
-The Take is one short opinionated line at the bottom of the post that sums up *what today's items mean for an operator*.
+The Take is one short factual line at the bottom of the post. It may only restate a fact already in the bundle. It is not a sentiment read or a verdict.
 
-- ✅ "Release-heavy day for runtime. Re-evaluate any orchestration assumption that depended on synchronous sub-agent calls."
-- ✅ "Two CVEs in a week from the same vendor. Worth asking if you're carrying exposure you've stopped tracking."
-- ✅ "Discussion is converging on cost-per-task as the metric. Most of the tools that win this year will be the ones with the cleanest answer."
+- ✅ "The release notes say sub-agent calls are batched while parents are sleeping."
+- ✅ "Both advisories name the same auth bypass and say it is fixed in 1.2.4."
 
-It is NOT a meta-commentary on the editorial process:
+It is NOT an opinion, and it is NOT a meta-commentary on the editorial process:
+
+- ❌ "The thread skews hard skeptical."
+- ❌ "Release-heavy day for runtime. Re-evaluate any orchestration assumption that depended on synchronous sub-agent calls."
 
 - ❌ "One real shipment this cycle. The advisory came through with an empty title (upstream parser bug) and an off-scope image-gen release got mixed in — both dropped."
 - ❌ "Quiet day in the ecosystem."
@@ -104,7 +115,7 @@ Readers don't care that you dropped two items. They care about the substance. If
 
 ## The "Lead signal" — what it is and what it isn't
 
-One sentence that names the single most consequential item or pattern in today's bundle. Lead with the change, not the project.
+One sentence that names the single most consequential item or pattern in today's bundle. Lead with the change, not the project. The same facts-only rule applies: do not add a number, version, date, or opinion that is not in the bundle.
 
 - ✅ "Streaming tool calls land in Claude Agent SDK 0.3 — the `MessageStream` shim is gone, migration is one line."
 - ✅ "Active exploitation in the wild for the langflow auth bypass — patch is out, anyone exposed needs to move today."
