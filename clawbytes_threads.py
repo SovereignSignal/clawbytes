@@ -2484,38 +2484,84 @@ def strip_banned_verbs(text: str) -> str:
     return result
 
 
-def llm_summarize(items: List[dict], category: str) -> Optional[str]:
-    """Use LLM to generate 'why it matters' summaries for a bundle of items."""
-    if not LLM_API_KEY:
-        return None
-    if not items:
-        return None
+# Second writer model, tried once after the primary fails or the number guard
+# rejects its draft. Unset uses this default. An empty value skips the extra call.
+DEFAULT_LLM_FALLBACK_MODEL = "glm-5.3-flash"
+# Comma groups and hyphen/slash/dot runs are one token so a reordered date
+# or a split thousands-group is not treated as grounded.
+_NUMBER_TOKEN = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[./\-]\d+)+|\d+")
 
-    # Build the prompt
+
+def _ungrounded_numbers(output: str, source: str) -> set[str]:
+    """Number and version tokens in output that are absent from source."""
+    return set(_NUMBER_TOKEN.findall(output or "")) - set(_NUMBER_TOKEN.findall(source or ""))
+
+
+def numbers_grounded(output: str, source: str) -> bool:
+    """True when every number or version token in output also appears in source."""
+    return not _ungrounded_numbers(output, source)
+
+
+def _writer_models() -> List[str]:
+    primary = LLM_MODEL
+    fallback = os.environ.get("CLAWBYTES_LLM_MODEL_FALLBACK", DEFAULT_LLM_FALLBACK_MODEL).strip()
+    if fallback and fallback != primary:
+        return [primary, fallback]
+    return [primary]
+
+
+def _completion_text(result: dict) -> str:
+    """Assistant `content` only. Empty content is a failure.
+
+    Reasoning models may fill `reasoning` or `reasoning_content` while leaving
+    `content` empty. That is not a post.
+    """
+    try:
+        message = result["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise ValueError(f"empty content: malformed completion ({e})") from e
+    if not isinstance(message, dict):
+        raise ValueError("empty content")
+    content = message.get("content")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("empty content")
+    return content.strip()
+
+
+def _writer_inputs(items: List[dict], category: str) -> Tuple[str, str]:
+    """Return the writer prompt and the fact text the number guard may cite.
+
+    The fact text is the item count plus the fields the model is shown. Prompt
+    instructions and item indexes are not facts, so a number that appears only
+    there does not license the post.
+    """
     meta = CATEGORY_META[category]
     item_emoji = {"ship": "📦", "watch": "🚨", "read": "📚", "community": "💬"}.get(category, meta["emoji"])
-    prompt = f"""You write @clawbytes on Telegram — covering the AI agent ecosystem. Short, sharp, opinionated. No corporate filler.
+    prompt = f"""You write @clawbytes on Telegram — covering the AI agent ecosystem. Short, sharp, factual. No corporate filler.
 
 Write a {meta['label']} lane post with {len(items)} items.
 
 FORMAT (strict HTML):
 {meta['emoji']} <b>{meta['label']}</b> — N items
 
-{item_emoji} <a href="URL">ACTUAL TITLE</a> — 1 punchy sentence on why this matters
+{item_emoji} <a href="URL">ACTUAL TITLE</a> — one factual sentence drawn from the item
 
 Rules:
 - Use <b> for bold, <a href="URL">title text</a> for links — use the ACTUAL model/project name as link text, never "Link" or "thread"
-- Ship: what changed, why operators care. Use the release notes if provided — don't invent features.
-- Watch: the risk, what to check, what breaks
-- Read: describe WHAT the piece IS (paper, framework, deep-dive, critique) and its core claim — but only if the source data states it. Never invent numbers, percentages, or specific findings. "A paper proposing formal metrics for agent reliability" beats "Defines 3 key metrics for agent failure rates" if you don't actually know there are 3.
-- Community: the sentiment, the discovery, the real user signal. If multiple threads cover the same topic, MERGE them into one bullet (e.g. "3 threads on cost and access (58↑ total)") instead of listing each separately. NEVER repeat the raw summary text — write fresh, specific descriptions.
+- Use only facts present in the item lines below. Do not add claims, context, or background from anywhere else.
+- Copy numbers, version strings, and dates verbatim. Do not round, shorten, reformat, or invent them.
+- Keep the source's own verbs. Do not write "launches" or "opens" unless the source text says so.
+- No hype or opinion words: massive, game-changing, groundbreaking, revolutionary, unprecedented, one of the largest.
+- Ship: what changed, using the release notes if provided. Do not invent features.
+- Watch: the risk, what to check, what breaks — only when the item text says so.
+- Read: describe what the piece is and its core claim only when the source data states it.
+- Community: the sentiment and the user signal that are in the item. If multiple threads cover the same topic, merge them into one bullet using counts that appear in the item lines.
 - MAX 150 chars per item summary. No filler. No "notable" or "worth watching." No "offering insights" or "highlights." No soft verbs: "breaks down", "unpacks", "dives into", "rages on", "sparks debate" are all banned.
-- Do NOT parrot the raw summary text provided in the item data. Write original descriptions based on the actual title and topic.
-- If release notes are missing or say nothing: just state what the project IS and what version dropped. 1 sentence max. Never speculate with "might," "could," or "should." Example: "IronClaw 0.1.0 — First skills release from the NEAR AI safety team." 
+- Reuse the source's wording when it states the fact. Do not add a claim that is not in the item line.
+- If release notes are missing or say nothing: state what the project is and the version string copied from the title. One sentence max. Never speculate with "might," "could," or "should."
 - Start EVERY item with {item_emoji} (this lane\u2019s emoji) and use the SAME emoji for every item. Never use another lane\u2019s emoji or a topical/decorative emoji.
-- For HN items: reference the community signal (e.g. "171 points on HN") when it adds weight
-- NEVER fabricate statistics, metrics, or specific findings. If unsure, describe the piece's ambition, not its results.
-- Copy version numbers character-for-character from the item title or release notes. Never shorten, round, or invent a version.
+- For HN items: include the point and comment counts from the item line when they are present.
+- NEVER fabricate statistics, metrics, or specific findings.
 
 Items:"""
 
@@ -2526,55 +2572,85 @@ Items:"""
     with ThreadPoolExecutor(max_workers=4) as pool:
         groundings = list(pool.map(lambda it: grounding_for_item(category, it), items))
 
+    fact_parts = [str(len(items))]
     for i, item in enumerate(items):
         title = display_title(item)
-        url = item.get("url", "")
-        raw_summary = item.get("summary", "")
-        source = item.get("sourceType", "")
+        url = item.get("url", "") or ""
+        raw_summary = item.get("summary", "") or ""
+        source = item.get("sourceType", "") or ""
         # Add HN engagement data to help LLM contextualize
         if source == "hackernews":
             pts = item.get("rawScore", 0)
             comments = item.get("rawComments", 0)
             raw_summary = f"{pts}pts / {comments} comments on HN"
-        item_line = f"\n{i+1}. {title} | {url} | {raw_summary} | source: {source}"
+        body = f"{title} | {url} | {raw_summary} | source: {source}"
         if groundings[i]:
-            item_line += f" | {groundings[i]}"
-        prompt += item_line
+            body += f" | {groundings[i]}"
+        # The item index stays out of fact_parts. Separators add no digits, so
+        # the guard sees the same number tokens as the fields themselves.
+        fact_parts.append(body)
+        prompt += f"\n{i+1}. {body}"
 
     prompt += "\n\nWrite the post now:"
+    return prompt, "\n".join(fact_parts)
 
+
+def _writer_complete(prompt: str, model: str) -> str:
     data = json.dumps({
-        "model": LLM_MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 1200,
-        "temperature": 0.4,
+        "temperature": 0.2,
     }).encode()
+    req = Request(
+        f"{LLM_URL}/chat/completions",
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {LLM_API_KEY}",
+        },
+    )
+    with urlopen(req, timeout=45) as resp:
+        result = json.loads(resp.read().decode())
+    return _completion_text(result)
 
-    # One retry: enrichment failures degrade the channel to the bare fallback
-    # renderer, so a transient proxy hiccup is worth a second attempt — and a
-    # logged reason, since a silent None made this failure mode invisible.
-    for attempt in range(2):
+
+def llm_summarize(items: List[dict], category: str) -> Optional[str]:
+    """Use LLM to generate lane copy from the item facts only.
+
+    The primary model is tried once. Timeout, HTTP error, empty content, a
+    rejected draft, or a number that was not in the item text tries
+    CLAWBYTES_LLM_MODEL_FALLBACK once. If that also fails, return None so the
+    caller renders the deterministic template.
+    """
+    if not LLM_API_KEY:
+        return None
+    if not items:
+        return None
+
+    prompt, fact_source = _writer_inputs(items, category)
+    for model in _writer_models():
         try:
-            req = Request(
-                f"{LLM_URL}/chat/completions",
-                data=data,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {LLM_API_KEY}",
-                },
-            )
-            with urlopen(req, timeout=45) as resp:
-                result = json.loads(resp.read().decode())
-            content = result["choices"][0]["message"]["content"].strip()
-            # Strip banned soft verbs
-            content = strip_banned_verbs(content)
-            # Basic sanity check
-            if len(content) < 50 or "I cannot" in content:
-                print(f"llm_summarize({category}): rejected output (len={len(content)})", file=sys.stderr)
-                return None
-            return content
+            content = _writer_complete(prompt, model)
         except Exception as e:
-            print(f"llm_summarize({category}) attempt {attempt + 1} failed: {e}", file=sys.stderr)
+            print(f"llm_summarize({category}) model={model} failed: {e}", file=sys.stderr)
+            continue
+        content = strip_banned_verbs(content)
+        if len(content) < 50 or "I cannot" in content:
+            print(
+                f"llm_summarize({category}): rejected output from model={model} (len={len(content)})",
+                file=sys.stderr,
+            )
+            continue
+        missing = _ungrounded_numbers(content, fact_source)
+        if missing:
+            print(
+                f"llm_summarize({category}): number guard rejected model={model} missing={', '.join(sorted(missing))}",
+                file=sys.stderr,
+            )
+            continue
+        print(f"llm_summarize({category}): answered by model={model}", file=sys.stderr)
+        return content
     return None
 
 
