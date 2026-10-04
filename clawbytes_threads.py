@@ -28,7 +28,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -134,6 +134,7 @@ REPO_PRIORITY = {
     "grok build": 62,  # vocab for HN/Reddit; GitHub atom is empty (2026-09)
     "opencode": 60,
     "pi coding": 60,  # never bare "pi" — ⊂ picoclaw, api
+    "deepseek harness": 60,  # npm @deepseek-ai/dsh. Never bare "dsh"
     "fx coding": 60,  # vercel-labs/fx. Never bare "fx" — ⊂ firefox
     "oh my pi": 60,  # OMP (can1357/oh-my-pi). Never bare "omp" — ⊂ compile/complete
     "herdr": 60,
@@ -479,6 +480,7 @@ def display_repo_name(repo: str) -> str:
         "agent client protocol": "ACP",
         "kiro": "Kiro",
         "pi coding": "Pi",
+        "deepseek harness": "DeepSeek Harness",
         "fx coding": "fx",
         "oh my pi": "OMP",
         "herdr": "Herdr",
@@ -621,6 +623,22 @@ def is_minor_release(title: str) -> bool:
     return False
 
 
+# OpenClaw publishes opaque `release-publish/<digits>` tags next to real
+# CalVer releases. Hermes publishes asset bundles titled "Pinned inputs N"
+# (or "Pinned inputs a/b/9"). Neither is a product release.
+_JUNK_RELEASE_TAG = re.compile(r"release-publish/\d+", re.IGNORECASE)
+_HERMES_ASSET_TITLE = re.compile(r"pinned inputs(?:\s+\S+)?$", re.IGNORECASE)
+
+
+def is_junk_release_title(title: str) -> bool:
+    text = (title or "").strip()
+    if not text:
+        return False
+    if _JUNK_RELEASE_TAG.search(text):
+        return True
+    return _HERMES_ASSET_TITLE.fullmatch(text) is not None
+
+
 def is_coding_agent_changelog(item: dict) -> bool:
     """True when this RSS item is a closed-source harness changelog or news feed.
 
@@ -736,6 +754,8 @@ def classify_rss(item: dict) -> Optional[dict]:
         }
 
     if "releases" in feed_low:
+        if is_junk_release_title(title):
+            return None
         if is_prerelease_title(title):
             return None
         # Skip chore/ci/internal/dependency release titles
@@ -770,6 +790,24 @@ def classify_rss(item: dict) -> Optional[dict]:
 
     if feed_low.strip() in ARXIV_FEEDS and not arxiv_harness_hit(low):
         return None
+
+    if feed_low.strip() == "claude.dev blog":
+        # First-party build log. Titles are often "Building with Claude
+        # Sonnet 5.5" and miss READ_TERMS, but the feed itself is the scope.
+        score = 40 + age_score(dt, 168) / 10 + (15 if item.get("high_signal") else 5)
+        return {
+            "primaryCategory": "read",
+            "categories": ["read"],
+            "score": round(score, 2),
+            "summary": richer_read_summary(title, feed),
+            "expiresAt": (dt or now_utc()) + timedelta(hours=CATEGORY_META["read"]["ttl_hours"]),
+            "publishedAt": dt,
+            "sourceType": "rss",
+            "sourceName": feed,
+            "sourceId": item.get("id", url),
+            "url": url,
+            "title": title,
+        }
 
     if any(_read_term_in(low, term) for term in READ_TERMS):
         categories = ["read"]
@@ -1277,6 +1315,8 @@ def backlog_item(candidate: dict) -> dict:
         "status": "queued",
         "postedCategories": [],
     }
+    if candidate.get("weeklyRollup"):
+        item["weeklyRollup"] = True
     if "rawScore" in candidate:
         item["rawScore"] = candidate["rawScore"]
     if "rawComments" in candidate:
@@ -1877,11 +1917,220 @@ def _empty_intake() -> Dict[str, int]:
     return {"added": 0, "capped": 0, "filtered": 0}
 
 
+def canonical_story_url(url: str) -> str:
+    """Host + path, ignoring scheme, www, query, and a trailing slash.
+
+    Ship items and HN article links rarely share a query string. The HN
+    discussion URL is not used here: every story would collapse to
+    news.ycombinator.com/item.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = "https://" + raw
+    parts = urlsplit(raw)
+    host = (parts.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    path = (parts.path or "").rstrip("/")
+    if not host:
+        return ""
+    return f"{host}{path}"
+
+
+def is_major_x0_release(title: str) -> bool:
+    """True for a tracked tool's major release: 1.0, 2.0, 1.0.0, 2.0.0.
+
+    A minor that happens to end in .0 (1.2.0) stays in score order. CalVer
+    years (2026.9.7) are not majors. Patches are not majors.
+    """
+    text = title or ""
+    for match in _SEMVER_RE.finditer(text):
+        major, minor, patch = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        if major >= 2000:
+            continue
+        if major >= 1 and minor == 0 and patch == 0:
+            return True
+    for match in re.finditer(r"\bv?(\d+)\.(\d+)\b", text, re.IGNORECASE):
+        end = match.end()
+        if end < len(text) and text[end] == "." and end + 1 < len(text) and text[end + 1].isdigit():
+            continue
+        major, minor = int(match.group(1)), int(match.group(2))
+        if major >= 2000:
+            continue
+        if major >= 1 and minor == 0:
+            return True
+    return False
+
+
+def _is_tracked_major_release(item: dict) -> bool:
+    repo = repo_name_from_feed(item.get("sourceName") or "")
+    if repo not in REPO_PRIORITY:
+        return False
+    return is_major_x0_release(item.get("title") or "")
+
+
+def load_hn_front_page_urls() -> set:
+    """Article URLs from the latest relevant HN front-page pass."""
+    state = load_json(MEMORY / "claw-hn-state.json", {})
+    urls = set()
+    if not isinstance(state, dict):
+        return urls
+    for row in state.get("frontPage") or []:
+        if not isinstance(row, dict):
+            continue
+        canon = canonical_story_url(row.get("url") or "")
+        if canon:
+            urls.add(canon)
+    return urls
+
+
+def ship_bypass_rank(item: dict, front_page_urls: Optional[set] = None) -> int:
+    """Sort key for the Ship queue. Higher leaves the backlog sooner.
+
+    2: a tracked tool's major/x.0 release, or a Ship item whose URL is also
+    on the relevant HN front page.
+    1: the weekly Claude Code patch roll-up.
+    0: everything else, still ordered by score.
+
+    This does not add a post. Ship still publishes on its two daily windows.
+    """
+    if not isinstance(item, dict):
+        return 0
+    categories = item.get("categories") or []
+    if item.get("primaryCategory") != "ship" and "ship" not in categories:
+        return 0
+    urls = front_page_urls or set()
+    if urls and canonical_story_url(item.get("url") or "") in urls:
+        return 2
+    if _is_tracked_major_release(item):
+        return 2
+    if item.get("weeklyRollup"):
+        return 1
+    return 0
+
+
+def _iso_week_key(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    year, week, _day = dt.isocalendar()
+    return f"{year}-W{week:02d}"
+
+
+def _version_sort_key(version: str) -> tuple:
+    nums = []
+    for part in (version or "").split("."):
+        try:
+            nums.append(int(part))
+        except ValueError:
+            nums.append(0)
+    return tuple(nums)
+
+
+def is_claude_code_product_release(source_name: str) -> bool:
+    """The Claude Code product atom, not the Action or Agent SDK feeds."""
+    low = (source_name or "").lower()
+    if "claude code action" in low or "claude agent sdk" in low:
+        return False
+    return "claude code" in low
+
+
+def _claude_code_patches_path() -> Path:
+    return MEMORY / "claw-claude-code-patches.json"
+
+
+def _load_claude_code_patches() -> dict:
+    data = load_json(_claude_code_patches_path(), {})
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def _save_claude_code_patches(data: dict) -> None:
+    save_json(_claude_code_patches_path(), data)
+
+
+def _rotate_claude_code_week(state: dict, now: datetime) -> bool:
+    """Move a finished week's patches onto the pending list. True if changed."""
+    if not state or not state.get("week"):
+        return False
+    week = _iso_week_key(now)
+    if state.get("week") == week:
+        return False
+    patches = list(state.get("patches") or [])
+    if patches:
+        pending = list(state.get("pending") or [])
+        pending.append({"week": state.get("week"), "patches": patches})
+        state["pending"] = pending[-4:]
+    state["week"] = week
+    state["patches"] = []
+    return True
+
+
+def _remember_claude_code_patch(state: dict, candidate: dict, now: datetime) -> bool:
+    version_match = _SEMVER_RE.search(candidate.get("title") or "")
+    if not version_match:
+        return False
+    version = f"{int(version_match.group(1))}.{int(version_match.group(2))}.{int(version_match.group(3))}"
+    week = _iso_week_key(now)
+    if state.get("week") != week:
+        if state.get("week") and state.get("patches"):
+            pending = list(state.get("pending") or [])
+            pending.append({"week": state["week"], "patches": list(state.get("patches") or [])})
+            state["pending"] = pending[-4:]
+        state["week"] = week
+        state["patches"] = []
+    patches = list(state.get("patches") or [])
+    if any(row.get("version") == version for row in patches):
+        state["patches"] = patches
+        return False
+    patches.append({"version": version, "url": candidate.get("url") or ""})
+    state["patches"] = patches
+    state["week"] = week
+    return True
+
+
+def _claude_code_rollup_candidate(batch: dict) -> Optional[dict]:
+    versions = sorted(
+        {row.get("version") for row in (batch.get("patches") or []) if row.get("version")},
+        key=_version_sort_key,
+    )
+    week = batch.get("week") or ""
+    if not versions or not week:
+        return None
+    if len(versions) == 1:
+        title = f"Claude Code {versions[0]} weekly patches"
+    else:
+        title = f"Claude Code {versions[0]}–{versions[-1]}"
+    published = now_utc()
+    return {
+        "primaryCategory": "ship",
+        "categories": ["ship"],
+        "score": REPO_PRIORITY.get("claude", 66),
+        "summary": "Weekly patch roll-up: " + ", ".join(versions),
+        "expiresAt": published + timedelta(hours=CATEGORY_META["ship"]["ttl_hours"]),
+        "publishedAt": published,
+        "sourceType": "rss",
+        "sourceName": "Claude Code Releases",
+        "sourceId": f"claude-code-patches:{week}",
+        "url": (
+            "https://github.com/anthropics/claude-code/releases"
+            f"#patches-{week}-{versions[0]}-{versions[-1]}"
+        ),
+        "title": title,
+        "weeklyRollup": True,
+    }
+
+
 def collect_into_backlog() -> dict:
     ensure_files()
 
     backlog = load_json(BACKLOG_FILE, {"items": []})
     state = load_json(THREAD_STATE_FILE, {})
+    collected_at = now_utc()
+    patch_book = _load_claude_code_patches()
+    patches_dirty = _rotate_claude_code_week(patch_book, collected_at)
 
     seen_source_keys = set(state.get("seenSourceKeys", []))
     existing_ids = {item["id"] for item in backlog.get("items", [])}
@@ -1942,6 +2191,11 @@ def collect_into_backlog() -> dict:
             row = (kind, candidate, key, source, eco)
             if low_signal:
                 # Counted as filtered from Ship, then queued on Read.
+                # Claude Code patches are summarized once a week instead of
+                # each tag competing for Ship.
+                if low_signal == "patch" and is_claude_code_product_release(source):
+                    if _remember_claude_code_patch(patch_book, candidate, collected_at):
+                        patches_dirty = True
                 _bump(source, "filtered")
                 other_ready.append(row)
             elif candidate.get("primaryCategory") == "ship":
@@ -1979,6 +2233,18 @@ def collect_into_backlog() -> dict:
         _queue(candidate, key)
         if eco is not None:
             acked_releases.append(eco)
+
+    pending_rollups = list(patch_book.get("pending") or [])
+    if pending_rollups:
+        rollup = _claude_code_rollup_candidate(pending_rollups[0])
+        if rollup:
+            rollup_key = source_key("rss", rollup["sourceId"], rollup["url"])
+            if rollup_key not in seen_source_keys and _queue(rollup, rollup_key):
+                _bump(rollup.get("sourceName") or "Claude Code Releases", "added")
+        patch_book["pending"] = pending_rollups[1:]
+        patches_dirty = True
+    if patches_dirty:
+        _save_claude_code_patches(patch_book)
 
     now = now_utc()
     for item in backlog["items"]:
@@ -2125,6 +2391,10 @@ def queue_for_category(category: str) -> List[dict]:
     if _normalize_scores_enabled():
         apply_normalized_scores(out)
         out.sort(key=lambda x: -(x.get("normScore") or 0))
+    # Headline releases lead the Ship bundle. The two daily windows are unchanged.
+    if category == "ship" and out:
+        front_urls = load_hn_front_page_urls()
+        out.sort(key=lambda x: -ship_bypass_rank(x, front_urls))
     return out
 
 
@@ -2766,6 +3036,10 @@ def source_badge(item: dict) -> str:
 
 
 def display_title(item: dict) -> str:
+    if item.get("weeklyRollup"):
+        # normalize_release_title keeps only the first semver, which would
+        # collapse "2.1.284–2.1.289" to a single patch.
+        return item.get("title", "")
     if item.get("primaryCategory") == "ship":
         repo = repo_name_from_feed(item.get("sourceName", ""))
         return normalize_release_title(repo, item.get("title", ""))

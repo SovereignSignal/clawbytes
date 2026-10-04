@@ -10,16 +10,16 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 
 | Class | What | Defined in | Cadence |
 |---|---|---|---|
-| RSS/Atom feeds | 80 feeds: vendor blogs, changelogs that Ship (Cursor, GitHub Copilot, Amp News), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, fx, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau), research blogs, ArXiv cs.AI/cs.CL (harness-compound gate — bare `agent` is not enough). Warp, Replit, Augment, JetBrains, and Zed blogs stay in the list and route to Read. Windsurf Blog is not in the list (removed 2026-09-23, stale since 2026-05-12). A new feed name baselines silently. | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
+| RSS/Atom feeds | 82 feeds: vendor blogs, changelogs that Ship (Cursor, GitHub Copilot, Amp News), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, fx, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau, DeepSeek Harness), research blogs, claude.dev Blog (Read), ArXiv cs.AI/cs.CL (harness-compound gate — bare `agent` is not enough). Warp, Replit, Augment, JetBrains, and Zed blogs stay in the list and route to Read. Windsurf Blog is not in the list (removed 2026-09-23, stale since 2026-05-12). A new feed name baselines silently. | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
 | GitHub releases (API) | Curated + auto-discovered repos, merged via `claw-ecosystem-sources.json`. First tag on a repo is a silent baseline. Later tags are classified on the release path; the tag is marked seen only after collect hands the item to the backlog. | `scripts/claw-ecosystem-monitor.sh` | 30 min |
 | HF Daily Papers | huggingface.co/papers via `api/daily_papers`, keyword-scored into lanes | `scripts/claw-hf-papers.py` | 30 min |
-| Hacker News | Algolia queries (harness/agent/MCP terms), 14-day window | `scripts/claw-hn-monitor.py`, `claw-ecosystem-monitor.sh` | 30 min |
+| Hacker News | Algolia queries (harness/agent/MCP terms, one query per term — Algolia has no `OR`), plus one `tags=front_page` pass filtered to agent/coding/AI-tool stories at ≥150 points. Search queries use a 14-day window. | `scripts/claw-hn-monitor.py`, `claw-ecosystem-monitor.sh` | 30 min |
 | Moltbook | Community posts, HTML scrape | `scripts/claw-moltbook-monitor.py` | 30 min |
 | Discovery | GitHub topic/keyword search, awesome lists (awesome-ai-agents, awesome-agents, awesome-mcp-servers, awesome-claude-code, awesome-code-ai, awesome-cli-coding-agents); HN discovery queries are harness-scoped (no "machine learning news"). Subreddit search does not run while Reddit is off | `claw-ecosystem-monitor.sh --mode discover`, `claw-source-discovery.py` | weekly (Mon 14:10 UTC) |
 | Leaderboards | SWE-bench (Verified, plus bash-only as the Verified mini-SWE-agent filter), Aider polyglot, LiveBench, Terminal-Bench 2.1 — emits only on top-3 movement, sha-gated fetches | `scripts/claw-leaderboard-monitor.py` (`BOARDS`) | 30 min |
 | Registries | OpenRouter model list (id diff, coding/agent family filter — same word-boundary pattern as HF trending), LiteLLM pricing registry (sha-gated key diff, URL fragment includes the new-key hash), HF trending (weekly, coding/agent filter) | `scripts/claw-registry-monitor.py` | 30 min |
 | GitHub advisories | Advisory Database, package-name allowlist (tracked repos, not `ecosystem=pip`), silent baseline, `html_url` per advisory, cap 2 Watch items per UTC day | `scripts/claw-advisory-monitor.py` | 30 min |
-| Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + HTML heading-hash (Antigravity, Kiro changelog) + sitemap slug diffs (Anthropic news/engineering, DeepSeek news) | `scripts/claw-pagewatch-monitor.py` | 30 min |
+| Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + HTML heading-hash (Antigravity, Kiro changelog) + sitemap slug diffs (Anthropic news/engineering, Anthropic research, DeepSeek news). Research is its own watch key so the first run baselines the existing sitemap instead of posting the backlog. | `scripts/claw-pagewatch-monitor.py` | 30 min |
 | Bluesky | Phrase search ("claude code", "codex cli", "openclaw", "mcp server", "agent harness", plus Cursor/Devin/Antigravity/ACP/Kiro/Kilo/Kimi/Grok Build/Mistral Vibe), engagement-gated | `scripts/claw-bsky-monitor.py` | 30 min |
 
 Discovered repos and feeds land in `claw-ecosystem-sources.json` /
@@ -249,3 +249,30 @@ entry in `claw-source-health.json` is left as stored. Re-enable by setting
 client id/secret and a refresh token) are wired into `fetch_reddit` and
 `discover_subreddits`. Flipping the flag alone resumes the 403s and the
 24h source alert.
+
+### 2026-10-04 coverage audit
+
+**HN** — Every hard-coded query that contained `OR` is now separate terms
+(Algolia returned no hits, or a handful, for the combined string). Results
+are deduped by story id. One `tags=front_page` pass keeps agent/coding/AI-tool
+stories at ≥150 points, including a Pi 1.0 title that does not contain those
+words. Schedules are unchanged.
+
+**Ship** — A tracked tool's major release (`1.0`, `2.0.0`) and a Ship item
+whose article URL is on that front page lead the Ship bundle. The two daily
+windows stay `[9, 18]`. Intake caps stay 2 per source and 6 per run. Claude
+Code patch tags still leave Ship; once a UTC week rolls over they become one
+roll-up item (`Claude Code 2.1.284–2.1.289`). `release-publish/<digits>` tags
+and Hermes titles like `Pinned inputs 9` are not classified.
+
+**Added** — DeepSeek Harness (`deepseek-ai/deepseek-harness` `releases.atom`,
+the repo behind npm `@deepseek-ai/dsh`; alpha tags still drop on the existing
+prerelease filter). claude.dev Blog (`https://claude.dev/rss.xml`, Read; the
+feed bypasses the keyword gate because titles like "Building with Claude
+Sonnet 5.5" carry none). Anthropic research sitemap
+(`https://www.anthropic.com/research/`, separate watch key, silent baseline).
+Research pages are Read; a cyber/security slug is Watch (GLM-5.3 cyber report).
+
+**Not in this change** — RSS gzip decompression already shipped in #36.
+Scheduler locking already shipped in #33. No env vars, caps, lanes, or
+forwarding flags moved.

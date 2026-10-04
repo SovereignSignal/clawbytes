@@ -95,6 +95,15 @@ SITEMAP_WATCHES = [
         "url": "https://www.anthropic.com/sitemap.xml",
         "prefixes": ("https://www.anthropic.com/news/", "https://www.anthropic.com/engineering/"),
     },
+    # Own key so the first run baselines the existing research URLs and emits
+    # nothing. Folding /research/ into the anthropic key would treat every
+    # URL already on the sitemap as a new page.
+    {
+        "key": "anthropic-research",
+        "label": "Anthropic research",
+        "url": "https://www.anthropic.com/sitemap.xml",
+        "prefixes": ("https://www.anthropic.com/research/",),
+    },
     {
         "key": "deepseek",
         "label": "DeepSeek",
@@ -251,7 +260,15 @@ def slug_title(url):
 
 
 def lane_for_slug(url):
-    return "read" if "/engineering/" in url else "ship"
+    """Engineering and research are Read. A research slug about cyber or
+    security is Watch. News and other prefixes stay Ship.
+    """
+    if "/research/" in (url or ""):
+        low = url.lower()
+        if any(token in low for token in ("cyber", "security", "vulnerab", "exploit", "jailbreak")):
+            return "watch"
+        return "read"
+    return "read" if "/engineering/" in (url or "") else "ship"
 
 
 def load_state():
