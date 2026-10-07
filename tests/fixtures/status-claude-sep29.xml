@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<item>
+      <title>Elevated errors on claude.ai, Claude Code, Claude Cowork and the Claude API</title>
+      <description>
+&lt;p&gt; &lt;small&gt;Sep &lt;var data-var='date'&gt;29&lt;/var&gt;, &lt;var data-var='time'&gt;16:27&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt; &lt;strong&gt;Resolved&lt;/strong&gt; - The issue affecting Claude.ai, the Claude desktop and mobile apps, Claude Code, Claude Cowork, and the Claude API has been resolved, and services have been operating normally since recovery. Impact occurred from 07:00 PT / 14:00 UTC to 07:59 PT / 14:59 UTC. &lt;/p&gt; &lt;p&gt; &lt;small&gt;Sep &lt;var data-var='date'&gt;29&lt;/var&gt;, &lt;var data-var='time'&gt;15:30&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt; &lt;strong&gt;Update&lt;/strong&gt; - All services have been operating normally since 14:59 UTC. We are continuing to monitor. &lt;/p&gt; &lt;p&gt; &lt;small&gt;Sep &lt;var data-var='date'&gt;29&lt;/var&gt;, &lt;var data-var='time'&gt;15:11&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt; &lt;strong&gt;Monitoring&lt;/strong&gt; - Most services have recovered as of 14:59 UTC. Signing in, starting new chats, voice conversations, Claude Code and Cowork sessions, purchases and file uploads are working again. Some messages sent between 14:00 and 14:59 UTC may not have been saved. We are monitoring closely and will post another update within 30 minutes. &lt;/p&gt; &lt;p&gt; &lt;small&gt;Sep &lt;var data-var='date'&gt;29&lt;/var&gt;, &lt;var data-var='time'&gt;15:00&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt; &lt;strong&gt;Update&lt;/strong&gt; - The errors that began at 14:00 UTC were mitigated at 14:36 UTC, and existing conversations are mostly working again. A second issue is preventing many users from signing in (single sign-on and Sign in with Apple are unavailable), starting new chats, voice conversations and Claude Code or Cowork sessions, making purchases, and uploading files. If you're signed in, please don't sign out. We're working on a fix and will post another update within 30 minutes. &lt;/p&gt; &lt;p&gt; &lt;small&gt;Sep &lt;var data-var='date'&gt;29&lt;/var&gt;, &lt;var data-var='time'&gt;14:41&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt; &lt;strong&gt;Update&lt;/strong&gt; - We have applied a mitigation and erro…&lt;/p&gt;</description>
+      <pubDate>Tue, 29 Sep 2026 16:27:21 +0000</pubDate>
+      <link>https://status.claude.com/incidents/4xvtc2gnq73l</link>
+      <guid>https://status.claude.com/incidents/4xvtc2gnq73l</guid>
+    </item>
+    
+</channel>
+</rss>

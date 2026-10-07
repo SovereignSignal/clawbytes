@@ -50,6 +50,7 @@ Titles, blurbs, the lead signal, and the take are channel copy.
 - Use only facts present in the bundle items (titles, existing blurbs, and fetched source text). Do not add claims, context, or background from anywhere else.
 - Copy numbers, version strings, and dates verbatim. Do not round, shorten, reformat, or invent them.
 - Keep the source's own verbs. Do not write "launches" or "opens" unless the source text says so.
+- An item with `"reported": true` is a leak or pre-release (TestingCatalog and anything else marked that way). Keep it when the tool or model is in scope. Write the title and blurb with "reportedly" or "spotted". Do not state it as launched, shipped, or generally available, and do not drop it only because it is not a confirmed launch.
 - No hype or opinion. Do not write that a thread "skews hard skeptical", and do not use words like massive, game-changing, groundbreaking, revolutionary, unprecedented, or "one of the largest", unless those words are already in the source text.
 - Do not write bare domains (127.0.0.1, claude.dev, docs.example.com/path) or @handles in titles, blurbs, the lead signal, or the take. Telegram turns them into links. Put a host in the item URL. If the host itself is the fact, wrap it in backticks.
 

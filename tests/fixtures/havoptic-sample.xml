@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<item>
+      <title>Claude Code v2.1.292</title>
+      <link>https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md</link>
+      <guid isPermaLink="false">claude-code-2.1.292</guid>
+      <pubDate>Tue, 06 Oct 2026 17:10:31 GMT</pubDate>
+      <description>Claude Code 2.1.292 now lets you install plugins directly from marketplaces and control how hard sub-agents work on your tasks. We've also improved performance, security, and fixed several edge cases that could cause unexpected behavior. Check out the full release notes to see...</description>
+      <category>Claude Code</category>
+    </item>
+    
+<item>
+      <title>Antigravity CLI v1.3.0</title>
+      <link>https://github.com/google-antigravity/antigravity-cli/releases/tag/1.3.0</link>
+      <guid isPermaLink="false">antigravity-cli-1.3.0</guid>
+      <pubDate>Tue, 06 Oct 2026 06:05:28 GMT</pubDate>
+      <description>Antigravity CLI 1.3.0 makes conversations easier to read by grouping related actions into summaries while keeping the important details visible, and fixes scrolling issues that were particularly annoying over SSH or in tmux. We've also smoothed out navigation and ensured files...</description>
+      <category>Antigravity CLI</category>
+    </item>
+    
+<item>
+      <title>Kiro CLI v2.27.0</title>
+      <link>https://kiro.dev/changelog/cli/2-27</link>
+      <guid isPermaLink="false">kiro-2.27.0</guid>
+      <pubDate>Thu, 01 Oct 2026 00:00:00 GMT</pubDate>
+      <description>{/ cspell:ignore Herdr /}</description>
+      <category>Kiro CLI</category>
+    </item>
+    
+<item>
+      <title>Grok Build v1.0.46</title>
+      <link>https://x.ai/build/changelog</link>
+      <guid isPermaLink="false">grok-build-1.0.46</guid>
+      <pubDate>Wed, 30 Sep 2026 00:00:00 GMT</pubDate>
+      <description>Grok Build 1.0.46 makes session startup dramatically faster when loading skills from large directories and fixes a frustrating issue where video cards would get stuck without proper playback support. We've also improved how the system preserves your settings and handles file p...</description>
+      <category>Grok Build</category>
+    </item>
+    
+</channel>
+</rss>

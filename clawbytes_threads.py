@@ -38,6 +38,19 @@ _SCRIPTS_DIR = str(Path(__file__).resolve().parent / "scripts")
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 from completion_diag import empty_content_message  # noqa: E402
+from feed_filters import (  # noqa: E402
+    STATUS_WATCH_FEEDS,
+    havoptic_feed,
+    is_reported_claim,
+    kilo_product_post,
+    status_blurb,
+    status_display_title,
+    status_incident_allowed,
+    testingcatalog_blurb,
+    testingcatalog_relevant,
+    urls_same_release,
+    version_key,
+)
 from title_text import first_stated_date, flatten_inline_markup  # noqa: E402
 
 # Vendored shared publish core (ss_publish/). _publisher is constructed lazily
@@ -148,6 +161,7 @@ REPO_PRIORITY = {
     "augment code": 58,
     "cline": 56,
     "kilo code": 58,
+    "kilo blog": 58,  # blog.kilo.ai product posts. Never bare "kilo" — ⊂ kilobyte
     "kimi code": 58,
     "open interpreter": 56,
     "deep agents": 56,
@@ -184,6 +198,7 @@ CHANGELOG_SHIP_FEED_NAMES = (
     "cursor changelog",
     "github copilot changelog",
     "amp news",
+    "kilo blog",
 )
 
 def _load_dynamic_subreddits():
@@ -485,6 +500,7 @@ def display_repo_name(repo: str) -> str:
         "oh my pi": "OMP",
         "herdr": "Herdr",
         "kilo code": "Kilo Code",
+        "kilo blog": "Kilo",
         "kimi code": "Kimi Code",
         "grok build": "Grok Build",
         "open interpreter": "Open Interpreter",
@@ -728,16 +744,59 @@ def classify_rss(item: dict) -> Optional[dict]:
     feed_low = feed.lower()
 
     if "status" in feed_low:
-        # Provider status incidents (e.g. "Anthropic: Elevated errors on Opus
-        # 4.8 Fast") are operational weather, not editorial signal for a
-        # harness-builder audience: they have no EDITORIAL_SCOPE mandate, ship a
-        # generic blurb, and — even after the #10 same-incident dedup and #11
-        # per-vendor/day cap — still read as the same alert repeating (a vendor
-        # files distinctly-titled incidents daily, each taking the one slot).
-        # Dropped entirely (2026-06-24). The explicit return is load-bearing: a
-        # status title like "...Opus 4.8..." contains the READ_TERM "opus 4", so
-        # falling through (instead of returning here) would misroute it to Read.
+        # Anything except the three history feeds stays dropped. A status title
+        # can contain a READ_TERM ("opus 4"); falling through would file it as Read.
+        # The three feeds reach Watch only after the incident filter.
+        if feed_low not in STATUS_WATCH_FEEDS or not status_incident_allowed(feed, item):
+            return None
+        display = status_display_title(feed, title)
+        blurb = status_blurb(feed, item)
+        score = 64 + age_score(dt, 96) / 10
+        return {
+            "primaryCategory": "watch",
+            "categories": ["watch"],
+            "score": round(score, 2),
+            "summary": trim(blurb, 140),
+            "expiresAt": (dt or now_utc()) + timedelta(hours=CATEGORY_META["watch"]["ttl_hours"]),
+            "publishedAt": dt,
+            "sourceType": "rss",
+            "sourceName": feed,
+            "sourceId": item.get("id", url),
+            "url": url,
+            "title": display,
+        }
+
+    if feed_low == "kilo blog" and not kilo_product_post(item):
         return None
+
+    if feed_low == "testingcatalog":
+        if not testingcatalog_relevant(item):
+            return None
+        reported = bool(item.get("reported")) or is_reported_claim(title, item.get("summary") or "")
+        blob = f"{title} {item.get('summary') or ''}".lower()
+        outage = any(word in blob for word in ("outage", "disruption", "degraded"))
+        primary = "watch" if outage and not reported else "ship"
+        repo = repo_name_from_feed(f"{title} {item.get('summary') or ''}")
+        base = REPO_PRIORITY[repo] if repo in REPO_PRIORITY else 60
+        if reported:
+            base = min(base, 60)
+        score = base + age_score(dt, 96) / 8
+        candidate = {
+            "primaryCategory": primary,
+            "categories": [primary],
+            "score": round(score, 2),
+            "summary": trim(testingcatalog_blurb(item, reported), 140),
+            "expiresAt": (dt or now_utc()) + timedelta(hours=CATEGORY_META[primary]["ttl_hours"]),
+            "publishedAt": dt,
+            "sourceType": "rss",
+            "sourceName": feed,
+            "sourceId": item.get("id", url),
+            "url": url,
+            "title": title,
+        }
+        if reported:
+            candidate["reported"] = True
+        return candidate
 
     if "release notes" in feed_low or is_coding_agent_changelog(item):
         # Mintlify-style changelogs title entries by date ("June 10, 2026")
@@ -793,7 +852,7 @@ def classify_rss(item: dict) -> Optional[dict]:
             base_score = max(20, base_score - 30)
         score = base_score + age_score(dt, 96) / 8
         summary = "New release" if repo == "openclaw" else f"New {repo.title()} release"
-        return {
+        candidate = {
             "primaryCategory": "ship",
             "categories": ["ship"],
             "score": round(score, 2),
@@ -806,6 +865,9 @@ def classify_rss(item: dict) -> Optional[dict]:
             "url": url,
             "title": display_title,
         }
+        if havoptic_feed(feed) or item.get("aggregator") == "havoptic":
+            candidate["aggregator"] = "havoptic"
+        return candidate
 
     if feed_low.strip() in ARXIV_FEEDS and not arxiv_harness_hit(low):
         return None
@@ -1336,6 +1398,10 @@ def backlog_item(candidate: dict) -> dict:
     }
     if candidate.get("weeklyRollup"):
         item["weeklyRollup"] = True
+    if candidate.get("reported"):
+        item["reported"] = True
+    if candidate.get("aggregator"):
+        item["aggregator"] = candidate["aggregator"]
     if "rawScore" in candidate:
         item["rawScore"] = candidate["rawScore"]
     if "rawComments" in candidate:
@@ -1384,7 +1450,30 @@ _WATCHLIST_FETCH_LOGS = (
     "INFO deepseek-harness:",
     "INFO claude.dev:",
     "INFO anthropic-research:",
+    "INFO status-claude:",
+    "INFO status-cursor:",
+    "INFO status-github:",
+    "INFO testingcatalog:",
+    "INFO kilo-blog:",
+    "INFO havoptic:",
 )
+
+
+def _status_health_observation(stdout: str):
+    """Parse the RSS monitor's status-feed line, or None when it did not run.
+
+    Status history is empty most days. The ``status`` source treats that
+    empty line as healthy. A fetch failure is ``status=error`` and still pages.
+    """
+    match = re.search(
+        r"^STATUS_HEALTH status=(ok|empty|error) items=(\d+) reason=(.*)$",
+        stdout or "",
+        re.MULTILINE,
+    )
+    if not match:
+        return None
+    error = (match.group(3) or "").strip() or "-"
+    return match.group(1), int(match.group(2)), error
 
 
 def _reprint_watchlist_fetch_logs(stdout: str) -> None:
@@ -1471,6 +1560,21 @@ def run_monitors() -> None:
             )
         except Exception as exc:  # noqa: BLE001 - health bookkeeping must not starve monitors
             print(f"source_health record failed source={name}: {exc!r}", file=sys.stderr)
+        if name == "rss":
+            observed = _status_health_observation(stdout)
+            if observed is not None:
+                s_status, s_items, s_error = observed
+                try:
+                    source_health.record_source_health(
+                        "status",
+                        status=s_status,
+                        items=s_items,
+                        error=s_error,
+                        memory_dir=MEMORY,
+                        alert_sender=_source_health_alert,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    print(f"source_health record failed source=status: {exc!r}", file=sys.stderr)
 
 
 def _unique_items(items: List[dict], key_fields: tuple[str, ...] = ("id", "url", "link")) -> List[dict]:
@@ -2162,6 +2266,53 @@ def _claude_code_rollup_candidate(batch: dict) -> Optional[dict]:
     }
 
 
+def _primary_release_index(candidates: Dict[str, List[dict]], posted_urls: set) -> tuple:
+    """Vendor URLs and (repo, version) pairs Havoptic must not repost."""
+    urls = {url for url in posted_urls if url}
+    versions = set()
+    for kind, items in candidates.items():
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            if kind == "rss":
+                feed = item.get("feed") or ""
+                if havoptic_feed(feed):
+                    continue
+                link = item.get("link") or ""
+                if link:
+                    urls.add(link)
+                repo = repo_name_from_feed(feed)
+                ver = version_key(item.get("title") or "") or version_key(link)
+                if repo in REPO_PRIORITY and ver:
+                    versions.add((repo, ver))
+            elif kind == "ecosystem_release":
+                link = item.get("url") or ""
+                if link:
+                    urls.add(link)
+                repo = repo_name_from_feed((item.get("repo") or "").replace("/", " ").replace("-", " "))
+                ver = version_key(item.get("tag") or "") or version_key(item.get("name") or "")
+                if repo in REPO_PRIORITY and ver:
+                    versions.add((repo, ver))
+    return urls, versions
+
+
+def havoptic_already_covered(candidate: dict, urls: set, versions: set) -> bool:
+    """True when a primary source already has this Havoptic release.
+
+    The vendor link wins. A fragment on a bare changelog is a different
+    version, so it does not match the page URL of an earlier post.
+    """
+    if not isinstance(candidate, dict) or candidate.get("aggregator") != "havoptic":
+        return False
+    url = candidate.get("url") or ""
+    for other in urls:
+        if urls_same_release(url, other):
+            return True
+    repo = repo_name_from_feed(candidate.get("sourceName") or "")
+    ver = version_key(candidate.get("title") or "") or version_key(url)
+    return bool(repo in REPO_PRIORITY and ver and (repo, ver) in versions)
+
+
 def collect_into_backlog() -> dict:
     ensure_files()
 
@@ -2177,6 +2328,9 @@ def collect_into_backlog() -> dict:
 
     added = []
     candidates = collect_candidates()
+    primary_urls, primary_versions = _primary_release_index(
+        candidates, set(state.get("postedUrls") or [])
+    )
     acked_releases: List[dict] = []
     intake: Dict[str, Dict[str, int]] = {}
     pending_keys = set()
@@ -2230,7 +2384,7 @@ def collect_into_backlog() -> dict:
             # tag so the monitor does not re-emit it every collect.
             if is_stale_dated_item(candidate, collected_at) or title_repeats_story(
                 candidate.get("title") or "", posted_titles
-            ):
+            ) or havoptic_already_covered(candidate, primary_urls, primary_versions):
                 seen_source_keys.add(key)
                 if eco is not None:
                     acked_releases.append(eco)
@@ -3093,6 +3247,7 @@ Rules:
 - Use only facts present in the item lines below. Do not add claims, context, or background from anywhere else.
 - Copy numbers, version strings, and dates verbatim. Do not round, shorten, reformat, or invent them.
 - Keep the source's own verbs. Do not write "launches" or "opens" unless the source text says so.
+- If an item line says REPORTED, it is a leak or pre-release. Write "reportedly" or "spotted". Do not state it as launched, shipped, or generally available.
 - No hype or opinion words: massive, game-changing, groundbreaking, revolutionary, unprecedented, one of the largest.
 - Ship: what changed, using the release notes if provided. Do not invent features.
 - Watch: the risk, what to check, what breaks — only when the item text says so.
@@ -3130,6 +3285,8 @@ Items:"""
         body = f"{title} | {url} | {raw_summary} | source: {source}"
         if groundings[i]:
             body += f" | {groundings[i]}"
+        if item.get("reported"):
+            body += " | REPORTED leak or pre-release; say reportedly or spotted; do not state a launch"
         # The item index stays out of fact_parts. Separators add no digits, so
         # the guard sees the same number tokens as the fields themselves.
         fact_parts.append(body)
@@ -4056,6 +4213,8 @@ def curator_input_bundle(category: str, limit: Optional[int] = None) -> dict:
             "score": item.get("score"),
             "published_at": item.get("publishedAt"),
         }
+        if item.get("reported"):
+            slim["reported"] = True
         slim.update(_fetch_item_context(item))
         items.append(slim)
 

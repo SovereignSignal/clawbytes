@@ -10,7 +10,7 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 
 | Class | What | Defined in | Cadence |
 |---|---|---|---|
-| RSS/Atom feeds | 82 feeds: vendor blogs, changelogs that Ship (Cursor, GitHub Copilot, Amp News), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, fx, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau, DeepSeek Harness), research blogs, claude.dev Blog (Read), ArXiv cs.AI/cs.CL (harness-compound gate — bare `agent` is not enough). Warp, Replit, Augment, JetBrains, and Zed blogs stay in the list and route to Read. Windsurf Blog is not in the list (removed 2026-09-23, stale since 2026-05-12). A new feed name baselines silently. | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
+| RSS/Atom feeds | 88 feeds: vendor blogs, changelogs that Ship (Cursor, GitHub Copilot, Amp News, Kilo Blog product posts), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, fx, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau, DeepSeek Harness), research blogs, claude.dev Blog (Read), ArXiv cs.AI/cs.CL (harness-compound gate — bare `agent` is not enough), TestingCatalog (coding-tool/model items; leaks marked reported), Havoptic releases (changelog backstop, vendor link, deduped against primary atoms), and three status-page history feeds (Claude, Cursor, GitHub) that reach Watch only for in-scope partial/major/elevated incidents. Warp, Replit, Augment, JetBrains, and Zed blogs stay in the list and route to Read. Windsurf Blog is not in the list (removed 2026-09-23, stale since 2026-05-12). A new feed name baselines silently. | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
 | GitHub releases (API) | Curated + auto-discovered repos, merged via `claw-ecosystem-sources.json`. First tag on a repo is a silent baseline. Later tags are classified on the release path; the tag is marked seen only after collect hands the item to the backlog. | `scripts/claw-ecosystem-monitor.sh` | 30 min |
 | HF Daily Papers | huggingface.co/papers via `api/daily_papers`, keyword-scored into lanes | `scripts/claw-hf-papers.py` | 30 min |
 | Hacker News | Algolia queries (harness/agent/MCP terms, one query per term — Algolia has no `OR`), plus one `tags=front_page` pass filtered to agent/coding/AI-tool stories at ≥150 points. Search queries use a 14-day window. | `scripts/claw-hn-monitor.py`, `claw-ecosystem-monitor.sh` | 30 min |
@@ -272,6 +272,18 @@ feed bypasses the keyword gate because titles like "Building with Claude
 Sonnet 5.5" carry none). Anthropic research sitemap
 (`https://www.anthropic.com/research/`, separate watch key, silent baseline).
 Research pages are Read; a cyber/security slug is Watch (GLM-5.3 cyber report).
+
+### 2026-10-07 free sources from the coverage scan
+
+**Added** — Claude, Cursor, and GitHub status history RSS (`status.claude.com`, `status.cursor.com`, `githubstatus.com`). Watch only. The filter keeps partial/major outages and elevated errors on Claude (claude.ai, Claude Code, Cowork, the Claude API, model-request errors), Cursor product surfaces (Cloud Agents, review agents, automations), and GitHub Copilot, Actions, or the GitHub API. Scheduled maintenance, billing, usage-page charts, Grok-Bot-only Cursor notes, and incidents that were already resolved in under 30 minutes are dropped. Incident updates share one URL, so investigating/identified/resolved is one story. A day with no new incident is healthy (`status` is in `EMPTY_IS_HEALTHY`); a failed fetch still pages. OpenAI and OpenRouter status RSS stay off (403).
+
+**Added** — TestingCatalog `https://testingcatalog.com/rss/`. Coding-tool and coding-model items only (sponsored posts and consumer AI stay out). Launches go to Ship. Headlines that prepare, leak, or test a thing are marked `reported`: the writer and curator must say "reportedly" or "spotted" and must not state a launch.
+
+**Added** — Kilo Blog `https://blog.kilo.ai/feed`. Product posts Ship (this is the feed that had "Introducing Kilo Desktop"). Essays on that Substack are not emitted. The GitHub atom remains the release feed.
+
+**Added** — Havoptic `https://havoptic.com/feed.xml` as a changelog backstop, not a primary source. Each item is renamed to the tool and linked to the vendor URL (GitHub tag when Havoptic only had a changelog blob; a version fragment when the vendor page is shared). Collect drops a Havoptic item when a primary RSS item or a posted URL already has that release. Havoptic's own Cursor history, checked 2026-10-07, stops at v3.11 on 2026-07-10 while `cursor.com/changelog/rss.xml` has 2026-10-06. Havoptic will not fill that Cursor gap until Havoptic itself updates.
+
+**Not in this change** — OpenAI/OpenRouter status, newsletter RSS, GitNova, Artificial Analysis, X accounts. No new env vars, no scheduler changes.
 
 **Not in this change** — RSS gzip decompression already shipped in #36.
 Scheduler locking already shipped in #33. No env vars, caps, lanes, or
