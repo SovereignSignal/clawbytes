@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<item>
+      <title>Incident with Actions</title>
+      <description>
+&lt;p&gt; &lt;small&gt;Oct &lt;var data-var='date'&gt; 5&lt;/var&gt;, &lt;var data-var='time'&gt;22:49&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt; &lt;strong&gt;Resolved&lt;/strong&gt; - On October 5, 2026, between 18:48 and 22:49 UTC, GitHub Actions and Hosted Runners experienced degraded performance. Over the full incident, 14.3% of workflow runs using GitHub-hosted runners and 26.5% of individual GitHub-hosted jobs did not start within five minutes. &lt;br /&gt;&lt;br /&gt; &lt;br /&gt;During the roughly 90-minute period of highest impact, 47.0% of workflow runs using GitHub-hosted runners failed and 71.9% of GitHub-hosted jobs did not start within five minutes, while existing Pages sites continued to serve normally. A portion of customers also encountered intermittent errors in repository lists, licensing and billing pages, and some Copilot features. Self-hosted runners were not affected. &lt;br /&gt;&lt;br /&gt;&lt;br /&gt;The incident was caused by a partial networking failure that disrupted connectivity between one of our on-premises datacenter regions and a subset of cloud-hosted regional database and storage services. &lt;br /&gt;&lt;br /&gt;&lt;br /&gt;We mitigated the incident by shifting database and storage traffic to healthy regions and endpoints and increasing capacity for affected compute services. GitHub Actions and Hosted Runners recovered by 21:54 UTC, and all affected services recovered by 22:49 UTC. &lt;br /&gt;&lt;br /&gt;  &lt;br /&gt;We are partnering with our cloud provider to understand the network failure and identify improvements to network-path resilience, detection, and recovery for similar incidents. &lt;/p&gt; &lt;p&gt; &lt;small&gt;Oct &lt;var data-var='date'&gt; 5&lt;/var&gt;, &lt;var data-var='time'&gt;22:40&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt; &lt;strong&gt;Update&lt;/strong&gt; - Pages is operating normally. &lt;/p&gt; &lt;p&gt; &lt;small&gt;Oct &lt;var data-var='date'&gt; 5&lt;/var&gt;, &lt;var data-var='time'&gt;21:54&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt; &lt;strong&gt;Update&lt;/stron…&lt;/p&gt;</description>
+      <pubDate>Mon, 05 Oct 2026 22:49:42 +0000</pubDate>
+      <link>https://www.githubstatus.com/incidents/3q1yb5m7ltvb</link>
+      <guid>https://www.githubstatus.com/incidents/3q1yb5m7ltvb</guid>
+    </item>
+    
+</channel>
+</rss>

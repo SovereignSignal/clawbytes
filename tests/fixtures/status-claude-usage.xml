@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<item>
+      <title>Elevated errors on platform.claude.com</title>
+      <description>
+&lt;p&gt; &lt;small&gt;Oct &lt;var data-var='date'&gt; 7&lt;/var&gt;, &lt;var data-var='time'&gt;13:25&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt; &lt;strong&gt;Investigating&lt;/strong&gt; - We are investigating elevated errors affecting usage data on the platform.claude.com Usage page and the Admin API usage report. Core functionality is not affected. We will provide an update as soon as possible. &lt;/p&gt;      </description>
+      <pubDate>Wed, 07 Oct 2026 13:25:04 +0000</pubDate>
+      <link>https://status.claude.com/incidents/978mjkgw6mh7</link>
+      <guid>https://status.claude.com/incidents/978mjkgw6mh7</guid>
+    </item>
+    
+</channel>
+</rss>

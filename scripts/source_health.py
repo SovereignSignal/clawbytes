@@ -37,12 +37,18 @@ UNHEALTHY_ALERT_AFTER = timedelta(hours=24)
 # hn is here for a different reason: the search matches a handful of stories
 # a day, so a 24h gap is ordinary. Its fetch errors print even under --quiet,
 # which keeps a failed search from reading as a clean empty.
+#
+# status is the three provider history feeds inside the RSS monitor. A day
+# with no new incident is their resting state. The monitor prints
+# STATUS_HEALTH status=error when a feed fails to fetch, so a dead feed
+# still pages. A clean empty does not.
 EMPTY_IS_HEALTHY = frozenset({
     "leaderboard",
     "registry",
     "pagewatch",
     "advisory",
     "hn",
+    "status",
     "ecosystem-discover",
     "source-discovery",
 })

@@ -17,6 +17,17 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
+from feed_filters import (
+    STATUS_FEED_NAMES,
+    collapse_status_entries,
+    element_text,
+    is_reported_claim,
+    kilo_product_post,
+    normalize_havoptic_entry,
+    status_incident_allowed,
+    testingcatalog_relevant,
+)
+
 # Workspace path
 WORKSPACE = Path(__file__).parent.parent
 MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
@@ -28,7 +39,14 @@ STATE_FILE = MEMORY_DIR / "claw-rss-state.json"
 _FETCH_LOG_NAMES = {
     "DeepSeek Harness Releases": "deepseek-harness",
     "claude.dev Blog": "claude.dev",
+    "Claude Status": "status-claude",
+    "Cursor Status": "status-cursor",
+    "GitHub Status": "status-github",
+    "TestingCatalog": "testingcatalog",
+    "Kilo Blog": "kilo-blog",
+    "Havoptic Releases": "havoptic",
 }
+_STATUS_FEEDS = set(STATUS_FEED_NAMES)
 
 # RSS feeds to monitor
 RSS_FEEDS = [
@@ -132,10 +150,21 @@ RSS_FEEDS = [
     {"name": "MiMo Code Releases", "url": "https://github.com/XiaomiMiMo/MiMo-Code/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "AGNO-AGI Releases", "url": "https://github.com/agno-agi/agno/releases.atom", "tags": ["releases", "frameworks"]},
     {"name": "Tau Coding Agent Releases", "url": "https://github.com/huggingface/tau/releases.atom", "tags": ["releases", "coding-agent"]},
-    # Provider status feeds removed 2026-06-24: provider-status incidents are
-    # retired from the Watch lane (operational weather, not editorial signal —
-    # they read as the same alert repeating). classify_rss drops the status
-    # branch; this is the source side of that retirement.
+    # Status-page history (2026-10-07). OpenAI and OpenRouter still 403.
+    # classify_rss keeps partial/major/elevated incidents on Claude, Cursor,
+    # and GitHub Copilot/Actions/API. Empty days are healthy (source "status").
+    {"name": "Claude Status", "url": "https://status.claude.com/history.rss", "tags": ["status", "official"]},
+    {"name": "Cursor Status", "url": "https://status.cursor.com/history.rss", "tags": ["status", "official"]},
+    {"name": "GitHub Status", "url": "https://www.githubstatus.com/history.rss", "tags": ["status", "official"]},
+    # Leak and launch wire. Relevance is coding-tool/model only; leak headlines
+    # are marked reported so the writer does not state them as launches.
+    {"name": "TestingCatalog", "url": "https://testingcatalog.com/rss/", "tags": ["leak", "models"]},
+    # Kilo's GitHub atom missed "Introducing Kilo Desktop". Product posts Ship;
+    # the Substack's essays do not.
+    {"name": "Kilo Blog", "url": "https://blog.kilo.ai/feed", "tags": ["coding-agent", "official"], "high_signal": True},
+    # Third-party changelog backstop. Vendor URL when the entry has one.
+    # Dedupe against primary atoms happens in collect (prefer the vendor item).
+    {"name": "Havoptic Releases", "url": "https://havoptic.com/feed.xml", "tags": ["releases", "aggregator"]},
 ]
 
 # Keywords for relevance filtering (lowercase)
@@ -265,12 +294,14 @@ def parse_atom(xml_text):
             if summary is None:
                 summary = entry.find("atom:content", ns)
             entry_id = entry.find("atom:id", ns)
+            detail = element_text(summary)
             
             entries.append({
-                "title": title.text if title is not None else "",
+                "title": (title.text or "").strip() if title is not None else "",
                 "link": link.get("href") if link is not None else "",
                 "published": published.text if published is not None else "",
-                "summary": summary.text[:500] if summary is not None and summary.text else "",
+                "summary": detail[:500],
+                "detail": detail[:8000],
                 "id": entry_id.text if entry_id is not None else ""
             })
         
@@ -282,12 +313,14 @@ def parse_atom(xml_text):
                 published = entry.find("published") or entry.find("updated")
                 summary = entry.find("summary") or entry.find("content")
                 entry_id = entry.find("id")
+                detail = element_text(summary)
                 
                 entries.append({
-                    "title": title.text if title is not None else "",
+                    "title": (title.text or "").strip() if title is not None else "",
                     "link": link.get("href") if link is not None else "",
                     "published": published.text if published is not None else "",
-                    "summary": summary.text[:500] if summary is not None and summary.text else "",
+                    "summary": detail[:500],
+                    "detail": detail[:8000],
                     "id": entry_id.text if entry_id is not None else ""
                 })
     except ET.ParseError as e:
@@ -305,13 +338,19 @@ def parse_rss(xml_text):
             pubDate = item.find("pubDate")
             description = item.find("description")
             guid = item.find("guid")
+            detail = element_text(description)
+            categories = [element_text(node).strip() for node in item.findall("category")]
+            categories = [node for node in categories if node]
             
             entries.append({
-                "title": title.text if title is not None else "",
+                "title": (title.text or "").strip() if title is not None else "",
                 "link": link.text if link is not None else "",
                 "published": pubDate.text if pubDate is not None else "",
-                "summary": description.text[:500] if description is not None and description.text else "",
-                "id": guid.text if guid is not None else (link.text if link is not None else "")
+                "summary": detail[:500],
+                "detail": detail[:8000],
+                "id": guid.text if guid is not None else (link.text if link is not None else ""),
+                "category": categories[0] if categories else "",
+                "categories": categories,
             })
     except ET.ParseError as e:
         print(f"  Parse error: {e}")
@@ -338,7 +377,8 @@ def is_relevant(entry, feed_name, tags=None):
     """Check if entry is relevant to OpenClaw ecosystem."""
     # Release, release-notes, and coding-agent changelog/news feeds are always
     # relevant: their entry titles are versions, dates, or feature names that
-    # often carry no keywords. (Provider status feeds were retired 2026-06-24.)
+    # often carry no keywords. Status history, TestingCatalog, and Kilo Blog
+    # have their own gates below; they are not release feeds.
     # Do NOT bypass the generic "GitHub Changelog" — only Cursor/Copilot
     # changelogs and coding-agent-tagged news/changelog feeds.
     low_name = feed_name.lower()
@@ -357,6 +397,14 @@ def is_relevant(entry, feed_name, tags=None):
     # ("Building with Claude Sonnet 5.5") and would otherwise never be emitted.
     if low_name == "claude.dev blog":
         return True
+    # Status history is a firehose of maintenance and minute-long blips.
+    # These feed names do not contain "releases", so this gate is what runs.
+    if feed_name in _STATUS_FEEDS:
+        return status_incident_allowed(feed_name, entry)
+    if low_name == "testingcatalog":
+        return testingcatalog_relevant(entry)
+    if low_name == "kilo blog":
+        return kilo_product_post(entry)
 
     # ArXiv is a research firehose. Bare "agent" (and the general keyword
     # list) lets adjacent ML through. Require a harness compound.
@@ -399,11 +447,15 @@ def check_feeds(filter_relevant=True, verbose=True):
         except Exception:
             pass
     
+    status_failures = []
+    saw_status_feed = False
     for feed in all_feeds:
         name = feed["name"]
         url = feed["url"]
         tags = feed.get("tags", [])
         high_signal = feed.get("high_signal", False)
+        if name in _STATUS_FEEDS:
+            saw_status_feed = True
         
         if verbose:
             print(f"\n📡 Checking: {name}")
@@ -412,9 +464,16 @@ def check_feeds(filter_relevant=True, verbose=True):
         
         if xml_text is None:
             feed_status[name] = "failed"
+            if name in _STATUS_FEEDS:
+                status_failures.append(name)
             continue
         
         entries = parse_feed(xml_text)
+        if name in _STATUS_FEEDS:
+            # One story per incident, before the baseline id list is written.
+            entries = collapse_status_entries(entries)
+        elif name == "Havoptic Releases":
+            entries = [shaped for shaped in (normalize_havoptic_entry(entry) for entry in entries) if shaped]
         if verbose:
             print(f"  Found {len(entries)} entries")
         
@@ -432,8 +491,11 @@ def check_feeds(filter_relevant=True, verbose=True):
             continue
 
         last_seen = seen_map.get(name, [])
+        # Havoptic mixes every tool. A Cursor release can sit past the
+        # usual 10-item window on a busy day.
+        scan_limit = 20 if name == "Havoptic Releases" else 10
         
-        for entry in entries[:10]:  # Check latest 10 entries
+        for entry in entries[:scan_limit]:
             entry_id = entry.get("id") or entry.get("link") or entry.get("title")
             
             if not entry_id or entry_id in last_seen:
@@ -442,9 +504,9 @@ def check_feeds(filter_relevant=True, verbose=True):
             # Check relevance
             if filter_relevant and not is_relevant(entry, name, tags):
                 continue
-            
-            new_items.append({
-                "feed": name,
+
+            item = {
+                "feed": entry.get("_feed") or name,
                 "title": entry.get("title", ""),
                 "link": entry.get("link", ""),
                 "published": entry.get("published", ""),
@@ -452,7 +514,16 @@ def check_feeds(filter_relevant=True, verbose=True):
                 "high_signal": high_signal,
                 "id": entry_id,
                 "found_at": datetime.now(timezone.utc).isoformat()
-            })
+            }
+            if name in _STATUS_FEEDS:
+                item["detail"] = entry.get("detail") or ""
+            if name == "TestingCatalog":
+                item["reported"] = is_reported_claim(entry.get("title") or "", entry.get("summary") or "")
+            if entry.get("aggregator"):
+                item["aggregator"] = entry["aggregator"]
+            if entry.get("categories"):
+                item["categories"] = entry["categories"]
+            new_items.append(item)
             
             if verbose:
                 signal = "🔥 HIGH SIGNAL: " if high_signal else "  → "
@@ -471,6 +542,15 @@ def check_feeds(filter_relevant=True, verbose=True):
         state["foundItems"] = state["foundItems"][-500:]
     
     save_state(state)
+    if saw_status_feed:
+        status_new = sum(1 for item in new_items if item.get("feed") in _STATUS_FEEDS)
+        if status_failures:
+            err = ", ".join(status_failures) + " fetch failed"
+            print(f"STATUS_HEALTH status=error items={status_new} reason={err}", flush=True)
+        elif status_new == 0:
+            print("STATUS_HEALTH status=empty items=0 reason=-", flush=True)
+        else:
+            print(f"STATUS_HEALTH status=ok items={status_new} reason=-", flush=True)
     
     return new_items, feed_status
 

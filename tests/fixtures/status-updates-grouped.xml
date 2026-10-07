@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<item>
+  <title>Investigating - Elevated errors on claude.ai, Claude Code, Claude Cowork and the Claude API</title>
+  <link>https://status.claude.com/incidents/4xvtc2gnq73l?update=1</link>
+  <guid>https://status.claude.com/incidents/4xvtc2gnq73l#investigating</guid>
+  <pubDate>Tue, 29 Sep 2026 14:21:00 +0000</pubDate>
+  <description>Sep 29 , 14:21 UTC Investigating - We are investigating elevated errors on claude.ai, Claude Code, Claude Cowork and the Claude API.</description>
+</item>
+<item>
+  <title>Identified - Elevated errors on claude.ai, Claude Code, Claude Cowork and the Claude API</title>
+  <link>https://status.claude.com/incidents/4xvtc2gnq73l?update=2</link>
+  <guid>https://status.claude.com/incidents/4xvtc2gnq73l#identified</guid>
+  <pubDate>Tue, 29 Sep 2026 15:30:00 +0000</pubDate>
+  <description>Sep 29 , 15:30 UTC Identified - The elevated errors on claude.ai, Claude Code, Claude Cowork and the Claude API have been identified.</description>
+</item>
+<item>
+  <title>Resolved - Elevated errors on claude.ai, Claude Code, Claude Cowork and the Claude API</title>
+  <link>https://status.claude.com/incidents/4xvtc2gnq73l?update=3</link>
+  <guid>https://status.claude.com/incidents/4xvtc2gnq73l#resolved</guid>
+  <pubDate>Tue, 29 Sep 2026 16:27:21 +0000</pubDate>
+  <description>Sep 29 , 16:27 UTC Resolved - The issue affecting claude.ai, Claude Code, Claude Cowork and the Claude API has been resolved.</description>
+</item>
+</channel>
+</rss>

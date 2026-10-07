@@ -12,12 +12,10 @@ def _item(feed, title):
     }
 
 
-# ── provider STATUS incidents are dropped entirely (2026-06-24) ──────────────
-#    "Anthropic: Elevated errors on Opus 4.8 Fast" is operational weather, not
-#    editorial signal: it has no EDITORIAL_SCOPE mandate, ships a generic blurb,
-#    and — even after the #10 dedup and #11 per-vendor/day cap — still reads as
-#    the same alert repeating (distinct daily incidents each take the one slot).
-#    The status branch of classify_rss now returns None.
+# ── provider status: three history feeds, filtered; every other status name drops ─
+#    A title like "Opus 4.8" contains the READ_TERM "opus 4". Feeds that are not
+#    Claude/Cursor/GitHub status, and incidents that fail the filter, return None
+#    before READ_TERMS. They must not land in Read.
 
 def test_provider_status_incident_is_dropped():
     assert ct.classify_rss(_item("Anthropic Status", "Elevated errors across models")) is None
@@ -27,16 +25,25 @@ def test_openai_status_incident_is_dropped():
     assert ct.classify_rss(_item("OpenAI Status", "Elevated error rates for GPT 5.5 in Codex")) is None
 
 
-def test_github_status_incident_is_dropped():
-    assert ct.classify_rss(_item("GitHub Status", "Degraded performance for Copilot")) is None
+def test_github_copilot_status_reaches_watch():
+    candidate = ct.classify_rss(_item("GitHub Status", "Degraded performance for Copilot"))
+    assert candidate is not None
+    assert candidate["primaryCategory"] == "watch"
+    assert "read" not in candidate["categories"]
 
 
 def test_status_feed_item_with_read_keyword_still_dropped():
     # Load-bearing: a status title like "...Opus 4.8..." contains the READ_TERM
-    # "opus 4". Dropping the branch must NOT let such an item fall through into
-    # the Read lane — the status branch returns None *before* READ_TERMS is
-    # consulted, so the whole status feed is suppressed.
+    # "opus 4". An unknown status feed, and a too-short Claude incident, must
+    # not fall through into Read.
     assert ct.classify_rss(_item("Anthropic Status", "Elevated errors on Opus 4.8 Fast")) is None
+    short = _item("Claude Status", "Elevated errors on Opus 4.8 Fast")
+    short["published"] = "Tue, 06 Oct 2026 12:43:02 +0000"
+    short["detail"] = (
+        "Oct 6 , 12:43 UTC Resolved - The issue affecting Claude Opus 4.8 Fast has been resolved. "
+        "Oct 6 , 12:24 UTC Investigating - We are investigating elevated errors on requests to Claude Opus 4.8 Fast."
+    )
+    assert ct.classify_rss(short) is None
 
 
 # ── release-notes / releases routing is unaffected ───────────────────────────
