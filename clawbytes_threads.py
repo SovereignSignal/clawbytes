@@ -39,13 +39,16 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 from completion_diag import empty_content_message  # noqa: E402
 from feed_filters import (  # noqa: E402
+    STATUS_FEED_NAMES,
     STATUS_WATCH_FEEDS,
     havoptic_feed,
+    incident_public_url,
     is_reported_claim,
     kilo_product_post,
     status_blurb,
     status_display_title,
     status_incident_allowed,
+    status_item_predates_watch,
     testingcatalog_blurb,
     testingcatalog_relevant,
     urls_same_release,
@@ -2313,8 +2316,135 @@ def havoptic_already_covered(candidate: dict, urls: set, versions: set) -> bool:
     return bool(repo in REPO_PRIORITY and ver and (repo, ver) in versions)
 
 
+def _status_source_name(item: dict) -> str:
+    name = (item.get("sourceName") or "").strip()
+    if name in STATUS_FEED_NAMES:
+        return name
+    lowered = name.lower()
+    for feed in STATUS_FEED_NAMES:
+        if feed.lower() == lowered:
+            return feed
+    return ""
+
+
+def _status_details_by_url(rss_state: dict) -> Dict[str, str]:
+    details = {}
+    for raw in rss_state.get("foundItems") or []:
+        if not isinstance(raw, dict):
+            continue
+        if not _status_source_name({"sourceName": raw.get("feed") or ""}):
+            continue
+        url = incident_public_url(raw.get("link") or raw.get("id") or "")
+        detail = raw.get("detail") or ""
+        if url and detail:
+            details[url] = detail
+    return details
+
+
+def drop_prebaseline_status_items(now: Optional[datetime] = None) -> List[str]:
+    """Retire queued status incidents from before that feed's baseline.
+
+    Safe to run on every process start and every collect. Only status-feed
+    rows are touched. A missing baseline clock is stamped once (pending until
+    the RSS monitor completes a successful fetch) and is never moved forward.
+    """
+    ensure_files()
+    moment = now or now_utc()
+    rss_path = MEMORY / "claw-rss-state.json"
+    rss_state = load_json(rss_path, {})
+    if not isinstance(rss_state, dict):
+        rss_state = {}
+    baselines = rss_state.get("feedBaseline")
+    if not isinstance(baselines, dict):
+        baselines = {}
+        rss_state["feedBaseline"] = baselines
+    rss_changed = False
+    for name in STATUS_FEED_NAMES:
+        rec = baselines.get(name)
+        if not isinstance(rec, dict):
+            baselines[name] = {"at": moment.isoformat(), "pending": True}
+            rss_changed = True
+            continue
+        if not rec.get("at"):
+            rec["at"] = moment.isoformat()
+            rss_changed = True
+        if not rec.get("url") and not rec.get("pending"):
+            rec["pending"] = True
+            rss_changed = True
+
+    backlog = load_json(BACKLOG_FILE, {"items": []})
+    state = load_json(THREAD_STATE_FILE, {})
+    if not isinstance(backlog, dict):
+        backlog = {"items": []}
+    if not isinstance(state, dict):
+        state = {}
+    items = backlog.get("items")
+    if not isinstance(items, list):
+        items = []
+        backlog["items"] = items
+    seen = state.get("seenSourceKeys")
+    if not isinstance(seen, list):
+        seen = []
+    seen_set = set(seen)
+    details = _status_details_by_url(rss_state)
+    seen_map = rss_state.get("lastSeenByFeed")
+    if not isinstance(seen_map, dict):
+        seen_map = {}
+        rss_state["lastSeenByFeed"] = seen_map
+    dropped: List[str] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("status") != "queued":
+            continue
+        feed = _status_source_name(item)
+        if not feed:
+            continue
+        rec = baselines.get(feed) if isinstance(baselines.get(feed), dict) else {}
+        baseline_at = parse_dt(rec.get("at") or "")
+        url = incident_public_url(item.get("url") or "")
+        detail = details.get(url) or ""
+        published = item.get("publishedAt") or ""
+        if not isinstance(published, str):
+            published = published.isoformat() if isinstance(published, datetime) else ""
+        if not status_item_predates_watch(
+            detail,
+            published,
+            baseline_at,
+            moment,
+            summary=item.get("summary") or "",
+        ):
+            continue
+        item["status"] = "retired"
+        item["retiredReason"] = "status_before_baseline"
+        key = source_key("rss", item.get("sourceId") or url, url)
+        if key not in seen_set:
+            seen.append(key)
+            seen_set.add(key)
+        if url:
+            bucket = seen_map.get(feed)
+            if not isinstance(bucket, list):
+                bucket = []
+            if url not in bucket:
+                bucket.append(url)
+                rss_changed = True
+            seen_map[feed] = bucket[-50:]
+        dropped.append(url or item.get("url") or "")
+
+    if rss_changed or dropped:
+        rss_state["feedBaseline"] = baselines
+        rss_state["lastSeenByFeed"] = seen_map
+        save_json(rss_path, rss_state)
+    if dropped:
+        state["seenSourceKeys"] = seen[-5000:]
+        save_json(BACKLOG_FILE, backlog)
+        save_json(THREAD_STATE_FILE, state)
+    shown = " ".join(url for url in dropped if url) or "-"
+    print(f"INFO status-queue-cleanup dropped={len(dropped)} urls={shown}", flush=True)
+    return dropped
+
+
 def collect_into_backlog() -> dict:
     ensure_files()
+    drop_prebaseline_status_items()
 
     backlog = load_json(BACKLOG_FILE, {"items": []})
     state = load_json(THREAD_STATE_FILE, {})

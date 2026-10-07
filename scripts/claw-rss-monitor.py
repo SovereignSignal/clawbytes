@@ -428,6 +428,63 @@ def _log_fetch(name, detail):
         print(f"INFO {label}: {detail}", flush=True)
 
 
+def _xml_document(xml_text):
+    """True when the body is a well-formed RSS, Atom, or RDF feed.
+
+    An error page or a truncated body must not become the baseline and must
+    not wipe ids already recorded for this feed. A well-formed HTML error
+    page is not a feed.
+    """
+    if xml_text is None or not str(xml_text).strip():
+        return False
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return False
+    tag = (root.tag or "").lower()
+    return tag.endswith("rss") or tag.endswith("feed") or tag.endswith("rdf")
+
+
+def _baseline_record(state, name):
+    baselines = state.get("feedBaseline")
+    if not isinstance(baselines, dict):
+        return None
+    rec = baselines.get(name)
+    return rec if isinstance(rec, dict) else None
+
+
+def _baseline_ready(state, name, url):
+    """True only after a successful fetch of this exact URL.
+
+    A name left in lastSeenByFeed by a feed that was later removed is not a
+    baseline. Neither is a pending watermark written before the fetch.
+    """
+    rec = _baseline_record(state, name)
+    if not rec or rec.get("pending") or not rec.get("url"):
+        return False
+    return rec.get("url") == url
+
+
+def _remember_baseline(state, name, url):
+    """Record the URL that was actually fetched. Keep the earliest watermark."""
+    baselines = state.get("feedBaseline")
+    if not isinstance(baselines, dict):
+        baselines = {}
+        state["feedBaseline"] = baselines
+    prev = baselines.get(name)
+    prev = prev if isinstance(prev, dict) else {}
+    at = prev.get("at") or datetime.now(timezone.utc).isoformat()
+    baselines[name] = {"url": url, "at": at}
+
+
+def _seen_map(state):
+    seen_map = state.get("lastSeenByFeed")
+    if not isinstance(seen_map, dict):
+        seen_map = {}
+        state["lastSeenByFeed"] = seen_map
+    return seen_map
+
+
 def check_feeds(filter_relevant=True, verbose=True):
     """Check all RSS feeds for new content."""
     state = load_state()
@@ -461,13 +518,15 @@ def check_feeds(filter_relevant=True, verbose=True):
             print(f"\n📡 Checking: {name}")
         
         xml_text = fetch_feed(url)
-        
-        if xml_text is None:
+
+        if xml_text is None or not _xml_document(xml_text):
             feed_status[name] = "failed"
             if name in _STATUS_FEEDS:
                 status_failures.append(name)
+            if xml_text is not None:
+                print(f"  Parse error: {name}")
             continue
-        
+
         entries = parse_feed(xml_text)
         if name in _STATUS_FEEDS:
             # One story per incident, before the baseline id list is written.
@@ -476,19 +535,40 @@ def check_feeds(filter_relevant=True, verbose=True):
             entries = [shaped for shaped in (normalize_havoptic_entry(entry) for entry in entries) if shaped]
         if verbose:
             print(f"  Found {len(entries)} entries")
-        
+
         feed_status[name] = f"ok ({len(entries)} entries)"
-        
-        # First sighting of a feed name records ids and emits nothing.
-        # Otherwise a newly added atom dumps its in-TTL backlog as news.
-        seen_map = state.setdefault("lastSeenByFeed", {})
-        if name not in seen_map:
-            seen_ids = [e.get("id") or e.get("link") for e in entries[:50]]
-            seen_map[name] = seen_ids
-            _log_fetch(name, "baseline written")
-            if verbose:
-                print(f"  baseline recorded ({len(seen_ids)} ids), emitting nothing")
-            continue
+
+        # Baseline is the first successful fetch of this URL, not the first
+        # time the name appears in lastSeenByFeed. Cursor Status and GitHub
+        # Status kept June's atom id lists when those feeds were removed, so
+        # re-adding the names skipped the silent baseline and posted history.
+        # A failed or unparseable fetch does not write this record.
+        seen_map = _seen_map(state)
+        if not _baseline_ready(state, name, url):
+            legacy = isinstance(seen_map.get(name), list)
+            rec = _baseline_record(state, name)
+            url_changed = bool(
+                rec and rec.get("url") and rec.get("url") != url and not rec.get("pending")
+            )
+            # Live non-status feeds already have a good id list and no URL on
+            # record. Stamp the URL and keep diffing. Status names reused from
+            # the retired atom feeds must baseline again.
+            adopt_legacy = (
+                name not in _STATUS_FEEDS
+                and legacy
+                and not url_changed
+                and (rec is None or rec.get("pending") or not rec.get("url"))
+            )
+            if adopt_legacy:
+                _remember_baseline(state, name, url)
+            else:
+                seen_ids = [e.get("id") or e.get("link") for e in entries[:50]]
+                seen_map[name] = seen_ids
+                _remember_baseline(state, name, url)
+                _log_fetch(name, "baseline written")
+                if verbose:
+                    print(f"  baseline recorded ({len(seen_ids)} ids), emitting nothing")
+                continue
 
         last_seen = seen_map.get(name, [])
         # Havoptic mixes every tool. A Cursor release can sit past the
@@ -531,9 +611,12 @@ def check_feeds(filter_relevant=True, verbose=True):
 
         _log_fetch(name, f"{len(entries)} items")
 
-        # Update last seen (keep last 50 IDs per feed)
-        seen_ids = [e.get("id") or e.get("link") for e in entries[:50]]
-        seen_map[name] = seen_ids
+        # Update last seen (keep last 50 IDs per feed). An empty body must
+        # not erase a previous baseline; the next full fetch would otherwise
+        # look entirely new.
+        if entries:
+            seen_ids = [e.get("id") or e.get("link") for e in entries[:50]]
+            seen_map[name] = seen_ids
     
     # Store new items for digest
     if new_items:
