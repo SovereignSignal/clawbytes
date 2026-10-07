@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import html
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Optional
 
@@ -426,6 +426,58 @@ def status_blurb(feed_name: str, entry: dict) -> str:
     elif not _resolved(detail):
         body += ", still open"
     return body
+
+
+# Queued status incidents older than this are backlog, not news. Watch posts
+# twice a day, so a real incident still clears a window inside this span.
+STATUS_QUEUE_MAX_AGE = timedelta(hours=24)
+
+
+def status_incident_bounds(detail: str, published: str = "") -> tuple[Optional[datetime], Optional[datetime]]:
+    """Earliest and latest stamps on an incident, when the body has them.
+
+    ``published`` fills in when the body has no clock time. The latest stamp
+    is a resolve time only when the text says the incident resolved.
+    """
+    text = detail or ""
+    stamps = _stamp_datetimes(text, published or "")
+    published_dt = _parse_published(published or "")
+    start = min(stamps) if stamps else published_dt
+    resolved = None
+    if _resolved(text):
+        resolved = max(stamps) if stamps else published_dt
+    return start, resolved
+
+
+def status_item_predates_watch(
+    detail: str,
+    published: str,
+    baseline_at: Optional[datetime],
+    now: datetime,
+    summary: str = "",
+) -> bool:
+    """True when a queued status incident should not post.
+
+    Drop it when it started or resolved before that feed's baseline, or when
+    the incident itself is more than 24 hours old. Discovery time is not the
+    incident's age.
+    """
+    text = detail or ""
+    if summary and not _stamp_datetimes(text, published or ""):
+        if not text:
+            text = summary
+        elif _resolved(summary) and not _resolved(text):
+            text = f"{text} {summary}"
+    start, resolved = status_incident_bounds(text, published or "")
+    if baseline_at is not None:
+        if start is not None and start < baseline_at:
+            return True
+        if resolved is not None and resolved < baseline_at:
+            return True
+    earliest = start or resolved
+    if earliest is not None and (now - earliest) > STATUS_QUEUE_MAX_AGE:
+        return True
+    return False
 
 
 def is_reported_claim(title: str, summary: str = "") -> bool:

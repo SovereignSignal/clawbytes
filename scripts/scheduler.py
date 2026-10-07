@@ -466,6 +466,19 @@ def health_check() -> None:
         log.exception("health_check: could not write alert marker")
 
 
+def run_startup_maintenance() -> None:
+    """Drop stale status incidents before the first scheduled autopublish.
+
+    The queue lives on the volume. This has to run in-process at startup;
+    the next Watch window can fire before the next collect.
+    """
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    import clawbytes_threads as threads
+
+    threads.drop_prebaseline_status_items()
+
+
 def main() -> int:
     memory_dir = os.environ.get("CLAWBYTES_MEMORY_DIR", "<unset - using repo default>")
     log.info("ClawBytes scheduler starting")
@@ -483,6 +496,10 @@ def main() -> int:
         "Scheduled: collect=*:00,30  autopublish=*:05  health_check=*:20 (alert-only)  "
         "discover=Mon 14:10  yield_snapshot=Mon 15:45 (file only) (UTC). Waiting for triggers."
     )
+    try:
+        run_startup_maintenance()
+    except Exception:
+        log.exception("status queue cleanup failed")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
