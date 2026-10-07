@@ -181,8 +181,23 @@ def test_junk_release_titles_are_dropped_and_real_ones_stay():
     assert ct.is_junk_release_title("release-publish/004549970362-1790888386")
     assert ct.is_junk_release_title("Pinned inputs 9")
     assert ct.is_junk_release_title("Pinned inputs a/b/9")
+    assert ct.is_junk_release_title("Hermes Agent: Pinned inputs b")
+    assert ct.is_junk_release_title("Hermes Agent — Pinned inputs a")
     assert not ct.is_junk_release_title("Pinned inputs for the new runtime")
     assert not ct.is_junk_release_title("openclaw 2026.9.7")
+    # Post #968: the atom title was the tag `inputs-8`, which the
+    # "Pinned inputs N" fullmatch does not cover. The release URL carries it.
+    inputs8 = "https://github.com/NousResearch/hermes-agent/releases/tag/inputs-8"
+    assert ct.is_junk_release_title("inputs-8", inputs8)
+    assert ct.is_junk_release_title("New Hermes release", inputs8)
+    assert ct.classify_rss(_rss("Hermes Agent Releases", "inputs-8", inputs8)) is None
+    assert ct.classify_ecosystem_release({
+        "repo": "NousResearch/hermes-agent",
+        "tag": "inputs-8",
+        "name": "inputs-8",
+        "url": inputs8,
+        "published": "2026-10-05T20:00:00Z",
+    }) is None
 
     junk = [
         ("OpenClaw Releases", "release-publish/004549970362-1790888386"),
@@ -214,6 +229,24 @@ def test_junk_tags_are_not_queued(monkeypatch, tmp_path, capsys):
     assert "https://example.com/hermes-asset" not in stored
     assert stored["https://example.com/oc-real"]["primaryCategory"] == "ship"
     capsys.readouterr()
+
+
+def test_queued_inputs_tag_does_not_publish(monkeypatch, tmp_path):
+    """#968 was already a backlog row titled like the channel post.
+
+    Classify-time filtering does not revisit rows queued earlier. The ship
+    queue has to drop the tag on the way out.
+    """
+    _isolate(monkeypatch, tmp_path)
+    ct.save_json(ct.THREAD_STATE_FILE, _state())
+    url = "https://github.com/NousResearch/hermes-agent/releases/tag/inputs-8"
+    ct.save_json(ct.BACKLOG_FILE, {"items": [
+        _queued(url, "inputs-8", "Hermes Agent Releases", 90),
+        _queued("https://example.com/real", "Hermes Agent 0.9.0", "Hermes Agent Releases", 80),
+    ]})
+    queued = [item["url"] for item in ct.queue_for_category("ship")]
+    assert url not in queued
+    assert "https://example.com/real" in queued
 
 
 def test_major_and_front_page_items_lead_the_ship_queue(monkeypatch, tmp_path):

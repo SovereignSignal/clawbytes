@@ -72,6 +72,30 @@ def _kiro_html(top, top_body, older="1.1.69", older_body="previous notes", bundl
     )
 
 
+def test_page_without_a_heading_records_its_own_date(tmp_path, monkeypatch):
+    """Devin CLI has no ## heading. The date is on the Update tag.
+
+    A later footer edit must not look like an undated 'page updated'.
+    """
+    watch = {
+        "key": "devin-cli-changelog",
+        "label": "Devin CLI",
+        "md": "https://docs.devin.ai/cli/changelog/stable.md",
+        "page": "https://docs.devin.ai/cli/changelog/stable",
+        "heading": r"^##\s+(.+)$",
+        "lane": "ship",
+    }
+    _bind(monkeypatch, tmp_path, md=watch)
+    page = '<Update label="v3000.11.3" description="September 22, 2026">\nnotes\n'
+    pages = [page, page + "\nfooter\n"]
+    monkeypatch.setattr(pw, "fetch_text", _feed(pages))
+    assert pw.check_pages(verbose=False) == []
+    items = pw.check_pages(verbose=False)
+    assert len(items) == 1
+    assert items[0]["summary"] == "Changelog page updated — September 22, 2026"
+    assert items[0]["url"].startswith("https://docs.devin.ai/cli/changelog/stable#updated-")
+
+
 def test_new_release_on_the_same_page_posts_and_churn_does_not(tmp_path, monkeypatch):
     _bind(monkeypatch, tmp_path, html=KIRO)
     pages = [

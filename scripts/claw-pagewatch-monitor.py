@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from title_text import flatten_inline_markup
+from title_text import first_stated_date, flatten_inline_markup, format_stated_date
 
 WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
@@ -298,6 +298,21 @@ def save_state(state):
     tmp.replace(STATE_FILE)
 
 
+def summary_with_entry_date(summary, heading, blob):
+    """Attach the entry's own calendar date when the heading does not.
+
+    Devin's stable changelog has no markdown heading; the date sits on the
+    ``<Update description="September 22, 2026">`` tag. Without it, a page
+    change looks new even when the top entry is weeks old.
+    """
+    if first_stated_date(heading or ""):
+        return summary
+    found = first_stated_date(blob or "")
+    if not found:
+        return summary
+    return f"{summary} — {format_stated_date(found)}"
+
+
 def check_pages(verbose=True):
     state = load_state()
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -328,17 +343,19 @@ def check_pages(verbose=True):
         else:
             digest = computed
         if old_digest and digest != old_digest:
+            title = f"{watch['label']} — {heading}" if heading else f"{watch['label']} updated"
+            date_blob = entry or ("" if heading else text[:4000])
             new_items.append({
                 "id": f"pagewatch:{watch['key']}:{digest[:12]}",
                 "watch": watch["label"],
-                "title": f"{watch['label']} — {heading}" if heading else f"{watch['label']} updated",
+                "title": title,
                 # Unique fragment per new top entry — publish dedup is
                 # URL-keyed, so the bare page URL would let only the first
                 # change post (see CLAUDE.md invariant 4). The fragment is
                 # inert in a browser; the page still loads. It changes only
                 # when the newest entry changes.
                 "url": f"{watch['page']}#updated-{digest[:8]}",
-                "summary": "Changelog page updated",
+                "summary": summary_with_entry_date("Changelog page updated", heading, date_blob),
                 "lane": watch["lane"],
                 "found_at": now_iso,
             })

@@ -263,7 +263,7 @@ whose article URL is on that front page lead the Ship bundle. The two daily
 windows stay `[9, 18]`. Intake caps stay 2 per source and 6 per run. Claude
 Code patch tags still leave Ship; once a UTC week rolls over they become one
 roll-up item (`Claude Code 2.1.284–2.1.289`). `release-publish/<digits>` tags
-and Hermes titles like `Pinned inputs 9` are not classified.
+and Hermes asset bundles (`Pinned inputs 9`, tag `inputs-8`) are not classified.
 
 **Added** — DeepSeek Harness (`deepseek-ai/deepseek-harness` `releases.atom`,
 the repo behind npm `@deepseek-ai/dsh`; alpha tags still drop on the existing

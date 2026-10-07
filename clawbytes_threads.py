@@ -28,7 +28,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import unquote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -38,7 +38,7 @@ _SCRIPTS_DIR = str(Path(__file__).resolve().parent / "scripts")
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 from completion_diag import empty_content_message  # noqa: E402
-from title_text import flatten_inline_markup  # noqa: E402
+from title_text import first_stated_date, flatten_inline_markup  # noqa: E402
 
 # Vendored shared publish core (ss_publish/). _publisher is constructed lazily
 # in _ensure_publisher() (creds come from cred() / env, resolved at call time,
@@ -624,19 +624,38 @@ def is_minor_release(title: str) -> bool:
 
 
 # OpenClaw publishes opaque `release-publish/<digits>` tags next to real
-# CalVer releases. Hermes publishes asset bundles titled "Pinned inputs N"
-# (or "Pinned inputs a/b/9"). Neither is a product release.
+# CalVer releases. Hermes publishes asset bundles whose release name is
+# "Pinned inputs N" (or "Pinned inputs a/b/9") and whose git tag is
+# `inputs-8` / `inputs-b`. The atom `<title>` is whichever GitHub stored.
+# Post #968 (tag inputs-8) used the tag as the title, which the name-only
+# fullmatch did not see. Neither shape is a product release.
 _JUNK_RELEASE_TAG = re.compile(r"release-publish/\d+", re.IGNORECASE)
-_HERMES_ASSET_TITLE = re.compile(r"pinned inputs(?:\s+\S+)?$", re.IGNORECASE)
+_HERMES_ASSET_TITLE = re.compile(
+    r"(?i)^(?:.*?(?:[:\u2014\u2013]| - )\s*)?pinned inputs(?:\s+\S+)?$"
+)
+_HERMES_INPUTS_TAG = re.compile(r"(?i)^inputs[-_][0-9a-z][0-9a-z._-]*$")
+_RELEASE_TAG_IN_URL = re.compile(r"/releases/tag/([^/?#]+)", re.IGNORECASE)
 
 
-def is_junk_release_title(title: str) -> bool:
+def _release_tag(url: str) -> str:
+    match = _RELEASE_TAG_IN_URL.search(url or "")
+    if not match:
+        return ""
+    return unquote(match.group(1)).strip()
+
+
+def is_junk_release_title(title: str, url: str = "") -> bool:
     text = (title or "").strip()
-    if not text:
-        return False
-    if _JUNK_RELEASE_TAG.search(text):
+    if text and _JUNK_RELEASE_TAG.search(text):
         return True
-    return _HERMES_ASSET_TITLE.fullmatch(text) is not None
+    if text and _HERMES_ASSET_TITLE.fullmatch(text):
+        return True
+    # The #968 path: the feed title is the tag itself (`inputs-8`), or the
+    # tag is only in the release URL while the title is a generic label.
+    if text and _HERMES_INPUTS_TAG.fullmatch(text):
+        return True
+    tag = _release_tag(url)
+    return bool(tag and _HERMES_INPUTS_TAG.fullmatch(tag))
 
 
 def is_coding_agent_changelog(item: dict) -> bool:
@@ -754,7 +773,7 @@ def classify_rss(item: dict) -> Optional[dict]:
         }
 
     if "releases" in feed_low:
-        if is_junk_release_title(title):
+        if is_junk_release_title(title, url):
             return None
         if is_prerelease_title(title):
             return None
@@ -2154,6 +2173,7 @@ def collect_into_backlog() -> dict:
 
     seen_source_keys = set(state.get("seenSourceKeys", []))
     existing_ids = {item["id"] for item in backlog.get("items", [])}
+    posted_titles = recent_posted_titles(backlog.get("items", []), collected_at)
 
     added = []
     candidates = collect_candidates()
@@ -2203,6 +2223,16 @@ def collect_into_backlog() -> dict:
                 # Ack only when this tag was already handled. A duplicate of a
                 # row still waiting on the cap must not mark the tag seen.
                 if eco is not None and key in seen_source_keys:
+                    acked_releases.append(eco)
+                continue
+            # Stale calendar dates and a story already posted inside the
+            # window never take a Ship slot. Mark seen and ack the ecosystem
+            # tag so the monitor does not re-emit it every collect.
+            if is_stale_dated_item(candidate, collected_at) or title_repeats_story(
+                candidate.get("title") or "", posted_titles
+            ):
+                seen_source_keys.add(key)
+                if eco is not None:
                     acked_releases.append(eco)
                 continue
             pending_keys.add(key)
@@ -2375,12 +2405,150 @@ def apply_normalized_scores(items: List[dict]) -> List[dict]:
     return items
 
 
+# Same product + same topic, across lanes and URLs. Not a URL compare:
+# pagewatch fragments are unique on purpose (CLAUDE.md invariant 4) and must
+# stay unique when the entry actually changed. Dotted versions that differ
+# are different stories (Claude Code 2.1.290 vs 2.1.291).
+STORY_WINDOW_DAYS = 7
+STALE_AFTER_DAYS = 3
+_STORY_STOP = {
+    "the", "and", "for", "with", "from", "into", "your", "this", "that", "new",
+    "now", "how", "why", "what", "using", "use", "guide", "update", "updated",
+    "updates", "release", "releases", "plugin", "plugins", "tool", "tools",
+    "introducing", "introduce", "introduced", "announces", "announce",
+    "announced", "available", "across", "experimental", "support", "supports",
+    "about", "over", "under", "after", "before", "more", "most", "than", "then",
+    "also", "just", "only", "item", "items", "post", "posts", "blog", "page",
+    "notes", "note", "changelog", "platform", "discussion", "thread", "today",
+    "yesterday", "its", "are", "was", "been", "have", "has", "not", "but",
+    "you", "our", "out", "all", "can", "via", "per",
+    "in", "on", "of", "by", "at", "or", "to", "as", "an", "is",
+}
+_STORY_VENDORS = {
+    "kiro", "claude", "copilot", "devin", "openai", "github", "hermes",
+    "cursor", "codex", "mistral", "anthropic", "google", "deepseek", "xai",
+}
+_STORY_WEAK = {"web", "app", "ide", "cli", "api", "pro", "max", "plus", "hub"}
+_DOTTED_VERSION = re.compile(r"\b\d+\.\d+(?:\.\d+)*\b")
+_BARE_NUMBER = re.compile(r"\b\d{1,4}\b")
+
+
+def _story_tokens(title: str) -> set:
+    text = re.sub(r"[^a-z0-9.+]+", " ", (title or "").lower())
+    out = set()
+    for raw in text.split():
+        token = raw
+        if len(token) > 4 and token.endswith("s") and not token.endswith("ss"):
+            token = token[:-1]
+        if len(token) < 2 or token in _STORY_STOP:
+            continue
+        out.add(token)
+    return out
+
+
+def _story_vendors(title: str) -> set:
+    return _story_tokens(title) & _STORY_VENDORS
+
+
+def _dotted_versions(title: str) -> set:
+    return set(_DOTTED_VERSION.findall((title or "").lower()))
+
+
+def _bare_numbers(title: str) -> set:
+    return set(_BARE_NUMBER.findall(title or ""))
+
+
+def same_story_titles(left: str, right: str) -> bool:
+    """True when two headlines are the same product and the same topic.
+
+    A different dotted version is a different story. A different bare number
+    (Mistral Large 3 vs Mistral Large 4) is too. Shared vendor words alone
+    are not a match.
+    """
+    if not left or not right:
+        return False
+    left_versions = _dotted_versions(left)
+    right_versions = _dotted_versions(right)
+    if left_versions and right_versions and left_versions.isdisjoint(right_versions):
+        return False
+    left_nums = _bare_numbers(left)
+    right_nums = _bare_numbers(right)
+    if left_nums and right_nums and left_nums.isdisjoint(right_nums):
+        return False
+    left_vendors = _story_vendors(left)
+    right_vendors = _story_vendors(right)
+    if left_vendors and right_vendors and left_vendors.isdisjoint(right_vendors):
+        return False
+    left_specific = _story_tokens(left) - _STORY_VENDORS - left_versions
+    right_specific = _story_tokens(right) - _STORY_VENDORS - right_versions
+    overlap = (left_specific & right_specific) - _STORY_WEAK
+    if not overlap:
+        return False
+    smaller = min(len(left_specific), len(right_specific))
+    if smaller <= 0:
+        return False
+    return len(left_specific & right_specific) / smaller >= 0.5
+
+
+def title_repeats_story(title: str, recent_titles: List[str]) -> bool:
+    return any(same_story_titles(title, other) for other in recent_titles if other)
+
+
+def _story_stamp(item: dict) -> Optional[datetime]:
+    return parse_dt(item.get("discoveredAt") or item.get("publishedAt") or "")
+
+
+def recent_posted_titles(backlog_items: List[dict], now: Optional[datetime] = None) -> List[str]:
+    """Titles posted inside the story window.
+
+    Posted backlog rows already carry the title. ``discoveredAt`` stands in
+    for the post time so this does not add a state-file field. Ship's TTL is
+    7 days, so a row that is still posted was discovered inside that span.
+    """
+    moment = now or now_utc()
+    window = timedelta(days=STORY_WINDOW_DAYS)
+    titles = []
+    for item in backlog_items or []:
+        if not isinstance(item, dict) or item.get("status") != "posted":
+            continue
+        stamp = _story_stamp(item)
+        if stamp is None:
+            continue
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        if moment - stamp <= window:
+            title = (item.get("title") or "").strip()
+            if title:
+                titles.append(title)
+    return titles
+
+
+def is_stale_dated_item(item: dict, now: Optional[datetime] = None) -> bool:
+    """True when the item's own calendar date is older than the stale window.
+
+    Discovery time is not the item's date. Pagewatch sets ``publishedAt`` to
+    the moment we noticed the page, so a September 22 changelog first seen
+    on October 5 would otherwise read as new. No stated date means not stale.
+    A future date (a retirement deadline) is not stale.
+    """
+    if not isinstance(item, dict):
+        return False
+    blob = f"{item.get('title') or ''} {item.get('summary') or ''}"
+    stated = first_stated_date(blob)
+    if stated is None:
+        return False
+    moment = now or now_utc()
+    age = (moment.date() - stated).days
+    return age > STALE_AFTER_DAYS
+
+
 def queue_for_category(category: str) -> List[dict]:
     ensure_files()
     backlog = load_json(BACKLOG_FILE, {"items": []})
     state = load_json(THREAD_STATE_FILE, {})
     posted_urls = set(state.get("postedUrls", []))
     now = now_utc()
+    recent_titles = recent_posted_titles(backlog.get("items", []), now)
     out = []
     for item in backlog.get("items", []):
         if item.get("status") != "queued":
@@ -2391,6 +2559,14 @@ def queue_for_category(category: str) -> List[dict]:
         # drop any leftover backlog residue (their synthetic status.local url) so
         # the cutover is immediate instead of waiting out the 48h TTL.
         if (item.get("url") or "").startswith("https://status.local/"):
+            continue
+        # Hermes asset bundles already in the backlog (classified before the
+        # tag filter, or titled with the tag `inputs-8`) must not still post.
+        if is_junk_release_title(item.get("title") or "", item.get("url") or ""):
+            continue
+        if is_stale_dated_item(item, now):
+            continue
+        if title_repeats_story(item.get("title") or "", recent_titles):
             continue
         if category not in item.get("categories", []):
             continue
@@ -2453,6 +2629,7 @@ def bundle_for_category(category: str, limit: Optional[int] = None) -> List[dict
     items = queue_for_category(category)
     target = limit or CATEGORY_META[category]["default_limit"]
     picked: List[dict] = []
+    picked_titles: List[str] = []
     bucket_counts: Dict[str, int] = {}
     bucket_cap = 1 if category == "ship" else 2 if category == "watch" else 3
 
@@ -2462,7 +2639,13 @@ def bundle_for_category(category: str, limit: Optional[int] = None) -> List[dict
             continue
         if category != "ship" and _same_topic(item, picked):
             continue
+        # Ship does not use the loose token overlap above. The story key
+        # still collapses two headlines of the same product and topic inside
+        # one bundle, including Ship.
+        if title_repeats_story(item.get("title") or "", picked_titles):
+            continue
         picked.append(item)
+        picked_titles.append(item.get("title") or "")
         bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
         if len(picked) >= target:
             break
@@ -2660,6 +2843,52 @@ def fetch_changelog_markdown(url: str) -> str:
     return text[:1800] if text else ""
 
 
+def focus_changelog_section(text: str, title: str) -> str:
+    """Keep the changelog section the item is about.
+
+    The raw page leads with every recent heading. A writer given that whole
+    prefix restates an older section inside today's item (post #968 put the
+    September 30 Sonnet 4.5 deprecation into the October 1 notes). When the
+    title names a heading, return that section only. No match leaves the
+    text unchanged.
+    """
+    if not text or not title:
+        return text or ""
+    hints = []
+    for sep in (" — ", " – ", " - "):
+        if sep in title:
+            hints.append(title.split(sep, 1)[1].strip())
+            break
+    hints.append((title or "").strip())
+    hints = [hint for hint in hints if len(hint) >= 4]
+    if not hints:
+        return text
+    lines = text.splitlines()
+    headings = []
+    for index, line in enumerate(lines):
+        match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
+        if match:
+            headings.append((index, len(match.group(1)), match.group(2).strip()))
+    chosen = None
+    for index, level, heading in headings:
+        low = heading.lower()
+        if any(hint.lower() in low or low in hint.lower() for hint in hints):
+            chosen = (index, level)
+            break
+    if chosen is None:
+        return text
+    start, level = chosen
+    end = len(lines)
+    for index, heading_level, _heading in headings:
+        if index > start and heading_level <= level:
+            end = index
+            break
+    section = "\n".join(lines[start:end]).strip()
+    if not section:
+        return text
+    return section[:1800]
+
+
 def _looks_like_changelog(url: str) -> bool:
     return ("/release-notes" in url or "/changelog" in url or "://docs." in url)
 
@@ -2702,7 +2931,8 @@ def grounding_for_item(category: str, item: dict) -> str:
     if _looks_like_changelog(url):
         md = fetch_changelog_markdown(url)
         if md:
-            return f"RELEASE NOTES: {md}"
+            md = focus_changelog_section(md, item.get("title") or "")
+            return f"RELEASE NOTES: {md}" if md else ""
     snippet = fetch_article_snippet(url)
     return f"ARTICLE SNIPPET: {snippet}" if snippet else ""
 
@@ -2851,8 +3081,15 @@ FORMAT (strict HTML):
 
 {item_emoji} <a href="URL">ACTUAL TITLE</a> — one factual sentence drawn from the item
 
+Lane — this post is {meta['label']} only:
+- Ship: something an operator can install, enable, or call. A release, a changelog entry, or a model showing up inside a coding tool. Not a funding announcement, not an opinion, not a paper.
+- Watch: an incident that needs action — outage, CVE, exploit, malicious package, sandbox escape. Not a trial, not a status filed as an improvement, not a CEO opinion.
+- Read: an essay, paper, benchmark, or explainer. Not release notes and not a version bump.
+- Community: a discussion builders are having. Not a paper with no thread, and not a vendor release.
+
 Rules:
 - Use <b> for bold, <a href="URL">title text</a> for links — use the ACTUAL model/project name as link text, never "Link" or "thread"
+- Do not write bare domains (127.0.0.1, claude.dev, github.com/name) or @handles. Telegram turns them into links. Put a host in the href. If the host itself is the fact, wrap it in <code>.
 - Use only facts present in the item lines below. Do not add claims, context, or background from anywhere else.
 - Copy numbers, version strings, and dates verbatim. Do not round, shorten, reformat, or invent them.
 - Keep the source's own verbs. Do not write "launches" or "opens" unless the source text says so.
@@ -2861,9 +3098,11 @@ Rules:
 - Watch: the risk, what to check, what breaks — only when the item text says so.
 - Read: describe what the piece is and its core claim only when the source data states it.
 - Community: the sentiment and the user signal that are in the item. If multiple threads cover the same topic, merge them into one bullet using counts that appear in the item lines.
+- Every item must name one concrete change (what shipped, what broke, what was deprecated, what the source measured). If the notes do not say that, omit the item. Do not write "release notes at the link", "changelog details what's improved", or a sentence that only repeats the title.
 - MAX 150 chars per item summary. No filler. No "notable" or "worth watching." No "offering insights" or "highlights." No soft verbs: "breaks down", "unpacks", "dives into", "rages on", "sparks debate" are all banned.
 - Reuse the source's wording when it states the fact. Do not add a claim that is not in the item line.
-- If release notes are missing or say nothing: state what the project is and the version string copied from the title. One sentence max. Never speculate with "might," "could," or "should."
+- If release notes are missing or say nothing concrete: omit the item. Do not invent a meaning for the tag. Never speculate with "might," "could," or "should."
+- Do not add a closing paragraph. The only line after the items is one sentence that connects two or more of them using facts already in those items. If you cannot, stop after the last item. Never restate a single bullet.
 - Start EVERY item with {item_emoji} (this lane\u2019s emoji) and use the SAME emoji for every item. Never use another lane\u2019s emoji or a topical/decorative emoji.
 - For HN items: include the point and comment counts from the item line when they are present.
 - NEVER fabricate statistics, metrics, or specific findings.
@@ -3498,6 +3737,140 @@ def _log_curator_lane_skipped(category: str, meta: dict) -> None:
     )
 
 
+_FILLER_PHRASE = re.compile(
+    r"release notes at the link|changelog details what|details what(?:'s| is) improved|"
+    r"\bat the link\b",
+    re.IGNORECASE,
+)
+_FILLER_GENERIC = {
+    "post", "posts", "announces", "announce", "announced", "introduces",
+    "introducing", "introduced", "release", "releases", "notes", "note",
+    "changelog", "updated", "update", "link", "the", "a", "an", "on", "of",
+    "and", "with", "for", "to", "in", "its", "is", "new", "ships", "shipped",
+    "about", "page", "details", "improved", "tagged", "published",
+}
+_FILLER_SOURCE = {
+    "openai", "mistral", "anthropic", "github", "hn", "hacker", "news",
+    "google", "devin", "kiro", "copilot", "claude", "simon",
+}
+_CHANGE_VERB = re.compile(
+    r"\b(?:fix|fixes|fixed|add|adds|added|remove|removes|removed|deprecat\w*|"
+    r"break|breaks|breaking|support|supports|enable|enables|disable|disables|"
+    r"patch|secur\w*|migrat\w*|now|can)\b",
+    re.IGNORECASE,
+)
+_ITEM_ANCHOR = re.compile(
+    r'<a href="[^"]*">(.*?)</a>\s*(?:—|–|-)\s*(.*)\s*\Z',
+    re.DOTALL,
+)
+
+
+def _filler_words(text: str) -> set:
+    plain = re.sub(r"<[^>]+>", " ", text or "")
+    plain = re.sub(r"&[a-z]+;", " ", plain)
+    words = re.findall(r"[a-z0-9][a-z0-9.+-]*", plain.lower())
+    cleaned = set()
+    for word in words:
+        word = word.strip(".")
+        if word not in _FILLER_GENERIC and len(word) > 1:
+            cleaned.add(word)
+    return cleaned
+
+
+def blurb_is_filler(title: str, blurb: str) -> bool:
+    """True when the line does not state a concrete change.
+
+    A paraphrase of the title ("Mistral announces Mistral Large 4") and a
+    canned "release notes at the link" with no change verb are filler.
+    A blurb that names a fix, addition, or deprecation is not.
+    """
+    text = (blurb or "").strip()
+    if not text:
+        return True
+    if _FILLER_PHRASE.search(text) and not _CHANGE_VERB.search(_FILLER_PHRASE.sub(" ", text)):
+        return True
+    extra = _filler_words(text) - _filler_words(title) - _FILLER_SOURCE
+    return len(_filler_words(text)) > 0 and len(extra) == 0
+
+
+def _closing_tokens(text: str) -> set:
+    plain = re.sub(r"<[^>]+>", " ", text or "")
+    return {word for word in re.findall(r"[a-z0-9]+", plain.lower()) if len(word) > 2}
+
+
+def _closing_duplicates_one_bullet(closing: str, bullets: List[str]) -> bool:
+    """Drop a closing line that restates a single bullet.
+
+    A line that overlaps two bullets is the cross-item connection the prompt
+    allows ("Mistral drew 680 comments; ColonistOne drew 80") and stays.
+    """
+    closing_tokens = _closing_tokens(closing)
+    if len(closing_tokens) < 4 or not bullets:
+        return False
+    scores = []
+    for bullet in bullets:
+        bullet_tokens = _closing_tokens(bullet)
+        if not bullet_tokens:
+            scores.append(0.0)
+            continue
+        scores.append(len(closing_tokens & bullet_tokens) / min(len(closing_tokens), len(bullet_tokens)))
+    if not scores or max(scores) < 0.72:
+        return False
+    return sum(1 for score in scores if score >= 0.45) < 2
+
+
+def polish_lane_post(message: str) -> str:
+    """Drop filler item lines and a closing line that repeats one bullet.
+
+    Messages that are not lane HTML (no item link) pass through unchanged.
+    An all-filler lane comes back empty so the caller can skip the send.
+    """
+    raw = message or ""
+    if '<a href="' not in raw:
+        return raw
+    blocks = re.split(r"\n\s*\n", raw.strip())
+    if not blocks:
+        return raw
+    header = blocks[0]
+    items = []
+    closings = []
+    for block in blocks[1:]:
+        if "<a href=" in block:
+            items.append(block.strip())
+        else:
+            closings.append(block.strip())
+    kept = []
+    for block in items:
+        match = _ITEM_ANCHOR.search(block.replace("\n", " "))
+        if not match:
+            kept.append(block)
+            continue
+        title = re.sub(r"<[^>]+>", "", match.group(1))
+        blurb = re.sub(r"<[^>]+>", "", match.group(2))
+        if blurb_is_filler(title, blurb):
+            continue
+        kept.append(block)
+    if not kept:
+        return ""
+    closing = "\n\n".join(part for part in closings if part)
+    if closing and _closing_duplicates_one_bullet(closing, kept):
+        closing = ""
+    count = len(kept)
+    label = "item" if count == 1 else "items"
+    header = re.sub(r"\b\d+\s+items?\b", f"{count} {label}", header, count=1)
+    parts = [header, *kept]
+    if closing:
+        parts.append(closing)
+    return "\n\n".join(parts)
+
+
+def _log_no_substance(category: str) -> None:
+    print(
+        f"lane_skipped lane={category} reason=no_substance",
+        file=sys.stderr,
+    )
+
+
 def _publish_lane(category: str, send: bool) -> tuple:
     """Publish one ready lane; return (sent, count).
 
@@ -3531,7 +3904,13 @@ def _publish_lane(category: str, send: bool) -> tuple:
             # body the gate or Telegram rejects is a send failure, not a
             # decline. Both still use the deterministic writer.
             if approved and items and send:
-                message = format_curated_html(curated, category)
+                raw = format_curated_html(curated, category)
+                message = polish_lane_post(raw)
+                # Filler-only lanes skip. Do not fall through to the
+                # deterministic bundle, which would post the same empty lines.
+                if '<a href="' in raw and not message:
+                    _log_no_substance(category)
+                    return (False, 0)
                 ok, errs = validate_lane_for_publish(message)
                 if ok and send_telegram(message):
                     mark_posted(category, None, items)
@@ -3557,9 +3936,13 @@ def _publish_lane(category: str, send: bool) -> tuple:
                 file=sys.stderr,
             )
 
-    message = format_category_bundle(category)
+    raw = format_category_bundle(category)
+    message = polish_lane_post(raw)
     bundle = bundle_for_category(category)
     if send and bundle:
+        if '<a href="' in raw and not message:
+            _log_no_substance(category)
+            return (False, 0)
         ok, errs = validate_lane_for_publish(message)
         if not ok:
             print(f"[autopublish] {category} rejected by gate: {'; '.join(errs)}", file=sys.stderr)
@@ -3616,6 +3999,7 @@ def _fetch_item_context(item: dict) -> dict:
     elif _looks_like_changelog(url):
         md = fetch_changelog_markdown(url)
         if md:
+            md = focus_changelog_section(md, item.get("title") or "")
             context["fetched"]["release_notes"] = md
             context["fetched"]["release_notes_source"] = "mintlify_md"
         else:
