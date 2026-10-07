@@ -30,7 +30,7 @@ from typing import Any, Optional, Tuple
 
 import requests
 
-from .markup import telegram_html_to_mrkdwn
+from .markup import sanitize_telegram_html, telegram_html_to_mrkdwn
 
 __all__ = [
     "Publisher",
@@ -38,6 +38,7 @@ __all__ = [
     "truncate_for_telegram",
     "redact_secrets",
     "retry_delay",
+    "sanitize_telegram_html",
     "telegram_html_to_mrkdwn",
     "RETRYABLE_STATUS",
     "TELEGRAM_MAX_CHARS",
@@ -157,6 +158,10 @@ class Publisher:
         """
         if not self.telegram_token or not self.telegram_channel_id:
             return TelegramResult(ok=False, error="telegram not configured")
+        # Curator copy, writer copy, and the deterministic fallback all land
+        # here. Defang autolinks and render inline markdown before Telegram
+        # sees the text. Ops alerts use send_ops_alert and stay plain text.
+        message = sanitize_telegram_html(message or "")
         original_len = len(message)
         body = message
         truncated = False
@@ -218,6 +223,7 @@ class Publisher:
         Telegram publish."""
         if not self.slack_token or not self.slack_channel_id:
             return False
+        message = sanitize_telegram_html(message or "")
         try:
             resp = self._post(
                 "https://slack.com/api/chat.postMessage",

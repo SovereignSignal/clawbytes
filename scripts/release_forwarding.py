@@ -76,6 +76,14 @@ NON_PRODUCT_PREFIX = re.compile(
 )
 INPUTS_PREFIX = re.compile(r"(?i)^inputs[-_]")
 
+# The ecosystem monitor used to hard-cut release bodies at 500 characters,
+# and build_event then sliced again at 1200, so the second cap never saw the
+# rest. Keep this above the monitor's raw slice (4000) only if you also raise
+# that slice — the monitor must send at least this many characters or the
+# boundary cut below cannot recover text it never received. Release Bot's own
+# message cap is 4096; 3000 leaves room for the alert chrome.
+RELEASE_BODY_LIMIT = 3000
+
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 _ACTIVE = frozenset({"queued", "retryable"})
 
@@ -202,6 +210,48 @@ def is_qualified(item: dict, targets: dict) -> bool:
     return True
 
 
+def clip_release_body(text: str, limit: int = RELEASE_BODY_LIMIT) -> str:
+    """Keep about ``limit`` characters, ending on a sentence or bullet.
+
+    A hard slice stops mid-word ("Subcon", "tool-r"). When the text is longer
+    than ``limit``, cut at the last sentence end, paragraph break, or bullet
+    start inside the window, then add an ellipsis. Shorter bodies pass through
+    unchanged, with no ellipsis.
+    """
+    raw = str(text or "")
+    if len(raw) <= limit:
+        return raw
+    window = raw[:limit]
+    floor = int(limit * 0.6)
+    boundaries = []
+    for match in re.finditer(r"[.!?…](?:\s|$)", window):
+        boundaries.append(match.end())
+    for match in re.finditer(r"\n\n|\n(?=\s*(?:[-*]|\d+[.)]|#{1,6}\s))", window):
+        boundaries.append(match.start())
+    usable = [point for point in boundaries if point >= floor]
+    if usable:
+        cut = max(usable)
+    else:
+        cut = max(window.rfind(" "), window.rfind("\n"))
+        if cut < floor:
+            cut = limit
+    # Don't end inside an unclosed markdown link or code span.
+    head = window[:cut]
+    if head.count("`") % 2 == 1:
+        tick = head.rfind("`")
+        if tick >= floor:
+            cut = tick
+            head = window[:cut]
+    open_link = head.rfind("[")
+    close_link = head.rfind("]")
+    if open_link > close_link and open_link >= floor:
+        cut = open_link
+    clipped = window[:cut].rstrip()
+    if not clipped.endswith(("…", "...")):
+        clipped += "…"
+    return clipped
+
+
 def build_event(item: dict, targets: dict) -> dict:
     """Event fields. ``name`` is the map display name, never the release title."""
     repo = str(item.get("repo") or "").strip()
@@ -218,7 +268,7 @@ def build_event(item: dict, targets: dict) -> dict:
         "source_type": "github_release",
         "url": str(item.get("url") or "").strip(),
         "published_at": item.get("published"),
-        "summary": str(item.get("body") or "")[:1200],
+        "summary": clip_release_body(str(item.get("body") or "")),
         "metadata": {
             "repo": repo,
             "tag": tag,

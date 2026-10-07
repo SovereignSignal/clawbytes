@@ -3,7 +3,7 @@ channels (modelbytes, clawbytes, and future siblings).
 
 See :mod:`ss_publish.publisher` for the ``Publisher`` class and the contract.
 """
-from .markup import telegram_html_to_mrkdwn
+from .markup import sanitize_telegram_html, telegram_html_to_mrkdwn
 from .publisher import (
     RETRYABLE_STATUS,
     TELEGRAM_MAX_CHARS,
@@ -22,6 +22,7 @@ __all__ = [
     "truncate_for_telegram",
     "redact_secrets",
     "retry_delay",
+    "sanitize_telegram_html",
     "telegram_html_to_mrkdwn",
     "RETRYABLE_STATUS",
     "TELEGRAM_MAX_CHARS",

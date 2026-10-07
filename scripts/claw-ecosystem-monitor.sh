@@ -801,13 +801,17 @@ check_github_releases() {
                     elif [[ "$latest_tag" != "$seen_tag" ]]; then
                         # Do not mark this tag seen here. collect hands it to the
                         # backlog and then writes lastSeenReleases.
+                        # Raw cap only. release_forwarding.clip_release_body
+                        # cuts this to ~3000 on a sentence or bullet and adds
+                        # an ellipsis. This slice must stay above that limit
+                        # or the boundary cut cannot see the text.
                         echo "$releases" | jq --arg repo "$repo" '.[0] | {
                             repo: $repo,
                             tag: .tag_name,
                             name: .name,
                             url: .html_url,
                             published: .published_at,
-                            body: (.body | if . then .[0:500] else "" end),
+                            body: (.body | if . then .[0:4000] else "" end),
                             prerelease: .prerelease,
                             draft: .draft
                         }' > "$tmpdir/${safe_name}.json"

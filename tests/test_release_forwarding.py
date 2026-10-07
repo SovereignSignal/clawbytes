@@ -635,3 +635,37 @@ def test_cli_receiver_failure_still_exits_zero(tmp_path):
         assert "127.0.0.1" in server.url
     finally:
         server.close()
+
+
+def test_release_body_clips_on_a_sentence_not_at_500():
+    """Cline's forwarded body used to die at character 500, mid-word.
+
+    The monitor now forwards a longer raw slice. build_event cuts near 3000
+    characters on a sentence or bullet and marks the cut.
+    """
+    # 500 characters lands inside "Subconscious", the old hard cut.
+    prefix = "A" * 466
+    body = prefix + " Providers: Ofox, Requesty, Subconscious. " + ("Later note. " * 400)
+    hard_500 = body[:500]
+    assert hard_500.endswith("Subcon")
+    assert not hard_500.rstrip().endswith(".")
+    clipped = release_forwarding.clip_release_body(body)
+    assert release_forwarding.RELEASE_BODY_LIMIT == 3000
+    assert 1200 < len(clipped) <= 3000 + 1
+    assert clipped.endswith("…")
+    assert "Subconscious." in clipped
+    assert release_forwarding.clip_release_body("Already short.") == "Already short."
+    event = release_forwarding.build_event({
+        "repo": "cline/cline",
+        "tag": "v4.1.23",
+        "url": "https://github.com/cline/cline/releases/tag/v4.1.23",
+        "published": "2026-10-07T07:32:00Z",
+        "body": body,
+        "prerelease": False,
+    }, {})
+    assert event["summary"] == clipped
+    assert event["schema"] == release_forwarding.SCHEMA
+    assert "summary" in event and "metadata" in event
+    shell = (ROOT / "scripts" / "claw-ecosystem-monitor.sh").read_text()
+    assert ".[0:4000]" in shell
+    assert ".[0:500]" not in shell
