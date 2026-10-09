@@ -24,6 +24,7 @@ from feed_filters import (
     is_reported_claim,
     kilo_product_post,
     normalize_havoptic_entry,
+    plain_text,
     status_incident_allowed,
     testingcatalog_relevant,
 )
@@ -82,7 +83,7 @@ RSS_FEEDS = [
     {"name": "Browser Use Releases", "url": "https://github.com/browser-use/browser-use/releases.atom", "tags": ["releases", "browser-automation"]},
     {"name": "vLLM Releases", "url": "https://github.com/vllm-project/vllm/releases.atom", "tags": ["releases", "inference"]},
     {"name": "Ollama Releases", "url": "https://github.com/ollama/ollama/releases.atom", "tags": ["releases", "local-models"]},
-    {"name": "openai-agents Releases", "url": "https://github.com/openai/openai-agents-python/releases.atom", "tags": ["releases", "agent-sdk"], "high_signal": True},
+    {"name": "openai-agents Releases", "url": "https://github.com/openai/openai-agents-python/releases.atom", "tags": ["releases", "agent-sdk", "lab-sdk"], "high_signal": True},
     {"name": "mcp Servers Releases", "url": "https://github.com/modelcontextprotocol/servers/releases.atom", "tags": ["releases", "mcp"]},
     {"name": "mcp Python SDK Releases", "url": "https://github.com/modelcontextprotocol/python-sdk/releases.atom", "tags": ["releases", "mcp"]},
     {"name": "mcp TypeScript SDK Releases", "url": "https://github.com/modelcontextprotocol/typescript-sdk/releases.atom", "tags": ["releases", "mcp"]},
@@ -101,8 +102,8 @@ RSS_FEEDS = [
     {"name": "Crush Releases", "url": "https://github.com/charmbracelet/crush/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "Qwen Code Releases", "url": "https://github.com/QwenLM/qwen-code/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "Smolagents Releases", "url": "https://github.com/huggingface/smolagents/releases.atom", "tags": ["releases", "frameworks"]},
-    {"name": "Claude Agent SDK Python Releases", "url": "https://github.com/anthropics/claude-agent-sdk-python/releases.atom", "tags": ["releases", "agent-sdk"], "high_signal": True},
-    {"name": "Claude Agent SDK TypeScript Releases", "url": "https://github.com/anthropics/claude-agent-sdk-typescript/releases.atom", "tags": ["releases", "agent-sdk"]},
+    {"name": "Claude Agent SDK Python Releases", "url": "https://github.com/anthropics/claude-agent-sdk-python/releases.atom", "tags": ["releases", "agent-sdk", "lab-sdk"], "high_signal": True},
+    {"name": "Claude Agent SDK TypeScript Releases", "url": "https://github.com/anthropics/claude-agent-sdk-typescript/releases.atom", "tags": ["releases", "agent-sdk", "lab-sdk"]},
     {"name": "Zed Blog", "url": "https://zed.dev/blog.rss", "tags": ["coding-agent", "official"]},
     # claude.dev/rss.xml (verified 2026-10-04). Not a changelog: posts are Read.
     {"name": "claude.dev Blog", "url": "https://claude.dev/rss.xml", "tags": ["official", "coding-agent"]},
@@ -122,11 +123,16 @@ RSS_FEEDS = [
     {"name": "Mistral AI Blog", "url": "https://mistral.ai/rss.xml", "tags": ["official", "models"]},
     {"name": "lobste.rs AI", "url": "https://lobste.rs/t/ai.rss", "tags": ["community", "technical"]},
     {"name": "IndyDevDan (YouTube)", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC_x36zCEGilGpB1m-V4gmjg", "tags": ["coding-agent", "video"]},
-    # Core SDK releases — model-id constants and feature flags land here first
-    {"name": "anthropic-sdk-python Releases", "url": "https://github.com/anthropics/anthropic-sdk-python/releases.atom", "tags": ["releases", "agent-sdk"]},
-    {"name": "anthropic-sdk-typescript Releases", "url": "https://github.com/anthropics/anthropic-sdk-typescript/releases.atom", "tags": ["releases", "agent-sdk"]},
-    {"name": "openai-python Releases", "url": "https://github.com/openai/openai-python/releases.atom", "tags": ["releases", "agent-sdk"]},
-    {"name": "python-genai Releases", "url": "https://github.com/googleapis/python-genai/releases.atom", "tags": ["releases", "agent-sdk"]},
+    # Official lab client SDKs. classify_rss keeps a release only when the
+    # notes name a new tool, computer/browser control, or a breaking change.
+    # The atom body is stored on the item (plain text) so that check does
+    # not need a GitHub API call. Tag lab-sdk must match LAB_SDK_FEED_NAMES.
+    {"name": "anthropic-sdk-python Releases", "url": "https://github.com/anthropics/anthropic-sdk-python/releases.atom", "tags": ["releases", "agent-sdk", "lab-sdk"]},
+    {"name": "anthropic-sdk-typescript Releases", "url": "https://github.com/anthropics/anthropic-sdk-typescript/releases.atom", "tags": ["releases", "agent-sdk", "lab-sdk"]},
+    {"name": "openai-python Releases", "url": "https://github.com/openai/openai-python/releases.atom", "tags": ["releases", "agent-sdk", "lab-sdk"]},
+    {"name": "openai-node Releases", "url": "https://github.com/openai/openai-node/releases.atom", "tags": ["releases", "agent-sdk", "lab-sdk"]},
+    {"name": "python-genai Releases", "url": "https://github.com/googleapis/python-genai/releases.atom", "tags": ["releases", "agent-sdk", "lab-sdk"]},
+    {"name": "js-genai Releases", "url": "https://github.com/googleapis/js-genai/releases.atom", "tags": ["releases", "agent-sdk", "lab-sdk"]},
     {"name": "Agent Client Protocol Releases", "url": "https://github.com/agentclientprotocol/agent-client-protocol/releases.atom", "tags": ["releases", "agent-sdk"]},
     # 2026-09 harness widening — first-party release atoms, all endpoint-verified.
     # Feed names stay compound so repo_name_from_feed never keys on substring
@@ -603,6 +609,10 @@ def check_feeds(filter_relevant=True, verbose=True):
                 item["aggregator"] = entry["aggregator"]
             if entry.get("categories"):
                 item["categories"] = entry["categories"]
+            # Lab SDK significance is decided from the notes. The atom already
+            # carries them; this does not call the GitHub API.
+            if "lab-sdk" in {str(t).lower() for t in tags}:
+                item["summary"] = plain_text(entry.get("detail") or entry.get("summary") or "")[:4000]
             new_items.append(item)
             
             if verbose:

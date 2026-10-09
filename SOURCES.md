@@ -10,7 +10,7 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 
 | Class | What | Defined in | Cadence |
 |---|---|---|---|
-| RSS/Atom feeds | 88 feeds: vendor blogs, changelogs that Ship (Cursor, GitHub Copilot, Amp News, Kilo Blog product posts), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, fx, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau, DeepSeek Harness), research blogs, claude.dev Blog (Read), ArXiv cs.AI/cs.CL (harness-compound gate — bare `agent` is not enough), TestingCatalog (coding-tool/model items; leaks marked reported), Havoptic releases (changelog backstop, vendor link, deduped against primary atoms), and three status-page history feeds (Claude, Cursor, GitHub) that reach Watch only for in-scope partial/major/elevated incidents. Warp, Replit, Augment, JetBrains, and Zed blogs stay in the list and route to Read. Windsurf Blog is not in the list (removed 2026-09-23, stale since 2026-05-12). Each feed baselines silently on the first successful fetch of its URL. A failed or unparseable fetch does not count, and a reused feed name still baselines when the URL is new. | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
+| RSS/Atom feeds | 90 feeds: vendor blogs, changelogs that Ship (Cursor, GitHub Copilot, Amp News, Kilo Blog product posts), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, fx, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau, DeepSeek Harness), research blogs, claude.dev Blog (Read), ArXiv cs.AI/cs.CL (harness-compound gate — bare `agent` is not enough), TestingCatalog (coding-tool/model items; leaks marked reported), Havoptic releases (changelog backstop, vendor link, deduped against primary atoms), and three status-page history feeds (Claude, Cursor, GitHub) that reach Watch only for in-scope partial/major/elevated incidents. Warp, Replit, Augment, JetBrains, and Zed blogs stay in the list and route to Read. Windsurf Blog is not in the list (removed 2026-09-23, stale since 2026-05-12). Lab SDK atoms (Anthropic Python and TypeScript, Claude Agent SDK Python and TypeScript, OpenAI Python, Node, and Agents, Google GenAI Python and JS) Ship only when the release notes name a new tool, computer or browser control, or a breaking change; routine version bumps stay out. Each feed baselines silently on the first successful fetch of its URL. A failed or unparseable fetch does not count, and a reused feed name still baselines when the URL is new. | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
 | GitHub releases (API) | Curated + auto-discovered repos, merged via `claw-ecosystem-sources.json`. First tag on a repo is a silent baseline. Later tags are classified on the release path; the tag is marked seen only after collect hands the item to the backlog. | `scripts/claw-ecosystem-monitor.sh` | 30 min |
 | HF Daily Papers | huggingface.co/papers via `api/daily_papers`, keyword-scored into lanes | `scripts/claw-hf-papers.py` | 30 min |
 | Hacker News | Algolia queries (harness/agent/MCP terms, one query per term — Algolia has no `OR`), plus one `tags=front_page` pass filtered to agent/coding/AI-tool stories at ≥150 points. Search queries use a 14-day window. | `scripts/claw-hn-monitor.py`, `claw-ecosystem-monitor.sh` | 30 min |
@@ -288,3 +288,36 @@ Research pages are Read; a cyber/security slug is Watch (GLM-5.3 cyber report).
 **Not in this change** — RSS gzip decompression already shipped in #36.
 Scheduler locking already shipped in #33. No env vars, caps, lanes, or
 forwarding flags moved.
+
+### 2026-10-09 lab SDK release notes
+
+AlphaSignal's Oct 9 item was the Oct 7 Anthropic SDK release: Python
+`v1.12.0` and TypeScript `sdk-v0.132.0`, notes "typed computer and browser
+toolset tool calls". Those repos were already on `RSS_FEEDS`, along with
+the Claude Agent SDKs, `openai-python`, `openai-agents-python`, and
+`python-genai`. `openai-node` was not. HN search does not subscribe to a
+repo. `release_targets.json` does not list these SDKs and still does not:
+forwarding is a separate reviewed list.
+
+The miss was the notes. The atom title is only the version, and the monitor
+dropped the body before classify. Every `x.y.0` was eligible for Ship as
+"Anthropic SDK 1.12.0". The Python SDK cut nine of those from Sep 10 to
+Oct 9, so the browser/computer bullet looked like the rest of the bump
+train. Patches are buried under Read's publish bar without reading notes.
+The TypeScript repo also fills GitHub's 10-entry atom with Vertex, Bedrock,
+Foundry, and AWS tags.
+
+**Added** — `openai/openai-node` and `googleapis/js-genai` (the JS twin of
+the GenAI Python feed already on the list). Both atoms verified 2026-10-09,
+latest tags that day `v7.32.0` and `v2.28.0`.
+
+**Gate** — a lab SDK release with notes Ships only when those notes name a
+new tool, computer/browser control, or a breaking change. A patch that says
+so still Ships. Routine feature bullets, chores, and the TypeScript adapter
+tags do not. Empty notes keep the old version gate. New feed names baseline
+on the first good fetch. Already-seen tags are not replayed.
+
+**Passed** — `openai/openai-agents-js`. Changesets publish several packages
+(`agents`, `agents-core`, `agents-realtime`, …) on the same tag minute.
+That is the Mastra-style firehose. The Python agents SDK stays the feed.
+`google-gemini/gemini-cli` is already watched and is not an SDK.

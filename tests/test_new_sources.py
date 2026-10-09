@@ -43,7 +43,7 @@ def _isolate(monkeypatch, tmp_path):
 
 def test_feed_list_registers_the_new_sources():
     names = {feed["name"]: feed["url"] for feed in rss.RSS_FEEDS}
-    assert len(rss.RSS_FEEDS) == 88
+    assert len(rss.RSS_FEEDS) == 90
     assert names["Claude Status"] == "https://status.claude.com/history.rss"
     assert names["Cursor Status"] == "https://status.cursor.com/history.rss"
     assert names["GitHub Status"] == "https://www.githubstatus.com/history.rss"

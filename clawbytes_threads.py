@@ -47,6 +47,7 @@ from feed_filters import (  # noqa: E402
     kilo_product_post,
     status_blurb,
     status_display_title,
+    plain_text,
     status_incident_allowed,
     status_item_predates_watch,
     testingcatalog_blurb,
@@ -186,9 +187,51 @@ REPO_PRIORITY = {
     "crush": 50,
     "anthropic-sdk": 58,
     "openai-python": 56,
+    "openai-node": 56,
     "python-genai": 54,
+    "js-genai": 54,
     "agent framework": 54,
 }
+
+# Official lab client SDKs. Names are the lowercased RSS feed titles.
+# classify_rss reads their release notes; a version title alone is not
+# enough to Ship. Keep this set in lockstep with the lab-sdk tag on
+# RSS_FEEDS (tests assert the two match).
+LAB_SDK_FEED_NAMES = frozenset({
+    "anthropic-sdk-python releases",
+    "anthropic-sdk-typescript releases",
+    "claude agent sdk python releases",
+    "claude agent sdk typescript releases",
+    "openai-python releases",
+    "openai-node releases",
+    "openai-agents releases",
+    "python-genai releases",
+    "js-genai releases",
+})
+
+# Ship window 1 opens at 58. Routine SDK priorities sit at 54–58 so a
+# version bump does not outrank a harness. A note-backed tool or breaking
+# release uses this floor so it can still clear that window.
+NOTABLE_LAB_SDK_SCORE = 60
+
+# Compounds only. "tool" alone matches every Stainless changelog.
+# "toolset" is allowed as a suffix of "tool" so "browser toolset" hits.
+_LAB_SDK_NOTABLE = (
+    re.compile(r"\bcomputer\s+and\s+browser\b", re.IGNORECASE),
+    re.compile(r"\bbrowser\s+and\s+computer\b", re.IGNORECASE),
+    re.compile(r"\bbuilt-?in\s+browser\b", re.IGNORECASE),
+    re.compile(r"\bbuilt-?in\s+computer\b", re.IGNORECASE),
+    re.compile(r"\bcomputer\s+use\b", re.IGNORECASE),
+    re.compile(r"\bbrowser\s+use\b", re.IGNORECASE),
+    re.compile(r"\bcomputer\s+tools?(?:set)?\b", re.IGNORECASE),
+    re.compile(r"\bbrowser\s+tools?(?:set)?\b", re.IGNORECASE),
+    re.compile(r"\bcomputer\s+control\b", re.IGNORECASE),
+    re.compile(r"\bbrowser\s+control\b", re.IGNORECASE),
+    re.compile(r"\bbreaking\s+changes?\b", re.IGNORECASE),
+    re.compile(r"\bnew\s+tools?(?:set)?\b", re.IGNORECASE),
+    re.compile(r"\bnew\s+capacit(?:y|ies)\b", re.IGNORECASE),
+)
+_NOTABLE_NEGATION = re.compile(r"\b(?:no|not|without|never)\b", re.IGNORECASE)
 
 # Vendor changelogs/blogs whose feed names are not "releases"/"release notes".
 # Exact feed-name match covers backlog items that landed without tags;
@@ -480,7 +523,9 @@ def display_repo_name(repo: str) -> str:
         "crush": "Crush",
         "anthropic-sdk": "Anthropic SDK",
         "openai-python": "OpenAI SDK",
+        "openai-node": "OpenAI Node SDK",
         "python-genai": "Google GenAI SDK",
+        "js-genai": "Google GenAI JS SDK",
         "agent framework": "MS Agent Framework",
         "copilot": "Copilot",
         "devin desktop": "Devin Desktop",
@@ -640,6 +685,78 @@ def is_minor_release(title: str) -> bool:
     if re.search(r"20\d{6}\.\d+", low):
         return True
     return False
+
+
+def is_lab_sdk_feed(feed: str, item: Optional[dict] = None) -> bool:
+    """Official lab SDK atoms. Other release feeds keep the version gate."""
+    if (feed or "").lower().strip() in LAB_SDK_FEED_NAMES:
+        return True
+    tags = {str(t).lower() for t in ((item or {}).get("tags") or [])}
+    return "lab-sdk" in tags
+
+
+def is_anthropic_ts_sidecar(feed: str, title: str) -> bool:
+    """The TypeScript SDK repo publishes Vertex, Bedrock, Foundry, and AWS tags.
+
+    GitHub's releases.atom only carries 10 entries. Those adapter tags share
+    the feed with `@anthropic-ai/sdk` (`sdk-v*`, `sdk: v*`). They are not
+    the product release.
+    """
+    if "anthropic-sdk-typescript" not in (feed or "").lower():
+        return False
+    low = (title or "").lower().strip()
+    if low.startswith("sdk-v") or low.startswith("sdk:") or low.startswith("sdk "):
+        return False
+    if re.match(r"v?\d+\.\d+\.\d+\b", low):
+        return False
+    return True
+
+
+def lab_sdk_notable_index(notes: str) -> int:
+    """Index of the first new-tool, computer/browser, or breaking-change hit.
+
+    Returns -1 when the notes are a routine bump. A nearby "not" / "without"
+    skips a negated mention ("does not introduce a breaking change").
+    """
+    text = plain_text(notes)
+    if not text:
+        return -1
+    low = text.lower()
+    best = -1
+    for pattern in _LAB_SDK_NOTABLE:
+        for match in pattern.finditer(text):
+            idx = match.start()
+            window = low[max(0, idx - 32):idx]
+            if _NOTABLE_NEGATION.search(window) or window.rstrip().endswith("non-"):
+                continue
+            if best < 0 or idx < best:
+                best = idx
+    return best
+
+
+def lab_sdk_feature_line(notes: str, index: int) -> str:
+    """The changelog bullet that contains the notable phrase, trimmed."""
+    text = plain_text(notes)
+    if index < 0 or index >= len(text):
+        return ""
+    low = text.lower()
+    starts = [0]
+    for marker in ("\n", " api:", " tools:", " client:", " feat:", " * ", " • "):
+        pos = low.rfind(marker, 0, index)
+        if pos >= 0:
+            starts.append(pos + (1 if marker == "\n" else len(marker)))
+    left = max(starts)
+    right = len(text)
+    for marker in ("\n", " api:", " tools:", " client:", " feat:"):
+        pos = low.find(marker, index + 8)
+        if pos >= 0:
+            right = min(right, pos)
+    snippet = text[left:right]
+    snippet = re.sub(r"\[[0-9a-f]{6,}\]", " ", snippet, flags=re.IGNORECASE)
+    snippet = re.sub(r"\b[0-9a-f]{7,40}\b", " ", snippet, flags=re.IGNORECASE)
+    snippet = re.sub(r"^(?:api|tools|client|feat)\s*:\s*", "", snippet, flags=re.IGNORECASE)
+    snippet = re.sub(r"\s+", " ", snippet).strip(" -:*#")
+    return trim(snippet, 140)
 
 
 # OpenClaw publishes opaque `release-publish/<digits>` tags next to real
@@ -846,15 +963,34 @@ def classify_rss(item: dict) -> Optional[dict]:
             return None
         if is_deepagents_sidecar_churn(feed, title):
             return None
+        if is_anthropic_ts_sidecar(feed, title):
+            return None
+        # Lab SDKs cut a minor every few days and the atom title is only the
+        # version. When the notes are present, Ship only if they name a new
+        # tool, computer/browser control, or a breaking change. Empty notes
+        # keep the version gate so a body-less fetch does not hide a .0.
+        notes = plain_text(item.get("summary") or "")
+        notable_at = -1
+        if is_lab_sdk_feed(feed, item) and notes:
+            notable_at = lab_sdk_notable_index(notes)
+            if notable_at < 0:
+                return None
         repo = repo_name_from_feed(feed)
         display_title = normalize_release_title(repo, title)
         base_score = REPO_PRIORITY.get(repo, 50)
         # Penalize minor releases that stay on Ship (CalVer day trains, prose
         # like "minor"). Patch and pre-release rows are moved to Read at intake.
-        if is_minor_release(title):
+        # A notable lab SDK patch stays at the Ship floor instead.
+        if notable_at >= 0:
+            base_score = max(base_score, NOTABLE_LAB_SDK_SCORE)
+        elif is_minor_release(title):
             base_score = max(20, base_score - 30)
         score = base_score + age_score(dt, 96) / 8
         summary = "New release" if repo == "openclaw" else f"New {repo.title()} release"
+        if notable_at >= 0:
+            feature = lab_sdk_feature_line(notes, notable_at)
+            if feature:
+                summary = feature
         candidate = {
             "primaryCategory": "ship",
             "categories": ["ship"],
@@ -868,6 +1004,8 @@ def classify_rss(item: dict) -> Optional[dict]:
             "url": url,
             "title": display_title,
         }
+        if notable_at >= 0:
+            candidate["labSdkNotable"] = True
         if havoptic_feed(feed) or item.get("aggregator") == "havoptic":
             candidate["aggregator"] = "havoptic"
         return candidate
@@ -1971,6 +2109,10 @@ def ship_low_signal_reason(candidate: dict) -> Optional[str]:
     patch — the third component is the day. Leaderboard moves stay Ship.
     """
     if not isinstance(candidate, dict) or candidate.get("primaryCategory") != "ship":
+        return None
+    # Notes already cleared the lab-SDK gate, including a patch whose body
+    # names a new tool or a breaking change. The version gate would bury it.
+    if candidate.get("labSdkNotable"):
         return None
     if candidate.get("sourceType") == "leaderboard":
         return None

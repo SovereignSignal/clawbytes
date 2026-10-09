@@ -71,7 +71,9 @@ def _queued(url, title, source, score, **extra):
         "score": score,
         "publishedAt": now.isoformat(),
         "discoveredAt": now.isoformat(),
-        "expiresAt": (now + timedelta(days=6)).isoformat(),
+        # Ship TTL is 7 days from discovery. A date frozen on 2026-10-02
+        # expired on 2026-10-08, which empties the queue on later runs.
+        "expiresAt": (datetime.now(timezone.utc) + timedelta(days=6)).isoformat(),
         "status": "queued",
         "postedCategories": [],
     }
