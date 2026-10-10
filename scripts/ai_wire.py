@@ -47,6 +47,44 @@ _GH_RELEASE = re.compile(
 _POST_URL = re.compile(r"^https://t\.me/clawbytes/(\d+)$")
 _TAG = re.compile(r"<[^>]+>")
 _SPACE = re.compile(r"\s+")
+# Click ids and campaign params. ``utm_*`` is matched by prefix; every other
+# query param (HN ``id``, YouTube ``v``, ``refid``, …) is part of the identity.
+_TRACKING_PARAMS = frozenset({
+    "utm",
+    "ref",
+    "fbclid",
+    "gclid",
+    "gclsrc",
+    "dclid",
+    "gbraid",
+    "wbraid",
+    "msclkid",
+    "mc_cid",
+    "mc_eid",
+    "igshid",
+    "igsh",
+    "mkt_tok",
+    "_hsenc",
+    "_hsmi",
+    "yclid",
+    "twclid",
+    "ttclid",
+    "li_fat_id",
+    "srsltid",
+    "gad_source",
+    "gad_campaignid",
+    "_ga",
+    "_gl",
+    "vero_id",
+    "oly_anon_id",
+    "oly_enc_id",
+    "rb_clickid",
+    "irclickid",
+    "icid",
+    "ncid",
+    "mbid",
+})
+_UI_FRAGMENTS = frozenset({"top", "main"})
 
 
 def enabled() -> bool:
@@ -67,11 +105,43 @@ def telegram_post_url(message_id) -> Optional[str]:
     return f"https://t.me/clawbytes/{mid}"
 
 
-def normalize_url(url: str) -> str:
-    """Lowercase URL without query, fragment, or trailing slash.
+def _tracking_param(name: str) -> bool:
+    key = (name or "").strip().lower()
+    return key.startswith("utm_") or key in _TRACKING_PARAMS
 
-    Returns ``""`` when ``url`` is not an http(s) URL. The result is the
-    part after ``url:`` in a non-release canonical key.
+
+def _strip_tracking_query(query: str) -> str:
+    """Drop tracking params and keep every other param, in order, as written."""
+    if not query:
+        return ""
+    kept = []
+    for part in query.split("&"):
+        if not part:
+            continue
+        name, _sep, _value = part.partition("=")
+        if _tracking_param(urllib.parse.unquote_plus(name)):
+            continue
+        kept.append(part)
+    return "&".join(kept)
+
+
+def _keep_fragment(fragment: str) -> str:
+    """Keep an entry anchor. Drop an empty fragment and UI targets like #top."""
+    text = (fragment or "").strip()
+    if not text or text.lower() in _UI_FRAGMENTS:
+        return ""
+    return text
+
+
+def normalize_url(url: str) -> str:
+    """URL identity for a non-release canonical key.
+
+    Lowercases the scheme and host only. Drops userinfo, default ports, and
+    a trailing slash on the path. Drops tracking query params (``utm``,
+    ``utm_*``, ``ref``, ``fbclid``, ``gclid``, and other click ids) and keeps
+    every other param, including Hacker News ``id`` and YouTube ``v``. Keeps
+    the fragment unless it is empty or an obvious UI anchor (``#top``,
+    ``#main``). Returns ``""`` when ``url`` is not an http(s) URL.
     """
     raw = (url or "").strip()
     if not raw:
@@ -87,7 +157,14 @@ def normalize_url(url: str) -> str:
     if sep and ((scheme == "http" and port == "80") or (scheme == "https" and port == "443")):
         netloc = host
     path = urllib.parse.unquote(parts.path or "").rstrip("/")
-    return f"{scheme}://{netloc}{path}".lower()
+    query = _strip_tracking_query(parts.query)
+    fragment = _keep_fragment(parts.fragment)
+    normalized = f"{scheme}://{netloc}{path}"
+    if query:
+        normalized = f"{normalized}?{query}"
+    if fragment:
+        normalized = f"{normalized}#{fragment}"
+    return normalized
 
 
 def _iso(value) -> Optional[str]:
@@ -203,8 +280,9 @@ def map_item(item: dict, *, lane: str = "", channel_post_url: Optional[str] = No
     an http(s) url). Kind is ``tool_release`` for a GitHub release tag or a
     release / release-notes source, ``status`` for the three status feeds,
     and ``news`` otherwise. The GitHub release key is
-    ``release:<owner>/<repo>@<tag>``; every other key is ``url:`` plus the
-    normalized URL. The whole canonical key is lowercase.
+    ``release:<owner>/<repo>@<tag>`` (lowercased, unchanged by query or
+    fragment). Every other key is ``url:`` plus the normalized URL, which
+    lowercases the scheme and host only.
     """
     if not isinstance(item, dict):
         return None
@@ -240,7 +318,7 @@ def map_item(item: dict, *, lane: str = "", channel_post_url: Optional[str] = No
     payload = {
         "source_bot": SOURCE_BOT,
         "kind": kind,
-        "canonical_key": canonical.lower(),
+        "canonical_key": canonical,
         "title": title.strip(),
         "url": url,
         "channel": CHANNEL,
