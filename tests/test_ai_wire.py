@@ -112,7 +112,7 @@ def test_map_github_release_status_and_news():
     )
     assert news["kind"] == "news"
     assert news["lane"] == "Read"
-    assert news["canonical_key"] == "url:https://example.com/foo/bar"
+    assert news["canonical_key"] == "url:https://example.com/Foo/Bar?q=1#frag"
     assert news["url"] == "https://Example.com/Foo/Bar/?q=1#frag"
     assert "org" not in news
 
@@ -146,6 +146,93 @@ def test_github_release_key_is_lowercase_and_keeps_the_tag():
     assert row["org"] == "OpenAI"
     assert row["lane"] == "Community"
     assert row["url"].endswith("?utm=newsletter")
+
+
+def test_canonical_url_keeps_hn_youtube_and_changelog_identity():
+    """Distinct stories stay distinct: keep ids, video ids, and entry anchors."""
+    hn_one = ai_wire.map_item(
+        {
+            "title": "Show HN: Alpha",
+            "url": "https://news.ycombinator.com/item?id=45001&utm_source=twitter&utm_medium=social&ref=share&fbclid=IwAR0",
+            "sourceName": "Hacker News",
+        },
+        lane="community",
+    )
+    hn_two = ai_wire.map_item(
+        {
+            "title": "Show HN: Beta",
+            "url": "https://news.ycombinator.com/item?id=45002",
+            "sourceName": "Hacker News",
+        },
+        lane="community",
+    )
+    assert hn_one["kind"] == "news"
+    assert hn_one["canonical_key"] == "url:https://news.ycombinator.com/item?id=45001"
+    assert hn_two["canonical_key"] == "url:https://news.ycombinator.com/item?id=45002"
+
+    video = ai_wire.map_item(
+        {
+            "title": "Agent demo",
+            "url": "https://www.YouTube.com/watch?v=dQw4w9WgXcQ&gclid=EAIa&utm_campaign=launch",
+            "sourceName": "YouTube",
+        },
+        lane="read",
+    )
+    other_video = ai_wire.map_item(
+        {
+            "title": "Other demo",
+            "url": "https://www.youtube.com/watch?v=abcdefghijk",
+            "sourceName": "YouTube",
+        },
+        lane="read",
+    )
+    assert video["canonical_key"] == "url:https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    assert other_video["canonical_key"] == "url:https://www.youtube.com/watch?v=abcdefghijk"
+
+    latest = ai_wire.map_item(
+        {
+            "title": "October 8, 2026",
+            "url": "https://docs.claude.com/en/release-notes/overview?utm_source=newsletter#updated-1a2b3c4d",
+            "sourceName": "Claude Release Notes",
+        },
+        lane="ship",
+    )
+    earlier = ai_wire.map_item(
+        {
+            "title": "October 1, 2026",
+            "url": "https://docs.claude.com/en/release-notes/overview#updated-9z8y7x6w",
+            "sourceName": "Claude Release Notes",
+        },
+        lane="ship",
+    )
+    assert latest["kind"] == "tool_release"
+    assert latest["canonical_key"] == "url:https://docs.claude.com/en/release-notes/overview#updated-1a2b3c4d"
+    assert earlier["canonical_key"] == "url:https://docs.claude.com/en/release-notes/overview#updated-9z8y7x6w"
+
+    assert ai_wire.normalize_url(
+        "https://Example.com/Foo/Bar?utm_source=newsletter&utm_medium=email&fbclid=abc&gclid=def&ref=share"
+    ) == "https://example.com/Foo/Bar"
+    assert ai_wire.normalize_url(
+        "https://example.com/search?q=Claude+Code&utm_source=x&id=7"
+    ) == "https://example.com/search?q=Claude+Code&id=7"
+    assert ai_wire.normalize_url("https://example.com/a?refid=abc&ref=twitter") == "https://example.com/a?refid=abc"
+    assert ai_wire.normalize_url("https://docs.claude.com/en/release-notes/overview#top") == (
+        "https://docs.claude.com/en/release-notes/overview"
+    )
+    assert ai_wire.normalize_url("https://kiro.dev/changelog#main") == "https://kiro.dev/changelog"
+    assert ai_wire.normalize_url("https://kiro.dev/changelog#TOP") == "https://kiro.dev/changelog"
+    assert ai_wire.normalize_url("https://example.com/docs#") == "https://example.com/docs"
+    assert ai_wire.normalize_url("HTTPS://Example.COM/Foo/Bar?Q=Claude") == "https://example.com/Foo/Bar?Q=Claude"
+
+    release = ai_wire.map_item(
+        {
+            "title": "Codex",
+            "url": "https://github.com/openai/codex/releases/tag/v0.50.0?utm_source=hn#notes",
+            "sourceName": "Codex Releases",
+        },
+        lane="ship",
+    )
+    assert release["canonical_key"] == "release:openai/codex@v0.50.0"
 
 
 def test_explicit_org_and_blurb_win_and_summary_caps_at_600():
