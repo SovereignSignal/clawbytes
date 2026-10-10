@@ -11,6 +11,8 @@ Examples:
   python3 scripts/clawbytes_threads.py status
   python3 scripts/clawbytes_threads.py preview --category ship
   python3 scripts/clawbytes_threads.py publish --category watch --send
+  python3 clawbytes_threads.py ai-wire-backfill --days 7
+  python3 clawbytes_threads.py ai-wire-backfill --days 7 --send
 """
 
 from __future__ import annotations
@@ -56,6 +58,13 @@ from feed_filters import (  # noqa: E402
     version_key,
 )
 from title_text import first_stated_date, flatten_inline_markup  # noqa: E402
+from ai_wire import (  # noqa: E402
+    enabled as ai_wire_enabled,
+    payloads_for_backfill,
+    push_mapped,
+    push_clawbytes_items,
+    telegram_post_url,
+)
 
 # Vendored shared publish core (ss_publish/). _publisher is constructed lazily
 # in _ensure_publisher() (creds come from cred() / env, resolved at call time,
@@ -64,6 +73,10 @@ from title_text import first_stated_date, flatten_inline_markup  # noqa: E402
 # channel keeps its own cred() resolution, ops banner, and disable_preview=False
 # (clawbytes wants link cards in the channel; modelbytes disables them).
 _publisher = None
+# Bumped only by the real send_telegram, so a test double cannot reuse a
+# previous message id. _last_channel_post_url is the public t.me link.
+_send_generation = 0
+_last_channel_post_url: Optional[str] = None
 
 
 WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).resolve().parent)))
@@ -4005,8 +4018,11 @@ def send_telegram(message: str) -> bool:
     HTTP mechanics (truncate to 4096, retry 429/5xx honoring Retry-After,
     fail-soft) to the shared publish core. The Slack mirror fires only on a
     successful Telegram send so the two audience surfaces never desync.
+
+    On success, remembers ``https://t.me/clawbytes/<message_id>`` when Telegram
+    returns a message id, so the AI Wire push can cite the channel post.
     """
-    global _publisher
+    global _publisher, _send_generation, _last_channel_post_url
     if _publisher is None:
         _publisher = _ensure_publisher()
     pub = _publisher
@@ -4014,6 +4030,8 @@ def send_telegram(message: str) -> bool:
         print("Telegram bot token not found", file=sys.stderr)
         return False
     result = pub.send_telegram(message)
+    _send_generation += 1
+    _last_channel_post_url = telegram_post_url(result.message_id) if result.ok else None
     if not result.ok:
         from ss_publish import redact_secrets
         print(redact_secrets(f"Telegram send error: {result.error}", pub.secret_values),
@@ -4021,7 +4039,101 @@ def send_telegram(message: str) -> bool:
     return result.ok
 
 
-def mark_posted(category: str, limit: Optional[int] = None, posted_items: Optional[List[dict]] = None) -> List[dict]:
+def _rows_for_ai_wire(items: List[dict]) -> List[dict]:
+    """Fill source fields from the backlog when a curated row omitted them.
+
+    The curator row keeps its own title and blurb. Kind detection still needs
+    the feed name, which lives on the backlog copy.
+    """
+    backlog = load_json(BACKLOG_FILE, {"items": []})
+    by_id = {}
+    by_url = {}
+    for row in backlog.get("items") or []:
+        if not isinstance(row, dict):
+            continue
+        if row.get("id"):
+            by_id[row["id"]] = row
+        if row.get("url"):
+            by_url[row["url"]] = row
+    merged_rows = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        src = {}
+        item_id = item.get("id")
+        item_url = item.get("url")
+        if item_id and item_id in by_id:
+            src = by_id[item_id]
+        elif item_url and item_url in by_url:
+            src = by_url[item_url]
+        merged = dict(src)
+        for key, value in item.items():
+            if value not in (None, ""):
+                merged[key] = value
+        merged_rows.append(merged)
+    return merged_rows
+
+
+def ai_wire_backfill(days: int = 7, send: bool = False, now: Optional[datetime] = None) -> dict:
+    """Build ingest rows from posted backlog items in the last ``days`` days.
+
+    Dry-run unless ``send`` is true. ``--send`` still no-ops the HTTP call when
+    ``AI_WIRE_ENABLED`` is off. Reads ``clawbytes-backlog.json`` on the memory
+    volume. Does not post to Telegram.
+    """
+    backlog = load_json(BACKLOG_FILE, {"items": []})
+    payloads = payloads_for_backfill(backlog.get("items") or [], days=days, now=now or now_utc())
+    if not send:
+        return {"dry_run": True, "days": days, "count": len(payloads), "items": payloads}
+    if not ai_wire_enabled():
+        return {
+            "dry_run": False,
+            "days": days,
+            "count": len(payloads),
+            "pushed": False,
+            "reason": "AI_WIRE_ENABLED is off",
+        }
+    push_mapped(payloads)
+    return {"dry_run": False, "days": days, "count": len(payloads), "pushed": True}
+
+
+def push_lane_to_ai_wire(category: str, items: List[dict], channel_post_url: Optional[str] = None) -> None:
+    """Push one successful lane. Flag-off is a no-op. Never raises."""
+    try:
+        if not items or not ai_wire_enabled():
+            return
+        lane = CATEGORY_META.get(category, {}).get("label") or category
+        push_clawbytes_items(
+            _rows_for_ai_wire(items),
+            lane=lane,
+            channel_post_url=channel_post_url,
+            posted_at=now_utc(),
+        )
+    except Exception as exc:  # noqa: BLE001 - a registry failure must not fail the post
+        print(f"ai_wire push failed: {type(exc).__name__}", file=sys.stderr)
+
+
+def _send_and_record(category: str, message: str, limit: Optional[int] = None,
+                     posted_items: Optional[List[dict]] = None) -> bool:
+    """Send one lane message, then mark it posted and push to AI Wire.
+
+    The registry push runs only after Telegram succeeds. A push error is
+    logged and does not change the True return, and it does not undo
+    mark_posted. A mocked send_telegram that never bumps _send_generation
+    does not reuse a previous channel URL.
+    """
+    before = _send_generation
+    if not send_telegram(message):
+        return False
+    post_url = _last_channel_post_url if _send_generation != before else None
+    bundle = mark_posted(category, limit, posted_items, channel_post_url=post_url)
+    rows = bundle if isinstance(bundle, list) else list(posted_items or [])
+    push_lane_to_ai_wire(category, rows, channel_post_url=post_url)
+    return True
+
+
+def mark_posted(category: str, limit: Optional[int] = None, posted_items: Optional[List[dict]] = None,
+                channel_post_url: Optional[str] = None) -> List[dict]:
     backlog = load_json(BACKLOG_FILE, {"items": []})
     state = load_json(THREAD_STATE_FILE, {})
     bundle = posted_items if posted_items is not None else bundle_for_category(category, limit)
@@ -4030,25 +4142,33 @@ def mark_posted(category: str, limit: Optional[int] = None, posted_items: Option
     posted_urls = set(state.get("postedUrls", []))
     posted_backlog_ids = set(state.get("postedBacklogIds", []))
 
+    published_at = now_utc().isoformat()
     for item in backlog.get("items", []):
         if item.get("id") in posted_ids or item.get("url") in posted_urls_to_mark:
             item["status"] = "posted"
             item["postedCategories"] = sorted(set(item.get("postedCategories", []) + [category]))
+            # postedAt is the channel post time. channelPostUrl is the public
+            # Telegram link for this lane message. AI Wire backfill reads both.
+            item["postedAt"] = published_at
+            if channel_post_url:
+                item["channelPostUrl"] = channel_post_url
             posted_urls.add(item["url"])
             posted_backlog_ids.add(item["id"])
 
     posted_urls.update(posted_urls_to_mark)
     state["postedUrls"] = list(posted_urls)[-5000:]
     state["postedBacklogIds"] = list(posted_backlog_ids)[-5000:]
-    published_at = now_utc().isoformat()
     state.setdefault("lastPublishedAt", {})[category] = published_at
     publish_log = state.get("publishLog", [])
-    publish_log.append({
+    entry = {
         "category": category,
         "at": published_at,
         "day": local_day_key(),
         "count": len(bundle),
-    })
+    }
+    if channel_post_url:
+        entry["channelPostUrl"] = channel_post_url
+    publish_log.append(entry)
     state["publishLog"] = publish_log[-500:]
     save_json(BACKLOG_FILE, backlog)
     save_json(THREAD_STATE_FILE, state)
@@ -4341,8 +4461,7 @@ def _publish_lane(category: str, send: bool) -> tuple:
                     _log_no_substance(category)
                     return (False, 0)
                 ok, errs = validate_lane_for_publish(message)
-                if ok and send_telegram(message):
-                    mark_posted(category, None, items)
+                if ok and _send_and_record(category, message, None, items):
                     return (True, len(items))
                 if not ok:
                     print(f"[autopublish] curated {category} rejected by gate: "
@@ -4376,8 +4495,7 @@ def _publish_lane(category: str, send: bool) -> tuple:
         if not ok:
             print(f"[autopublish] {category} rejected by gate: {'; '.join(errs)}", file=sys.stderr)
             return (False, len(bundle))
-        if send_telegram(message):
-            mark_posted(category)
+        if _send_and_record(category, message):
             return (True, len(bundle))
         print(f"[autopublish] {category} Telegram send failed; not marked posted "
               f"(will retry next cycle)", file=sys.stderr)
@@ -4638,6 +4756,13 @@ def main() -> int:
     p_auto = sub.add_parser("autopublish")
     p_auto.add_argument("--send", action="store_true")
 
+    p_wire = sub.add_parser(
+        "ai-wire-backfill",
+        help="Push already-posted backlog items to AI Wire (dry-run unless --send)",
+    )
+    p_wire.add_argument("--days", type=int, default=7, help="How many days of posted items to include")
+    p_wire.add_argument("--send", action="store_true", help="POST the batch. Default is a dry run")
+
     p_prev = sub.add_parser("preview")
     p_prev.add_argument("--category", choices=list(CATEGORY_META.keys()), required=True)
     p_prev.add_argument("--limit", type=int)
@@ -4692,6 +4817,14 @@ def main() -> int:
         print(json.dumps(results, indent=2))
         return 0
 
+    if args.cmd == "ai-wire-backfill":
+        if args.days < 1:
+            print("ai-wire-backfill: --days must be >= 1", file=sys.stderr)
+            return 2
+        report = ai_wire_backfill(days=args.days, send=args.send)
+        print(json.dumps(report, indent=2))
+        return 0
+
     if getattr(args, "collect_first", False):
         collect_into_backlog()
 
@@ -4737,9 +4870,7 @@ def main() -> int:
                 print(message)
                 bundle = bundle_for_category(args.category, args.limit)
                 if args.send and bundle:
-                    if send_telegram(message):
-                        mark_posted(args.category, args.limit)
-                    else:
+                    if not _send_and_record(args.category, message, args.limit):
                         print("[publish] Telegram send failed; lane not marked posted", file=sys.stderr)
                         return 1
                 return 0
@@ -4751,9 +4882,7 @@ def main() -> int:
                 print(message)
                 bundle = bundle_for_category(args.category, args.limit)
                 if args.send and bundle:
-                    if send_telegram(message):
-                        mark_posted(args.category, args.limit)
-                    else:
+                    if not _send_and_record(args.category, message, args.limit):
                         print("[publish] Telegram send failed; lane not marked posted", file=sys.stderr)
                         return 1
                 return 0
@@ -4769,9 +4898,8 @@ def main() -> int:
             print(json.dumps(meta, indent=2), file=sys.stderr)
             items = curated.get("items") or []
             if args.send and items:
-                if send_telegram(message):
+                if _send_and_record(args.category, message, args.limit, items):
                     print(f"[publish] sent consolidated {args.category} post ({len(items)} items) to Telegram", file=sys.stderr)
-                    mark_posted(args.category, args.limit, items)
                 else:
                     print("[publish] Telegram send failed; lane not marked posted", file=sys.stderr)
                     return 1
@@ -4781,9 +4909,7 @@ def main() -> int:
         print(message)
         bundle = bundle_for_category(args.category, args.limit)
         if args.send and bundle:
-            if send_telegram(message):
-                mark_posted(args.category, args.limit)
-            else:
+            if not _send_and_record(args.category, message, args.limit):
                 print("[publish] Telegram send failed; lane not marked posted", file=sys.stderr)
                 return 1
         return 0

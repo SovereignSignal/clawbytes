@@ -76,6 +76,20 @@ There are **no routine status reports**. Ops DMs are exception-only: the admin h
 | `GITHUB_TOKEN` | Lifts GitHub API rate limits (release-note grounding, leaderboard/registry sha checks, discovery) | recommended |
 | `CLAWBYTES_NORMALIZE_SCORES` | `1` to rank a lane by within-source percentile (top-of-each-source is comparable) instead of raw score. Code default is off; recommended on in production. | optional |
 | `CLAWBYTES_RELEASE_DIFF` | `1` to add "changes since `<prev tag>`" context to GitHub release grounding, falling back to compare-endpoint commit subjects when notes are thin. Costs 1-2 extra API calls/ship item (wants `GITHUB_TOKEN`). Code default is off; recommended on in production. | optional |
+| `AI_WIRE_ENABLED` | `1`/`true`/`yes`/`on` to upsert posted items to the AI Wire registry after Telegram accepts the lane. Default off. A failed push is a log line and does not fail the channel post. | optional |
+| `AI_WIRE_URL` | Origin of the AI Wire site. Items are posted to `{AI_WIRE_URL}/api/ingest/items`. | with the flag |
+| `AI_WIRE_INGEST_TOKEN` | Bearer token for that ingest endpoint. | with the flag |
+
+## AI Wire
+
+When `AI_WIRE_ENABLED` is on, each successful Telegram lane post is also upserted to the AI Wire registry. The push runs only after Telegram accepts the message, one batch per publish, with a 5 second timeout and one retry. Failure logs `ai_wire push failed:` and leaves the channel post in place. Leave the flag off until the registry is ready to take traffic.
+
+```bash
+python3 clawbytes_threads.py ai-wire-backfill --days 7          # dry run
+python3 clawbytes_threads.py ai-wire-backfill --days 7 --send   # needs the flag, URL, and token
+```
+
+The backfill reads already-posted rows from `clawbytes-backlog.json` on `CLAWBYTES_MEMORY_DIR`. It does not post to Telegram.
 
 ## Local development
 
