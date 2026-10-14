@@ -9,6 +9,8 @@ It stays off unless ``AI_WIRE_ENABLED`` is ``1``, ``true``, ``yes``, or
 stdlib only, times out after 5 seconds, retries once on transport errors and
 408/429/5xx, and never raises. Logs are ``ai_wire push ok n=`` or
 ``ai_wire push failed:`` and do not include the token or the response body.
+``n`` is the response ``created`` count plus ``upserted`` (rows that already
+existed). A body without those counts falls back to the number of items sent.
 """
 from __future__ import annotations
 
@@ -458,17 +460,32 @@ def _retryable(reason: str) -> bool:
     return code in {408, 429} or 500 <= code <= 599
 
 
-def _upserted(body: bytes, fallback: int) -> int:
+def _count_field(data: dict, name: str) -> Optional[int]:
+    value = data.get(name)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _accepted_count(body: bytes, fallback: int) -> int:
+    """Rows the registry accepted: new (``created``) plus already present (``upserted``).
+
+    ``upserted`` alone is the update count. New items arrive with ``upserted``
+    0 and ``created`` set, so logging only ``upserted`` reads as ``n=0``.
+    Zero is a real total when either field is present. A missing or unusable
+    body falls back to the number of items sent.
+    """
     try:
         data = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         return fallback
     if not isinstance(data, dict):
         return fallback
-    count = data.get("upserted")
-    if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
-        return count
-    return fallback
+    created = _count_field(data, "created")
+    upserted = _count_field(data, "upserted")
+    if created is None and upserted is None:
+        return fallback
+    return (created or 0) + (upserted or 0)
 
 
 def _post_once(endpoint: str, token: str, items: list, timeout: float) -> tuple:
@@ -511,7 +528,7 @@ def _post_batch(endpoint: str, token: str, items: list, timeout: float) -> tuple
                 continue
             return False, last
         if 200 <= status < 300:
-            return True, _upserted(body, len(items))
+            return True, _accepted_count(body, len(items))
         last = f"http_{status}"
         if attempt == 0 and _retryable(last):
             continue

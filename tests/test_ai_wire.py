@@ -318,7 +318,7 @@ def test_push_posts_the_batch_and_logs_ok(monkeypatch, capsys):
         seen["url"] = req.full_url
         seen["auth"] = req.get_header("Authorization")
         seen["body"] = json.loads(req.data.decode())
-        return _Body(payload={"upserted": 1, "created": 1, "keys": ["release:openai/codex@v0.50.0"]})
+        return _Body(payload={"upserted": 0, "created": 1, "keys": ["release:openai/codex@v0.50.0"]})
 
     monkeypatch.setattr(ai_wire.urllib.request, "urlopen", _open)
     ai_wire.push_clawbytes_items(
@@ -334,6 +334,34 @@ def test_push_posts_the_batch_and_logs_ok(monkeypatch, capsys):
     assert seen["auth"] == "Bearer test-token"
     assert seen["body"]["items"][0]["canonical_key"] == "release:openai/codex@v0.50.0"
     assert "test-token" not in err
+
+
+def test_push_ok_adds_created_and_upserted(monkeypatch, capsys):
+    """``upserted`` is rows that already existed. ``created`` is new rows."""
+    _enable(monkeypatch)
+
+    def _open(_req, timeout=None):
+        return _Body(payload={"upserted": 2, "created": 1, "keys": []})
+
+    monkeypatch.setattr(ai_wire.urllib.request, "urlopen", _open)
+    ai_wire.push_mapped([
+        {"canonical_key": "url:https://example.com/a", "title": "A", "url": "https://example.com/a"},
+        {"canonical_key": "url:https://example.com/b", "title": "B", "url": "https://example.com/b"},
+        {"canonical_key": "url:https://example.com/c", "title": "C", "url": "https://example.com/c"},
+    ])
+    assert "ai_wire push ok n=3" in capsys.readouterr().err
+
+
+def test_accepted_count_sums_created_and_upserted_and_falls_back():
+    assert ai_wire._accepted_count(b'{"upserted": 0, "created": 4}', 9) == 4
+    assert ai_wire._accepted_count(b'{"upserted": 2, "created": 1}', 9) == 3
+    assert ai_wire._accepted_count(b'{"upserted": 2}', 9) == 2
+    assert ai_wire._accepted_count(b'{"created": 4}', 9) == 4
+    assert ai_wire._accepted_count(b'{"upserted": 0, "created": 0}', 9) == 0
+    assert ai_wire._accepted_count(b"not-json", 9) == 9
+    assert ai_wire._accepted_count(b"[]", 9) == 9
+    assert ai_wire._accepted_count(b'{"upserted": true, "created": "3"}', 9) == 9
+    assert ai_wire._accepted_count(b'{"upserted": -1, "created": 2}', 9) == 2
 
 
 def test_timeout_retries_once_then_success_logs_ok(monkeypatch, capsys):
