@@ -2039,6 +2039,68 @@ def write_source_yield(report: Optional[dict] = None, *, written_at: Optional[st
     return payload
 
 
+def yield_snapshot_summary(snapshot: dict, *, duration_s: float, ok: bool, error: str = "") -> str:
+    """One completion line: counts, duration, and ok or failed.
+
+    Per-source rows stay in the yield file. Printing them is what tripped
+    Railway's log rate limit and hid this line.
+    """
+    duration = f"{max(0.0, duration_s):.1f}s"
+    if not ok:
+        suffix = f" error={error}" if error else ""
+        return f"yield-snapshot done duration={duration} failed{suffix}"
+    status = snapshot.get("statusCounts") if isinstance(snapshot, dict) else None
+    if not isinstance(status, dict):
+        status = {}
+    sources = snapshot.get("bySourceName") if isinstance(snapshot, dict) else None
+    source_count = len(sources) if isinstance(sources, dict) else 0
+    raw = snapshot.get("rawItems", 0) if isinstance(snapshot, dict) else 0
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raw = 0
+
+    def _count(key: str) -> int:
+        value = status.get(key, 0)
+        if isinstance(value, bool) or not isinstance(value, int):
+            return 0
+        return value
+
+    return (
+        "yield-snapshot done "
+        f"raw={raw} sources={source_count} "
+        f"would_add={_count('would_add')} skipped={_count('skipped')} rejected={_count('rejected')} "
+        f"duration={duration} ok"
+    )
+
+
+def run_yield_snapshot(*, write=None, clock=None) -> int:
+    """Write the weekly yield file. Stdout is a start line and one summary.
+
+    Success and failure each emit a single final line so a rate-limited log
+    still shows whether the job finished. Returns 0 on success, 1 on failure.
+    """
+    write = write_source_yield if write is None else write
+    clock = time.perf_counter if clock is None else clock
+    print("yield-snapshot start", flush=True)
+    started = clock()
+    error = ""
+    snapshot: dict = {}
+    try:
+        payload = write()
+        latest = payload.get("latest") if isinstance(payload, dict) else None
+        if isinstance(latest, dict):
+            snapshot = latest
+        ok = True
+    except Exception as exc:  # noqa: BLE001 - one summary line, then a nonzero exit
+        ok = False
+        error = type(exc).__name__
+    duration = clock() - started
+    print(
+        yield_snapshot_summary(snapshot, duration_s=duration, ok=ok, error=error),
+        flush=True,
+    )
+    return 0 if ok else 1
+
+
 def print_audit(report: dict) -> None:
     print("ClawBytes ingestion audit")
     print(f"memory: {report['memoryDir']}")
@@ -4808,9 +4870,7 @@ def main() -> int:
         return 0
 
     if args.cmd == "yield-snapshot":
-        payload = write_source_yield()
-        print(json.dumps(payload["latest"], indent=2))
-        return 0
+        return run_yield_snapshot()
 
     if args.cmd == "autopublish":
         results = autopublish(send=args.send)

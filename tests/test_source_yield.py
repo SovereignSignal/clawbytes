@@ -103,3 +103,41 @@ def test_write_source_yield_keeps_eight_weeks_and_does_not_notify(monkeypatch):
     on_disk = ct.load_json(ct.SOURCE_YIELD_FILE, {})
     assert on_disk["latest"]["rawItems"] == 10
     assert len(on_disk["history"]) == 8
+
+
+def test_yield_snapshot_prints_start_and_one_summary(capsys):
+    def _write():
+        return {
+            "latest": {
+                "rawItems": 10,
+                "statusCounts": {"would_add": 2, "skipped": 5, "rejected": 3},
+                "bySourceName": {
+                    "Cursor Changelog": {"total": 6, "would_add": 2},
+                    "r/cursor": {"total": 4, "skipped": 4},
+                },
+            }
+        }
+
+    ticks = iter([10.0, 11.0])
+    code = ct.run_yield_snapshot(write=_write, clock=lambda: next(ticks))
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert code == 0
+    assert lines == [
+        "yield-snapshot start",
+        "yield-snapshot done raw=10 sources=2 would_add=2 skipped=5 rejected=3 duration=1.0s ok",
+    ]
+
+
+def test_yield_snapshot_failure_is_one_line(capsys):
+    def _write():
+        raise OSError("disk full")
+
+    ticks = iter([0.0, 0.4])
+    code = ct.run_yield_snapshot(write=_write, clock=lambda: next(ticks))
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 1
+    assert lines == [
+        "yield-snapshot start",
+        "yield-snapshot done duration=0.4s failed error=OSError",
+    ]
+    assert "disk full" not in lines[1]
