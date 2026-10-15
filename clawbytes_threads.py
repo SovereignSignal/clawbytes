@@ -2784,12 +2784,18 @@ def collect_into_backlog() -> dict:
             # Stale calendar dates and a story already posted inside the
             # window never take a Ship slot. Mark seen and ack the ecosystem
             # tag so the monitor does not re-emit it every collect.
-            if is_stale_dated_item(candidate, collected_at) or title_repeats_story(
-                candidate.get("title") or "", posted_titles
-            ) or havoptic_already_covered(candidate, primary_urls, primary_versions):
+            repeat = story_repeat_match(candidate.get("title") or "", posted_titles)
+            if is_stale_dated_item(candidate, collected_at) or repeat == "identified" or (
+                havoptic_already_covered(candidate, primary_urls, primary_versions)
+            ):
                 seen_source_keys.add(key)
                 if eco is not None:
                     acked_releases.append(eco)
+                continue
+            if repeat == "fuzzy":
+                # Headline overlap alone is not proof. Skip this collect but
+                # leave the key unseen (and the tag unacked) so it is checked
+                # again rather than rejected for good.
                 continue
             pending_keys.add(key)
             source = candidate.get("sourceName") or kind
@@ -3014,14 +3020,76 @@ def _bare_numbers(title: str) -> set:
     return set(_BARE_NUMBER.findall(title or ""))
 
 
+# Event words. Token overlap cannot tell "adds X" from "removes X", or a
+# launch from a vulnerability report on the same feature, so two headlines
+# whose events conflict are different stories.
+_STORY_EVENT_ON = re.compile(
+    r"\b(?:adds?|added|adding|launch\w*|introduc\w*|enabl\w*|ships?|shipped|"
+    r"roll(?:s|ed|ing)? out|unveil\w*|now available|generally available)\b",
+    re.IGNORECASE,
+)
+_STORY_EVENT_OFF = re.compile(
+    r"\b(?:remov\w*|deprecat\w*|retir\w*|sunset\w*|disabl\w*|"
+    r"discontinu\w*|revert\w*|roll(?:s|ed|ing)? back|rollback|kill\w*|shut\w* down|"
+    r"paus\w*|delay\w*|end(?:s|ing)? support)\b",
+    re.IGNORECASE,
+)
+_STORY_EVENT_SECURITY = re.compile(
+    r"\b(?:security|vulnerab\w*|vulns?|cve-\d{4}-\d+|ghsa-[\w-]+|exploit\w*|breach\w*|"
+    r"leak\w*|malicious|compromis\w*|backdoor\w*|prompt injection|rce|advisory|"
+    r"outage\w*|incident\w*)\b",
+    re.IGNORECASE,
+)
+_STORY_INCIDENT_ID = re.compile(r"\b(?:cve-\d{4}-\d{4,}|ghsa(?:-[a-z0-9]{4}){3})\b", re.IGNORECASE)
+
+
+def _story_events(title: str) -> set:
+    text = title or ""
+    events = set()
+    if _STORY_EVENT_ON.search(text):
+        events.add("on")
+    if _STORY_EVENT_OFF.search(text):
+        events.add("off")
+    if _STORY_EVENT_SECURITY.search(text):
+        events.add("security")
+    return events
+
+
+def _story_events_conflict(left: str, right: str) -> bool:
+    """True when the two headlines describe incompatible events.
+
+    On vs off (adds/removes, enables/disables) conflicts. A security or
+    incident headline never collapses into one that is not: a vulnerability
+    report is a follow-up, not a repeat of the launch. A headline with no
+    event word (``Mistral Large 4``) is compatible with either.
+    """
+    left_events = _story_events(left)
+    right_events = _story_events(right)
+    if ("security" in left_events) != ("security" in right_events):
+        return True
+    left_turn = left_events & {"on", "off"}
+    right_turn = right_events & {"on", "off"}
+    return bool(left_turn and right_turn and left_turn != right_turn)
+
+
+def _story_identifiers(title: str) -> set:
+    """Release versions and incident ids (CVE, GHSA) named in a headline."""
+    ids = _dotted_versions(title)
+    ids.update(match.lower() for match in _STORY_INCIDENT_ID.findall(title or ""))
+    return ids
+
+
 def same_story_titles(left: str, right: str) -> bool:
     """True when two headlines are the same product and the same topic.
 
     A different dotted version is a different story. A different bare number
     (Mistral Large 3 vs Mistral Large 4) is too. Shared vendor words alone
-    are not a match.
+    are not a match, and neither are conflicting events (adds vs removes, a
+    launch vs a security report).
     """
     if not left or not right:
+        return False
+    if _story_events_conflict(left, right):
         return False
     left_versions = _dotted_versions(left)
     right_versions = _dotted_versions(right)
@@ -3048,6 +3116,24 @@ def same_story_titles(left: str, right: str) -> bool:
 
 def title_repeats_story(title: str, recent_titles: List[str]) -> bool:
     return any(same_story_titles(title, other) for other in recent_titles if other)
+
+
+def story_repeat_match(title: str, recent_titles: List[str]) -> Optional[str]:
+    """How ``title`` repeats a recent story: "identified", "fuzzy", or None.
+
+    "identified" means the headlines also share a release version or incident
+    id, which is firm enough to retire the source key. "fuzzy" is token
+    overlap alone: skip for now, but do not mark the key seen.
+    """
+    match = None
+    title_ids = _story_identifiers(title)
+    for other in recent_titles or []:
+        if not other or not same_story_titles(title, other):
+            continue
+        if title_ids & _story_identifiers(other):
+            return "identified"
+        match = "fuzzy"
+    return match
 
 
 def _story_stamp(item: dict) -> Optional[datetime]:

@@ -184,3 +184,97 @@ def test_collect_does_not_queue_a_stale_pagewatch_item(monkeypatch, tmp_path):
     stored = {item["url"] for item in ct.load_json(ct.BACKLOG_FILE, {"items": []})["items"]}
     assert "https://docs.devin.ai/cli/changelog/stable#updated-old" not in stored
     assert "https://docs.devin.ai/release-notes/overview#october-5-2026" in stored
+
+
+# --- conflicting events stay distinct (2026-10-14 review, finding 3) --------
+
+DISTINCT_PAIRS = [
+    ("Claude Code adds remote agents", "Claude Code removes remote agents"),
+    ("Cursor launches background agents", "Cursor background agents security vulnerability"),
+    ("Claude Code enables sandbox isolation", "Claude Code disables sandbox isolation"),
+]
+
+
+def test_conflicting_event_pairs_are_not_the_same_story():
+    for left, right in DISTINCT_PAIRS:
+        assert not ct.same_story_titles(left, right), (left, right)
+        assert not ct.same_story_titles(right, left), (right, left)
+        assert ct.story_repeat_match(right, [left]) is None
+
+
+def test_paraphrases_of_one_release_still_dedupe():
+    assert ct.same_story_titles(
+        "Claude Code 2.1.300 adds remote agents",
+        "Remote agents arrive in Claude Code 2.1.300",
+    )
+    assert ct.story_repeat_match(
+        "Remote agents arrive in Claude Code 2.1.300",
+        ["Claude Code 2.1.300 adds remote agents"],
+    ) == "identified"
+    assert ct.same_story_titles("Cursor launches background agents", "Cursor introduces background agents")
+    assert ct.story_repeat_match(
+        "Cursor introduces background agents", ["Cursor launches background agents"]
+    ) == "fuzzy"
+    assert ct.story_repeat_match(
+        "Cursor background agents vulnerability CVE-2026-12345",
+        ["Security advisory: CVE-2026-12345 in Cursor background agents"],
+    ) == "identified"
+
+
+def _rss_candidate(url, title):
+    return {
+        "id": url,
+        "title": title,
+        "url": url,
+        "summary": "",
+        "sourceType": "rss",
+        "sourceName": "Example",
+        "sourceId": url,
+        "primaryCategory": "read",
+        "categories": ["read"],
+        "score": 70,
+        "publishedAt": NOW,
+        "expiresAt": NOW + timedelta(days=3),
+    }
+
+
+def _collect_once(monkeypatch, posted, candidates):
+    ct.save_json(ct.BACKLOG_FILE, {"items": posted})
+    monkeypatch.setattr(ct, "collect_candidates", lambda: {"rss": candidates})
+    monkeypatch.setattr(ct, "classify_source_candidate", lambda _kind, item: dict(item))
+    ct.collect_into_backlog()
+    stored = {row["url"] for row in ct.load_json(ct.BACKLOG_FILE, {"items": []})["items"]}
+    seen = set(ct.load_json(ct.THREAD_STATE_FILE, {}).get("seenSourceKeys", []))
+    return stored, seen
+
+
+def test_collect_queues_the_conflicting_pairs(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    posted = [
+        _item(f"https://example.com/posted-{i}", left, status="posted", discovered=NOW - timedelta(days=1))
+        for i, (left, _right) in enumerate(DISTINCT_PAIRS)
+    ]
+    candidates = [_rss_candidate(f"https://example.com/new-{i}", right) for i, (_l, right) in enumerate(DISTINCT_PAIRS)]
+    stored, _seen = _collect_once(monkeypatch, posted, candidates)
+    for candidate in candidates:
+        assert candidate["url"] in stored, candidate["title"]
+
+
+def test_collect_fuzzy_repeat_is_skipped_but_not_marked_seen(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    posted = [_item("https://example.com/p", "Cursor launches background agents",
+                    status="posted", discovered=NOW - timedelta(days=1))]
+    fuzzy = _rss_candidate("https://example.com/fuzzy", "Cursor introduces background agents")
+    stored, seen = _collect_once(monkeypatch, posted, [fuzzy])
+    assert fuzzy["url"] not in stored
+    assert ct.source_key("rss", fuzzy["sourceId"], fuzzy["url"]) not in seen
+
+
+def test_collect_identified_repeat_is_marked_seen(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    posted = [_item("https://example.com/p", "Claude Code 2.1.300 adds remote agents",
+                    status="posted", discovered=NOW - timedelta(days=1))]
+    same = _rss_candidate("https://example.com/same", "Remote agents arrive in Claude Code 2.1.300")
+    stored, seen = _collect_once(monkeypatch, posted, [same])
+    assert same["url"] not in stored
+    assert ct.source_key("rss", same["sourceId"], same["url"]) in seen
