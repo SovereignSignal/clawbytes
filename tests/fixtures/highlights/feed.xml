@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>ClawBytes</title>
+    <link>https://ai-wire.example.invalid</link>
+    <description>Twice a week, the agents, models, tools and open-source repos worth your time: what shipped, what matters, and where it's all going.</description>
+    <language>en</language>
+        <item>
+      <title>Labsus</title>
+      <link>https://ai-wire.example.invalid/items/item-0001</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0001</guid>
+      <pubDate>Thu, 15 Oct 2026 19:00:06 GMT</pubDate>
+      <category>repo</category>
+      <description>Labsus is a browser-based JavaScript workbench for FSAE suspension analysis, covering kinematics, 4-Post dynamics.
+
+https://github.com/ZZzyy714227/Labsus</description>
+    </item>
+    <item>
+      <title>SymX</title>
+      <link>https://ai-wire.example.invalid/items/item-0002</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0002</guid>
+      <pubDate>Thu, 15 Oct 2026 19:00:06 GMT</pubDate>
+      <category>repo</category>
+      <description>SymX is a C++ library for symbolic differentiation that generates, JIT-compiles.
+
+https://github.com/InteractiveComputerGraphics/SymX</description>
+    </item>
+    <item>
+      <title>vtkbool</title>
+      <link>https://ai-wire.example.invalid/items/item-0003</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0003</guid>
+      <pubDate>Thu, 15 Oct 2026 19:00:06 GMT</pubDate>
+      <category>repo</category>
+      <description>Vtkbool adds robust boolean operations on polygonal meshes to the VTK graphics library, making it useful for developers who need reliable mesh intersection.
+
+https://github.com/zippy84/vtkbool</description>
+    </item>
+    <item>
+      <title>Einsums in C++</title>
+      <link>https://ai-wire.example.invalid/items/item-0004</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0004</guid>
+      <pubDate>Thu, 15 Oct 2026 19:00:06 GMT</pubDate>
+      <category>repo</category>
+      <description>Einsums is a C++ MIT-licensed library that performs compile-time contraction pattern analysis to determine optimal tensor operations.
+
+https://github.com/Einsums/Einsums</description>
+    </item>
+    <item>
+      <title>3D Forest</title>
+      <link>https://ai-wire.example.invalid/items/item-0005</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0005</guid>
+      <pubDate>Thu, 15 Oct 2026 19:00:06 GMT</pubDate>
+      <category>repo</category>
+      <description>3D Forest is a C++ GPL-3.0 application for visualizing, processing, and analyzing terabyte-scale lidar point clouds in forest environments.
+
+https://github.com/VUKOZ-OEL/3d-forest</description>
+    </item>
+    <item>
+      <title>Accelerating the search for antimicrobial peptides with Google Antigravity</title>
+      <link>https://ai-wire.example.invalid/items/item-0006</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0006</guid>
+      <pubDate>Thu, 15 Oct 2026 16:08:03 GMT</pubDate>
+      <category>news</category>
+      <description>DeepMind post on using Google Antigravity to accelerate the search for antimicrobial peptides — the coding harness applied to a scientific research workload.
+
+https://deepmind.google/blog/accelerating-antimicrobial-discovery/</description>
+    </item>
+    <item>
+      <title>Sotto</title>
+      <link>https://ai-wire.example.invalid/items/item-0007</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0007</guid>
+      <pubDate>Thu, 15 Oct 2026 16:03:47 GMT</pubDate>
+      <category>repo</category>
+      <description>Syncs secrets end-to-end encrypted so servers only store ciphertext, sharing one Rust crypto implementation between CLI and browser via WebAssembly.
+
+https://github.com/getsotto/sotto</description>
+    </item>
+    <item>
+      <title>Qwen Code 0.25.2</title>
+      <link>https://ai-wire.example.invalid/items/item-0010</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0010</guid>
+      <pubDate>Thu, 15 Oct 2026 15:41:15 GMT</pubDate>
+      <category>tool_release</category>
+      <description>• Version: 0.25.2.
+• connector and broker robustness from the #12692 R2 review; settle worktree child runs after their merge (#13753 I2 follow-up); unwedge Hosted stream close and bound task cancel attempts; recover original Hook sessions during Workspace retirement; e2e runner and image robustness from the #12692 R2 review; return 404 for unknown tool publications.
+• H4e-b2 the lead's mailbox over Session messages; admit public foreground Shell with mandatory approval; Introduce the EventTransport seam behind the after-commit publisher.
+
+https://github.com/QwenLM/qwen-code/releases/tag/v0.25.2</description>
+    </item>
+    <item>
+      <title>Copilot: Agentic autofix for code scanning alerts general availability</title>
+      <link>https://ai-wire.example.invalid/items/item-0011</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0011</guid>
+      <pubDate>Thu, 15 Oct 2026 13:49:20 GMT</pubDate>
+      <category>news</category>
+      <description>Agentic autofix for code scanning alerts is now generally available — the changelog entry covers how it works, how to use it, access, and billing.
+
+https://github.blog/changelog/2026-10-15-agentic-autofix-for-code-scanning-alerts-general-availability</description>
+    </item>
+    <item>
+      <title>Hermes Agent 0.22.2</title>
+      <link>https://ai-wire.example.invalid/items/item-0012</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0012</guid>
+      <pubDate>Thu, 15 Oct 2026 13:29:29 GMT</pubDate>
+      <category>tool_release</category>
+      <description>• Hermes Agent v0.22.2. Release Date: October 15, 2026.
+• v0.22.1 was built from the wrong commit. It shipped unreleased gateway work, and the Microsoft Store app could stick on &quot;Connecting.&quot;
+• 0.22.2 is the release 0.22.1 was meant to be.
+
+https://github.com/NousResearch/hermes-agent/releases/tag/v0.22.2</description>
+    </item>
+    <item>
+      <title>How Netflix Made AI Coding Agents More Efficient with JetBrains IDE Intelligence</title>
+      <link>https://ai-wire.example.invalid/items/item-0013</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0013</guid>
+      <pubDate>Thu, 15 Oct 2026 09:29:14 GMT</pubDate>
+      <category>news</category>
+      <description>JetBrains case study on how Netflix used IDE intelligence to make AI coding agents more efficient — relevant if your coding agents run inside a JetBrains IDE.
+
+https://blog.jetbrains.com/ai/2026/10/how-netflix-made-ai-coding-agents-more-efficient/</description>
+    </item>
+    <item>
+      <title>Kilo Code 7.8.12</title>
+      <link>https://ai-wire.example.invalid/items/item-0014</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0014</guid>
+      <pubDate>Thu, 15 Oct 2026 09:08:09 GMT</pubDate>
+      <category>tool_release</category>
+      <description>• 7.8.12: Route Kilo Gateway traffic (chat, models, embeddings, autocomplete, transcription) through https://ai-gateway.kilo.ai/api/v1 by default, and support a KILO_AI_GATEWAY_URL environment variable to override it. Setting only KILO_API_URL keeps routing gateway traffic through that server.
+• 7.8.10: Add an experimental Search Ignored Paths setting that lists ignored folders or files, such as build output, that the agent's glob tool should still search.
+• 7.8.10: Keep .gitignore'd files and folders, such as node_modules, out of glob results and grep include searches, even when the pattern m
+
+https://github.com/Kilo-Org/kilocode/releases/tag/v7.8.12</description>
+    </item>
+    <item>
+      <title>OpenClaw 2026.10.5-beta.4</title>
+      <link>https://ai-wire.example.invalid/items/item-0015</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0015</guid>
+      <pubDate>Thu, 15 Oct 2026 06:10:42 GMT</pubDate>
+      <category>tool_release</category>
+      <description>• 2026.10.5-beta.4: Updates finish more reliably: macOS updates no longer time out on aliased temporary directories, systemd user installs reclaim abandoned runtimes, pacman and FreeBSD package installs are left to their package manager, snapshot failures are identified before activation with accurate recovery advice, and the success summary no longer repeats settled plugin upgrades as pending.
+• ChatGPT models work on the default Codex runtime: ChatGPT-listed models no longer fail before sending any request.
+• Headless browser sign-ins stay usable: headless pages keep accepting clicks and key
+
+https://github.com/openclaw/openclaw/releases/tag/v2026.10.5-beta.4</description>
+    </item>
+    <item>
+      <title>Devin CLI v3000.11.92: /goal command and mid-turn steering</title>
+      <link>https://ai-wire.example.invalid/items/item-0016</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0016</guid>
+      <pubDate>Thu, 15 Oct 2026 05:31:38 GMT</pubDate>
+      <category>news</category>
+      <description>New `/goal ` command keeps Devin working across turns until it reports the goal complete or blocked — a run pauses itself after 50 turns, not available on prompt-based plans. Steering hands mid-run messages to the running turn instead of the queue; new config.json settings include `agent.subagent_model` and `local_tools_bypass_permissions` (starts local-tools connections with Bypass Permissions on).
+
+https://docs.devin.ai/cli/changelog/stable#updated-13a9d11c</description>
+    </item>
+    <item>
+      <title>Claude Code Desktop Vulnerability: Preview Pane Data Exfiltration</title>
+      <link>https://ai-wire.example.invalid/items/item-0017</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0017</guid>
+      <pubDate>Thu, 15 Oct 2026 05:02:06 GMT</pubDate>
+      <category>news</category>
+      <description>`noma.security` reports a data exfiltration vulnerability in Claude Code Desktop's preview pane; the HN thread — 15 points, no comments — hasn't surfaced any fix or CVE details yet.
+
+https://news.ycombinator.com/item?id=50099375</description>
+    </item>
+    <item>
+      <title>Hermes Agent 0.22.1</title>
+      <link>https://ai-wire.example.invalid/items/item-0018</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0018</guid>
+      <pubDate>Thu, 15 Oct 2026 01:33:36 GMT</pubDate>
+      <category>tool_release</category>
+      <description>• Hermes Agent v0.22.1 (rc.5-v0.22.1), released October 14, 2026. This is a patch release, with a handful of fixes for the Windows Store, plugin updates, and more.
+• Agent: add nemotron super 3.5 default parameters
+• CLI: add curated model list at the top in the model picker list
+
+https://github.com/NousResearch/hermes-agent/releases/tag/v0.22.1</description>
+    </item>
+    <item>
+      <title>The Most Common Questions About Agent Evals, Answered</title>
+      <link>https://ai-wire.example.invalid/items/item-0019</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0019</guid>
+      <pubDate>Thu, 15 Oct 2026 01:19:37 GMT</pubDate>
+      <category>news</category>
+      <description>LangChain's answers to the most common questions about agent evals.
+
+https://www.langchain.com/blog/common-questions-about-agent-evals</description>
+    </item>
+    <item>
+      <title>Nemotron 3.5 Bolt 74B A9B</title>
+      <link>https://ai-wire.example.invalid/items/item-0020</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0020</guid>
+      <pubDate>Thu, 15 Oct 2026 00:00:00 GMT</pubDate>
+      <category>model</category>
+      <description>A multimodal model for builders who need vision and language in one stack.
+
+https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB</description>
+    </item>
+    <item>
+      <title>Timestral 209M</title>
+      <link>https://ai-wire.example.invalid/items/item-0021</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0021</guid>
+      <pubDate>Thu, 15 Oct 2026 00:00:00 GMT</pubDate>
+      <category>model</category>
+      <description>A forecasting model that lets builders add time-series prediction to their stack.
+
+https://huggingface.co/mistralai/Timestral-209M</description>
+    </item>
+    <item>
+      <title>Claude Code 2.1.300</title>
+      <link>https://ai-wire.example.invalid/items/item-0026</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0026</guid>
+      <pubDate>Wed, 14 Oct 2026 14:27:26 GMT</pubDate>
+      <category>tool_release</category>
+      <description>• Added virtualText to a mod's prompt decorations: text drawn in the prompt box that never enters the draft or the submitted prompt
+• Added cache_creation_5m_tokens and cache_creation_1h_tokens to the OpenTelemetry api_request event, splitting cache writes by lifetime
+• Added $.ui.view({ agentId }) for mods: shows an agent's transcript in the main view when you ask, and $.ui.view({}) goes back
+
+https://github.com/anthropics/claude-code/releases/tag/v2.1.300</description>
+    </item>
+    <item>
+      <title>Drama 3</title>
+      <link>https://ai-wire.example.invalid/items/item-0029</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0029</guid>
+      <pubDate>Wed, 14 Oct 2026 00:00:00 GMT</pubDate>
+      <category>model</category>
+      <description>A text-to-speech model for builders who need expressive long-form voice synthesis inside their own pipelines.
+
+https://huggingface.co/fishaudio/drama-3</description>
+    </item>
+    <item>
+      <title>AesCode 32B</title>
+      <link>https://ai-wire.example.invalid/items/item-0030</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0030</guid>
+      <pubDate>Wed, 14 Oct 2026 00:00:00 GMT</pubDate>
+      <category>model</category>
+      <description>A multimodal model that lets builders work with code and images in one pipeline.
+
+https://huggingface.co/microsoft/AesCode-32B</description>
+    </item>
+    <item>
+      <title>Ling 3.1 Flash</title>
+      <link>https://ai-wire.example.invalid/items/item-0031</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0031</guid>
+      <pubDate>Wed, 14 Oct 2026 00:00:00 GMT</pubDate>
+      <category>model</category>
+      <description>A permissively d open-weight text model gives builders a self-hostable option without legal review before serving.
+
+https://huggingface.co/inclusionAI/Ling-3.1-flash</description>
+    </item>
+    <item>
+      <title>MiniCPM-V 4.7 35B A3B</title>
+      <link>https://ai-wire.example.invalid/items/item-0032</link>
+      <guid isPermaLink="true">https://ai-wire.example.invalid/items/item-0032</guid>
+      <pubDate>Tue, 13 Oct 2026 00:00:00 GMT</pubDate>
+      <category>model</category>
+      <description>Extending the MiniCPM-V line upward gives builders a heavier vision-language option for image and document understanding inside their own stack.
+
+https://huggingface.co/openbmb/MiniCPM-V-4.7-35B-A3B</description>
+    </item>
+  </channel>
+</rss>
