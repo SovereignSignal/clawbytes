@@ -27,6 +27,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from html import unescape as _html_unescape
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
@@ -4529,6 +4530,44 @@ def polish_lane_post(message: str) -> str:
     return "\n\n".join(parts)
 
 
+_HREF_RE = re.compile(r'<a href="([^"]*)">')
+
+
+def _message_urls(message: str) -> set:
+    return {_html_unescape(url) for url in _HREF_RE.findall(message or "")}
+
+
+def finalize_lane_post(category: str, raw: str, items: List[dict]) -> Tuple[str, List[dict]]:
+    """Polish and length-limit a lane message; return it with its item manifest.
+
+    The manifest is the subset of ``items`` that is still in the message that
+    will be sent. An item whose link polish_lane_post dropped as filler, or
+    whose line the Telegram length limit cut off, is left out, so mark_posted
+    and AI Wire see only delivered items. Left-out items stay queued and are
+    logged with a reason. Items with no link in ``raw`` (bundled releases)
+    keep riding with the post, as before.
+    """
+    polished = polish_lane_post(raw)
+    message = polished
+    if len(message) > TELEGRAM_MAX_CHARS:
+        message = _truncate_for_telegram(message)
+    raw_urls = _message_urls(raw)
+    polished_urls = _message_urls(polished)
+    final_urls = _message_urls(message)
+    manifest = []
+    for item in items or []:
+        url = item.get("url")
+        if url in raw_urls and url not in final_urls:
+            reason = "filler" if url not in polished_urls else "length"
+            print(
+                f"lane_item_dropped lane={category} reason={reason} id={item.get('id')} url={url}",
+                file=sys.stderr,
+            )
+            continue
+        manifest.append(item)
+    return message, manifest
+
+
 def _log_no_substance(category: str) -> None:
     print(
         f"lane_skipped lane={category} reason=no_substance",
@@ -4570,15 +4609,15 @@ def _publish_lane(category: str, send: bool) -> tuple:
             # decline. Both still use the deterministic writer.
             if approved and items and send:
                 raw = format_curated_html(curated, category)
-                message = polish_lane_post(raw)
+                message, manifest = finalize_lane_post(category, raw, items)
                 # Filler-only lanes skip. Do not fall through to the
                 # deterministic bundle, which would post the same empty lines.
-                if '<a href="' in raw and not message:
+                if '<a href="' in raw and (not message or not manifest):
                     _log_no_substance(category)
                     return (False, 0)
                 ok, errs = validate_lane_for_publish(message)
-                if ok and _send_and_record(category, message, None, items):
-                    return (True, len(items))
+                if ok and _send_and_record(category, message, None, manifest):
+                    return (True, len(manifest))
                 if not ok:
                     print(f"[autopublish] curated {category} rejected by gate: "
                           f"{'; '.join(errs)}; using deterministic bundle", file=sys.stderr)
@@ -4601,18 +4640,20 @@ def _publish_lane(category: str, send: bool) -> tuple:
             )
 
     raw = format_category_bundle(category)
-    message = polish_lane_post(raw)
     bundle = bundle_for_category(category)
+    message, manifest = finalize_lane_post(category, raw, bundle)
     if send and bundle:
-        if '<a href="' in raw and not message:
+        if '<a href="' in raw and (not message or not manifest):
             _log_no_substance(category)
             return (False, 0)
         ok, errs = validate_lane_for_publish(message)
         if not ok:
             print(f"[autopublish] {category} rejected by gate: {'; '.join(errs)}", file=sys.stderr)
             return (False, len(bundle))
-        if _send_and_record(category, message):
-            return (True, len(bundle))
+        # Record the manifest, not a fresh bundle_for_category pick: items
+        # polish or the length limit removed were not delivered.
+        if _send_and_record(category, message, None, manifest):
+            return (True, len(manifest))
         print(f"[autopublish] {category} Telegram send failed; not marked posted "
               f"(will retry next cycle)", file=sys.stderr)
         return (False, len(bundle))
