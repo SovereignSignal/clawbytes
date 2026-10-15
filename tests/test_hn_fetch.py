@@ -238,6 +238,7 @@ def test_run_monitors_reprints_watchlist_fetch_logs(monkeypatch, capsys):
         "claw-leaderboard-monitor.py": "Leaderboards: 0 new movement item(s)\n",
         "claw-registry-monitor.py": "Registries: 0 new item(s)\n",
         "claw-bsky-monitor.py": "Bluesky: 0 new item(s)\n",
+        "claw-x-monitor.py": "X watch: 0 new item(s)\n",
         "claw-advisory-monitor.py": "Advisories: 0 new item(s)\n",
         "claw-ecosystem-monitor.sh": "   Found 0 new release(s)\n   Found 0 new story/stories\n",
     }

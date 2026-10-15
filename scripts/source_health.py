@@ -42,6 +42,9 @@ UNHEALTHY_ALERT_AFTER = timedelta(hours=24)
 # with no new incident is their resting state. The monitor prints
 # STATUS_HEALTH status=error when a feed fails to fetch, so a dead feed
 # still pages. A clean empty does not.
+#
+# x is the watchlist monitor. It is off unless CLAWBYTES_X_WATCH is set,
+# and a quiet day with no new posts is healthy. A failed fetch exits 1.
 EMPTY_IS_HEALTHY = frozenset({
     "leaderboard",
     "registry",
@@ -49,6 +52,7 @@ EMPTY_IS_HEALTHY = frozenset({
     "advisory",
     "hn",
     "status",
+    "x",
     "ecosystem-discover",
     "source-discovery",
 })
@@ -63,6 +67,7 @@ _SECRET_ENV_KEYS = (
     "SLACK_BOT_TOKEN",
     "CLAWBYTES_CURATOR_API_KEY",
     "CLAWBYTES_LLM_API_KEY",
+    "CLAWBYTES_X_BEARER_TOKEN",
 )
 
 _SECRET_RES = (
@@ -90,7 +95,7 @@ _SUMMARY_RES = (
     re.compile(r"Found\s+(\d+)\s+new\s+HN\s+items", re.I),
     re.compile(r"Found\s+(\d+)\s+new\s+project(?:\(s\))?", re.I),
     re.compile(
-        r"(?:Bluesky|Leaderboards|Pagewatch|Advisories|Registries):\s+(\d+)\s+new",
+        r"(?:Bluesky|Leaderboards|Pagewatch|Advisories|Registries|X watch):\s+(\d+)\s+new",
         re.I,
     ),
 )

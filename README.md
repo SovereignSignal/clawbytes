@@ -30,7 +30,7 @@ Deployed on Railway as a single always-on container running `scripts/scheduler.p
 
 ## Source classes
 
-The authoritative, current list with file references is in [`SOURCES.md`](SOURCES.md). In brief: RSS/Atom feeds (vendor blogs, changelogs, GitHub `releases.atom`, research, ArXiv with a harness-compound gate), Hacker News, HuggingFace Daily Papers, weekly **discovery** (GitHub topics, awesome-list diffs; subreddit search is off with Reddit), benchmark **leaderboards** (SWE-bench, Aider, LiveBench, Terminal-Bench 2.1 — sha-gated, emit on top-3 movement only), model **registries** (OpenRouter coding/agent ids, LiteLLM pricing, HF trending), **GitHub advisories** (package allowlist, Watch, cap 2/day), **feedless pages** (Mintlify `.md` hashes, Antigravity HTML heading-hash, sitemap slug diffs for Anthropic/Claude/Devin CLI/xAI/DeepSeek), and **Bluesky** phrase search.
+The authoritative, current list with file references is in [`SOURCES.md`](SOURCES.md). In brief: RSS/Atom feeds (vendor blogs, changelogs including the Codex changelog, GitHub `releases.atom`, research, ArXiv with a harness-compound gate), Hacker News, HuggingFace Daily Papers, weekly **discovery** (GitHub topics, awesome-list diffs; subreddit search is off with Reddit), benchmark **leaderboards** (SWE-bench, Aider, LiveBench, Terminal-Bench 2.1 — sha-gated, emit on top-3 movement only), model **registries** (OpenRouter coding/agent ids, LiteLLM pricing, HF trending), **GitHub advisories** (package allowlist, Watch, cap 2/day), **feedless pages** (Mintlify `.md` hashes, Antigravity HTML heading-hash, sitemap slug diffs for Anthropic/Claude/Devin CLI/xAI/DeepSeek, the Anthropic news index, Claude launch articles, and Codex rows on the OpenAI release notes), **Bluesky** phrase search, and an **X watchlist** (@cursor_ai and @btibor91) that stays off unless `CLAWBYTES_X_WATCH` is set.
 
 ## Scheduler jobs
 
@@ -79,6 +79,8 @@ There are **no routine status reports**. Ops DMs are exception-only: the admin h
 | `AI_WIRE_ENABLED` | `1`/`true`/`yes`/`on` to upsert posted items to the AI Wire registry after Telegram accepts the lane. Default off. A failed push is a log line and does not fail the channel post. | optional |
 | `AI_WIRE_URL` | Origin of the AI Wire site. Items are posted to `{AI_WIRE_URL}/api/ingest/items`. | with the flag |
 | `AI_WIRE_INGEST_TOKEN` | Bearer token for that ingest endpoint. | with the flag |
+| `CLAWBYTES_X_WATCH` | `1`/`true`/`yes`/`on` to poll the X watchlist (@cursor_ai, @btibor91). Default off: the monitor does not call the API. | optional |
+| `CLAWBYTES_X_BEARER_TOKEN` | App-only bearer for X API v2 `GET /2/users/:id/tweets`. Required when the watch is on. A missing token exits 1. | with the flag |
 
 ## AI Wire
 
@@ -90,6 +92,12 @@ python3 clawbytes_threads.py ai-wire-backfill --days 7 --send   # needs the flag
 ```
 
 The backfill reads already-posted rows from `clawbytes-backlog.json` on `CLAWBYTES_MEMORY_DIR`. It does not post to Telegram.
+
+## X watchlist
+
+`CLAWBYTES_X_WATCH` defaults off. When it is on, collect polls @cursor_ai and @btibor91 with `CLAWBYTES_X_BEARER_TOKEN`. X API pay-per-use charges **$0.005 per post returned** (Posts: Read). The $0.001 owned-read rate applies only to the app owner's own account, not these two. After the silent baseline, polls send `since_id`, so a quiet half-hour returns no posts and adds no charge. `max_results` is 5 (the API minimum). Retweets and replies are excluded. User ids are in the script, so there is no $0.010 user lookup. A rough ceiling if each account publishes 5 new posts a day is about **$1.50 per month** (5 × 2 × $0.005 × 30). The same post is not billed again inside a UTC day.
+
+The OpenAI product release notes page is Cloudflare-challenged from a datacenter. When the official body has no Codex entries, the watcher reads it through `https://r.jina.ai/` (no key, no charge) and keeps the help-center fragment as the item URL.
 
 ## Local development
 
@@ -114,7 +122,7 @@ Publishing requires `--send` and a live token; `preview` never posts.
 
 **Root:** `clawbytes_threads.py` (the live collector/classifier/publisher), `clawbytes_daily.py` + `claw-digest-generator.py` (legacy single-shot digest), `EDITORIAL_SCOPE.md`, `SOURCES.md`.
 
-**`scripts/` — scheduler + monitors:** `scheduler.py`; the monitors `run_monitors()` invokes directly — `claw-rss-monitor.py`, `claw-hn-monitor.py`, `claw-moltbook-monitor.py`, `claw-leaderboard-monitor.py`, `claw-registry-monitor.py`, `claw-pagewatch-monitor.py`, `claw-bsky-monitor.py`, and `claw-ecosystem-monitor.sh` (releases + discovery); `claw-hf-papers.py` (HF Daily Papers — run *inside* `claw-ecosystem-monitor.sh`, not standalone); `claw-source-discovery.py` (weekly discovery). `claw-reddit-monitor.py` remains in the tree but is not invoked while `REDDIT_FETCH_ENABLED` is false. (Notion/Proton/people-tracker scripts are legacy VM-era and not wired into the scheduler.)
+**`scripts/` — scheduler + monitors:** `scheduler.py`; the monitors `run_monitors()` invokes directly — `claw-rss-monitor.py`, `claw-hn-monitor.py`, `claw-moltbook-monitor.py`, `claw-leaderboard-monitor.py`, `claw-registry-monitor.py`, `claw-pagewatch-monitor.py`, `claw-bsky-monitor.py`, `claw-x-monitor.py` (no-ops unless `CLAWBYTES_X_WATCH` is on), and `claw-ecosystem-monitor.sh` (releases + discovery); `claw-hf-papers.py` (HF Daily Papers — run *inside* `claw-ecosystem-monitor.sh`, not standalone); `claw-source-discovery.py` (weekly discovery). `claw-reddit-monitor.py` remains in the tree but is not invoked while `REDDIT_FETCH_ENABLED` is false. (Notion/Proton/people-tracker scripts are legacy VM-era and not wired into the scheduler.)
 
 **`content-engine/` — Slack reporting helpers** (`send-clawbytes-report`, `send-clawbytes-audit`); pure stdlib, used on demand.
 

@@ -27,6 +27,10 @@ STATUS_MIN_MINUTES = 30
 TESTINGCATALOG_FEED = "testingcatalog"
 KILO_BLOG_FEED = "kilo blog"
 HAVOPTIC_FEED = "havoptic releases"
+CODEX_CHANGELOG_FEED = "codex changelog"
+
+# Official product account. Other watchlist handles are reporters.
+X_OFFICIAL_HANDLES = frozenset({"cursor_ai"})
 
 _TAG = re.compile(r"<[^>]+>")
 _SPACE = re.compile(r"\s+")
@@ -49,6 +53,20 @@ _MONTHS = {
     "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
 }
 _VERSION = re.compile(r"\b((?:rust-)?v?\d+\.\d+(?:\.\d+)*)\b", re.IGNORECASE)
+# Word-boundary tokens. "cursor" is not a substring of a longer word we care
+# about here; "composer" is the Codex composer, not a generic noun we see
+# in unrelated posts on this watchlist.
+_X_WORD = re.compile(
+    r"\b(?:cursor|claude|codex|gemini|composer|copilot|antigravity|kiro)\b",
+    re.IGNORECASE,
+)
+_X_PHRASE = (
+    "claude code",
+    "managed agent",
+    "grok build",
+    "kilo code",
+    "composer prediction",
+)
 
 # GitHub tag URL when Havoptic only linked a bare changelog blob.
 # prefix "" means the tag is the version with no added "v".
@@ -640,3 +658,40 @@ def _canonical(url: str) -> str:
     if not host:
         return ""
     return f"{host}{path}"
+
+
+def codex_changelog_relevant(entry: dict) -> bool:
+    """Keep a Codex changelog row. Drop the ChatGPT iOS rows.
+
+    The developers feed is one changelog for Codex and ChatGPT. iOS rows
+    are titled "ChatGPT for iOS" and anchored ``#codex-YYYY-MM-DD-mobile``.
+    Everything else is an app, CLI, or model note. Those titles are feature
+    names, so they cannot go through the keyword gate.
+    """
+    if not isinstance(entry, dict):
+        return False
+    title = (entry.get("title") or "").strip().lower()
+    if title == "chatgpt for ios":
+        return False
+    link = entry.get("link") or entry.get("url") or entry.get("id") or ""
+    fragment = link.split("#", 1)[-1].lower() if "#" in str(link) else ""
+    if fragment.endswith("-mobile"):
+        return False
+    return True
+
+
+def x_post_in_scope(handle: str, text: str) -> bool:
+    """Official Cursor posts stay. Reporter posts need a product term.
+
+    ``@btibor91`` also posts consumer items (Sora, film). Those are not
+    lab launches. ``cursor`` and ``composer`` are word-matched so they do
+    not fire inside unrelated words.
+    """
+    who = (handle or "").strip().lstrip("@").lower()
+    if who in X_OFFICIAL_HANDLES:
+        return True
+    blob = text or ""
+    if _X_WORD.search(blob):
+        return True
+    low = blob.lower()
+    return any(phrase in low for phrase in _X_PHRASE)

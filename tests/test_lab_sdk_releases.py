@@ -57,7 +57,7 @@ def _item(feed, title, summary="", link="https://github.com/anthropics/anthropic
 
 def test_lab_sdk_feeds_match_the_monitor_and_are_not_forwarded():
     names = {feed["name"]: feed for feed in rss.RSS_FEEDS}
-    assert len(rss.RSS_FEEDS) == 90
+    assert len(rss.RSS_FEEDS) == 91
     expected = {
         "anthropic-sdk-python Releases": "https://github.com/anthropics/anthropic-sdk-python/releases.atom",
         "anthropic-sdk-typescript Releases": "https://github.com/anthropics/anthropic-sdk-typescript/releases.atom",

@@ -27,6 +27,8 @@ pw = _load()
 def _bind(monkeypatch, tmp_path, md=None, html=None):
     monkeypatch.setattr(pw, "STATE_FILE", tmp_path / "claw-pagewatch-state.json")
     monkeypatch.setattr(pw, "SITEMAP_WATCHES", [])
+    monkeypatch.setattr(pw, "NEWS_INDEX_WATCHES", [])
+    monkeypatch.setattr(pw, "RELEASE_NOTE_WATCHES", [])
     if html is not None:
         monkeypatch.setattr(pw, "MD_WATCHES", [])
         monkeypatch.setattr(pw, "HTML_WATCHES", [html])
