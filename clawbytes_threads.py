@@ -27,6 +27,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from html import unescape as _html_unescape
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
@@ -61,10 +62,14 @@ from feed_filters import (  # noqa: E402
 )
 from title_text import first_stated_date, flatten_inline_markup  # noqa: E402
 from ai_wire import (  # noqa: E402
+    OUTBOX_FILE_NAME as AI_WIRE_OUTBOX_FILE_NAME,
+    deliver_outbox as ai_wire_deliver_outbox,
     enabled as ai_wire_enabled,
+    enqueue_outbox as ai_wire_enqueue_outbox,
+    map_clawbytes_items,
+    outbox_summary as ai_wire_outbox_summary,
     payloads_for_backfill,
     push_mapped,
-    push_clawbytes_items,
     telegram_post_url,
 )
 
@@ -2783,12 +2788,18 @@ def collect_into_backlog() -> dict:
             # Stale calendar dates and a story already posted inside the
             # window never take a Ship slot. Mark seen and ack the ecosystem
             # tag so the monitor does not re-emit it every collect.
-            if is_stale_dated_item(candidate, collected_at) or title_repeats_story(
-                candidate.get("title") or "", posted_titles
-            ) or havoptic_already_covered(candidate, primary_urls, primary_versions):
+            repeat = story_repeat_match(candidate.get("title") or "", posted_titles)
+            if is_stale_dated_item(candidate, collected_at) or repeat == "identified" or (
+                havoptic_already_covered(candidate, primary_urls, primary_versions)
+            ):
                 seen_source_keys.add(key)
                 if eco is not None:
                     acked_releases.append(eco)
+                continue
+            if repeat == "fuzzy":
+                # Headline overlap alone is not proof. Skip this collect but
+                # leave the key unseen (and the tag unacked) so it is checked
+                # again rather than rejected for good.
                 continue
             pending_keys.add(key)
             source = candidate.get("sourceName") or kind
@@ -3013,14 +3024,76 @@ def _bare_numbers(title: str) -> set:
     return set(_BARE_NUMBER.findall(title or ""))
 
 
+# Event words. Token overlap cannot tell "adds X" from "removes X", or a
+# launch from a vulnerability report on the same feature, so two headlines
+# whose events conflict are different stories.
+_STORY_EVENT_ON = re.compile(
+    r"\b(?:adds?|added|adding|launch\w*|introduc\w*|enabl\w*|ships?|shipped|"
+    r"roll(?:s|ed|ing)? out|unveil\w*|now available|generally available)\b",
+    re.IGNORECASE,
+)
+_STORY_EVENT_OFF = re.compile(
+    r"\b(?:remov\w*|deprecat\w*|retir\w*|sunset\w*|disabl\w*|"
+    r"discontinu\w*|revert\w*|roll(?:s|ed|ing)? back|rollback|kill\w*|shut\w* down|"
+    r"paus\w*|delay\w*|end(?:s|ing)? support)\b",
+    re.IGNORECASE,
+)
+_STORY_EVENT_SECURITY = re.compile(
+    r"\b(?:security|vulnerab\w*|vulns?|cve-\d{4}-\d+|ghsa-[\w-]+|exploit\w*|breach\w*|"
+    r"leak\w*|malicious|compromis\w*|backdoor\w*|prompt injection|rce|advisory|"
+    r"outage\w*|incident\w*)\b",
+    re.IGNORECASE,
+)
+_STORY_INCIDENT_ID = re.compile(r"\b(?:cve-\d{4}-\d{4,}|ghsa(?:-[a-z0-9]{4}){3})\b", re.IGNORECASE)
+
+
+def _story_events(title: str) -> set:
+    text = title or ""
+    events = set()
+    if _STORY_EVENT_ON.search(text):
+        events.add("on")
+    if _STORY_EVENT_OFF.search(text):
+        events.add("off")
+    if _STORY_EVENT_SECURITY.search(text):
+        events.add("security")
+    return events
+
+
+def _story_events_conflict(left: str, right: str) -> bool:
+    """True when the two headlines describe incompatible events.
+
+    On vs off (adds/removes, enables/disables) conflicts. A security or
+    incident headline never collapses into one that is not: a vulnerability
+    report is a follow-up, not a repeat of the launch. A headline with no
+    event word (``Mistral Large 4``) is compatible with either.
+    """
+    left_events = _story_events(left)
+    right_events = _story_events(right)
+    if ("security" in left_events) != ("security" in right_events):
+        return True
+    left_turn = left_events & {"on", "off"}
+    right_turn = right_events & {"on", "off"}
+    return bool(left_turn and right_turn and left_turn != right_turn)
+
+
+def _story_identifiers(title: str) -> set:
+    """Release versions and incident ids (CVE, GHSA) named in a headline."""
+    ids = _dotted_versions(title)
+    ids.update(match.lower() for match in _STORY_INCIDENT_ID.findall(title or ""))
+    return ids
+
+
 def same_story_titles(left: str, right: str) -> bool:
     """True when two headlines are the same product and the same topic.
 
     A different dotted version is a different story. A different bare number
     (Mistral Large 3 vs Mistral Large 4) is too. Shared vendor words alone
-    are not a match.
+    are not a match, and neither are conflicting events (adds vs removes, a
+    launch vs a security report).
     """
     if not left or not right:
+        return False
+    if _story_events_conflict(left, right):
         return False
     left_versions = _dotted_versions(left)
     right_versions = _dotted_versions(right)
@@ -3047,6 +3120,24 @@ def same_story_titles(left: str, right: str) -> bool:
 
 def title_repeats_story(title: str, recent_titles: List[str]) -> bool:
     return any(same_story_titles(title, other) for other in recent_titles if other)
+
+
+def story_repeat_match(title: str, recent_titles: List[str]) -> Optional[str]:
+    """How ``title`` repeats a recent story: "identified", "fuzzy", or None.
+
+    "identified" means the headlines also share a release version or incident
+    id, which is firm enough to retire the source key. "fuzzy" is token
+    overlap alone: skip for now, but do not mark the key seen.
+    """
+    match = None
+    title_ids = _story_identifiers(title)
+    for other in recent_titles or []:
+        if not other or not same_story_titles(title, other):
+            continue
+        if title_ids & _story_identifiers(other):
+            return "identified"
+        match = "fuzzy"
+    return match
 
 
 def _story_stamp(item: dict) -> Optional[datetime]:
@@ -4213,19 +4304,46 @@ def ai_wire_backfill(days: int = 7, send: bool = False, now: Optional[datetime] 
     return {"dry_run": False, "days": days, "count": len(payloads), "pushed": True}
 
 
+def ai_wire_outbox_path() -> Path:
+    return MEMORY / AI_WIRE_OUTBOX_FILE_NAME
+
+
 def push_lane_to_ai_wire(category: str, items: List[dict], channel_post_url: Optional[str] = None) -> None:
-    """Push one successful lane. Flag-off is a no-op. Never raises."""
+    """Push one successful lane. Flag-off is a no-op. Never raises.
+
+    The rows go to the outbox first, so a failed push is retried by the next
+    autopublish run (retry_ai_wire_outbox) instead of being lost.
+    """
     try:
         if not items or not ai_wire_enabled():
             return
         lane = CATEGORY_META.get(category, {}).get("label") or category
-        push_clawbytes_items(
+        rows = map_clawbytes_items(
             _rows_for_ai_wire(items),
             lane=lane,
             channel_post_url=channel_post_url,
             posted_at=now_utc(),
         )
+        if not rows:
+            return
+        path = ai_wire_outbox_path()
+        try:
+            keys = ai_wire_enqueue_outbox(path, rows)
+        except Exception as exc:  # noqa: BLE001 - no outbox still means one direct try
+            print(f"ai_wire outbox write failed: {type(exc).__name__}", file=sys.stderr)
+            push_mapped(rows)
+            return
+        ai_wire_deliver_outbox(path, keys=keys)
     except Exception as exc:  # noqa: BLE001 - a registry failure must not fail the post
+        print(f"ai_wire push failed: {type(exc).__name__}", file=sys.stderr)
+
+
+def retry_ai_wire_outbox() -> None:
+    """Deliver AI Wire rows left pending by earlier runs. Never raises, never posts."""
+    try:
+        if ai_wire_enabled():
+            ai_wire_deliver_outbox(ai_wire_outbox_path())
+    except Exception as exc:  # noqa: BLE001 - registry retries must not block publishing
         print(f"ai_wire push failed: {type(exc).__name__}", file=sys.stderr)
 
 
@@ -4303,6 +4421,12 @@ def print_status() -> None:
         print(
             f"- {meta['label']}: {len(queued)} queued | last published: {state.get('lastPublishedAt', {}).get(category)} "
             f"| today {ready['posts_today']}/{ready['allowed_today']} | {ready['reason']}"
+        )
+    outbox = ai_wire_outbox_summary(ai_wire_outbox_path())
+    if outbox["pending"] or outbox["failed"]:
+        print(
+            f"AI Wire outbox: {outbox['pending']} pending | oldest {outbox['oldest']} "
+            f"({outbox['oldestAgeHours']}h) | {outbox['failed']} failed"
         )
 
 
@@ -4529,6 +4653,44 @@ def polish_lane_post(message: str) -> str:
     return "\n\n".join(parts)
 
 
+_HREF_RE = re.compile(r'<a href="([^"]*)">')
+
+
+def _message_urls(message: str) -> set:
+    return {_html_unescape(url) for url in _HREF_RE.findall(message or "")}
+
+
+def finalize_lane_post(category: str, raw: str, items: List[dict]) -> Tuple[str, List[dict]]:
+    """Polish and length-limit a lane message; return it with its item manifest.
+
+    The manifest is the subset of ``items`` that is still in the message that
+    will be sent. An item whose link polish_lane_post dropped as filler, or
+    whose line the Telegram length limit cut off, is left out, so mark_posted
+    and AI Wire see only delivered items. Left-out items stay queued and are
+    logged with a reason. Items with no link in ``raw`` (bundled releases)
+    keep riding with the post, as before.
+    """
+    polished = polish_lane_post(raw)
+    message = polished
+    if len(message) > TELEGRAM_MAX_CHARS:
+        message = _truncate_for_telegram(message)
+    raw_urls = _message_urls(raw)
+    polished_urls = _message_urls(polished)
+    final_urls = _message_urls(message)
+    manifest = []
+    for item in items or []:
+        url = item.get("url")
+        if url in raw_urls and url not in final_urls:
+            reason = "filler" if url not in polished_urls else "length"
+            print(
+                f"lane_item_dropped lane={category} reason={reason} id={item.get('id')} url={url}",
+                file=sys.stderr,
+            )
+            continue
+        manifest.append(item)
+    return message, manifest
+
+
 def _log_no_substance(category: str) -> None:
     print(
         f"lane_skipped lane={category} reason=no_substance",
@@ -4570,15 +4732,15 @@ def _publish_lane(category: str, send: bool) -> tuple:
             # decline. Both still use the deterministic writer.
             if approved and items and send:
                 raw = format_curated_html(curated, category)
-                message = polish_lane_post(raw)
+                message, manifest = finalize_lane_post(category, raw, items)
                 # Filler-only lanes skip. Do not fall through to the
                 # deterministic bundle, which would post the same empty lines.
-                if '<a href="' in raw and not message:
+                if '<a href="' in raw and (not message or not manifest):
                     _log_no_substance(category)
                     return (False, 0)
                 ok, errs = validate_lane_for_publish(message)
-                if ok and _send_and_record(category, message, None, items):
-                    return (True, len(items))
+                if ok and _send_and_record(category, message, None, manifest):
+                    return (True, len(manifest))
                 if not ok:
                     print(f"[autopublish] curated {category} rejected by gate: "
                           f"{'; '.join(errs)}; using deterministic bundle", file=sys.stderr)
@@ -4601,18 +4763,20 @@ def _publish_lane(category: str, send: bool) -> tuple:
             )
 
     raw = format_category_bundle(category)
-    message = polish_lane_post(raw)
     bundle = bundle_for_category(category)
+    message, manifest = finalize_lane_post(category, raw, bundle)
     if send and bundle:
-        if '<a href="' in raw and not message:
+        if '<a href="' in raw and (not message or not manifest):
             _log_no_substance(category)
             return (False, 0)
         ok, errs = validate_lane_for_publish(message)
         if not ok:
             print(f"[autopublish] {category} rejected by gate: {'; '.join(errs)}", file=sys.stderr)
             return (False, len(bundle))
-        if _send_and_record(category, message):
-            return (True, len(bundle))
+        # Record the manifest, not a fresh bundle_for_category pick: items
+        # polish or the length limit removed were not delivered.
+        if _send_and_record(category, message, None, manifest):
+            return (True, len(manifest))
         print(f"[autopublish] {category} Telegram send failed; not marked posted "
               f"(will retry next cycle)", file=sys.stderr)
         return (False, len(bundle))
@@ -4621,6 +4785,7 @@ def _publish_lane(category: str, send: bool) -> tuple:
 
 def autopublish(send: bool = False) -> List[dict]:
     collect_into_backlog()
+    retry_ai_wire_outbox()
     state = load_json(THREAD_STATE_FILE, {})
     results = []
     for category in CATEGORY_META:

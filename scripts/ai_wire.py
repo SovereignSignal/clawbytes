@@ -11,6 +11,10 @@ stdlib only, times out after 5 seconds, retries once on transport errors and
 ``ai_wire push failed:`` and do not include the token or the response body.
 ``n`` is the response ``created`` count plus ``upserted`` (rows that already
 existed). A body without those counts falls back to the number of items sent.
+
+The publish path goes through a JSON outbox (``enqueue_outbox`` then
+``deliver_outbox``) so rows that fail survive a restart and are retried on
+the next run. See the outbox section at the bottom.
 """
 from __future__ import annotations
 
@@ -536,6 +540,14 @@ def _post_batch(endpoint: str, token: str, items: list, timeout: float) -> tuple
     return False, last
 
 
+def _endpoint_and_token() -> tuple:
+    base = os.environ.get("AI_WIRE_URL", "").strip().rstrip("/")
+    token = os.environ.get("AI_WIRE_INGEST_TOKEN", "").strip()
+    if not base or not token:
+        return None, None
+    return base + "/api/ingest/items", token
+
+
 def push_mapped(items: list) -> None:
     """POST already-mapped rows. Flag-off and empty input are silent no-ops.
 
@@ -548,12 +560,10 @@ def push_mapped(items: list) -> None:
         rows = [item for item in (items or []) if isinstance(item, dict) and item.get("canonical_key")]
         if not rows:
             return
-        base = os.environ.get("AI_WIRE_URL", "").strip().rstrip("/")
-        token = os.environ.get("AI_WIRE_INGEST_TOKEN", "").strip()
-        if not base or not token:
+        endpoint, token = _endpoint_and_token()
+        if not endpoint:
             print("ai_wire push failed: unconfigured", file=sys.stderr)
             return
-        endpoint = base + "/api/ingest/items"
         total = 0
         for chunk in _chunks(rows, MAX_BATCH):
             ok, detail = _post_batch(endpoint, token, chunk, TIMEOUT_SECONDS)
@@ -566,16 +576,197 @@ def push_mapped(items: list) -> None:
         print(f"ai_wire push failed: {type(exc).__name__}", file=sys.stderr)
 
 
+def map_clawbytes_items(items, *, lane: str = "", channel_post_url: Optional[str] = None, posted_at=None) -> list:
+    """Map posted lane items to ingest rows, deduped on canonical key."""
+    mapped = []
+    for item in items or []:
+        row = map_item(item, lane=lane, channel_post_url=channel_post_url, posted_at=posted_at)
+        if row:
+            mapped.append(row)
+    return _dedupe(mapped)
+
+
 def push_clawbytes_items(items, *, lane: str = "", channel_post_url: Optional[str] = None, posted_at=None) -> None:
     """Map a posted lane and push it. Flag-off is a no-op. Never raises."""
     try:
         if not enabled():
             return
-        mapped = []
-        for item in items or []:
-            row = map_item(item, lane=lane, channel_post_url=channel_post_url, posted_at=posted_at)
-            if row:
-                mapped.append(row)
-        push_mapped(_dedupe(mapped))
+        push_mapped(map_clawbytes_items(items, lane=lane, channel_post_url=channel_post_url, posted_at=posted_at))
     except Exception as exc:  # noqa: BLE001 - mapping bugs must not fail a post
         print(f"ai_wire push failed: {type(exc).__name__}", file=sys.stderr)
+
+
+# --- outbox ------------------------------------------------------------------
+# Rows from a posted lane are written to a JSON outbox on the memory volume
+# before the HTTP call, so a registry outage or a restart does not lose them.
+# Each ordinary autopublish run retries what is still pending. A 2xx acks the
+# rows. A payload rejection (400/413/422) or OUTBOX_MAX_ATTEMPTS failed runs
+# moves a row to ``failed``. Auth and config errors stay pending so fixing the
+# token delivers the backlog.
+
+OUTBOX_FILE_NAME = "ai-wire-outbox.json"
+OUTBOX_MAX_ATTEMPTS = 72
+OUTBOX_HISTORY = 200
+_PERMANENT_FAILURES = frozenset({"http_400", "http_413", "http_422"})
+
+
+def _empty_outbox() -> dict:
+    return {"pending": {}, "acked": [], "failed": []}
+
+
+def load_outbox(path) -> dict:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return _empty_outbox()
+    if not isinstance(data, dict):
+        return _empty_outbox()
+    box = _empty_outbox()
+    if isinstance(data.get("pending"), dict):
+        box["pending"] = data["pending"]
+    for name in ("acked", "failed"):
+        if isinstance(data.get(name), list):
+            box[name] = data[name][-OUTBOX_HISTORY:]
+    return box
+
+
+def save_outbox(path, box: dict) -> None:
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(box, fh, indent=2)
+    os.replace(tmp, path)
+
+
+def _now_iso(now: Optional[datetime]) -> str:
+    return (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def enqueue_outbox(path, rows: list, now: Optional[datetime] = None) -> list:
+    """Persist mapped rows as pending. Returns their canonical keys.
+
+    A key already pending gets the newer row and keeps its first queue time.
+    Raises on a write error so the caller can push directly instead.
+    """
+    box = load_outbox(path)
+    stamp = _now_iso(now)
+    keys = []
+    for row in rows or []:
+        key = row.get("canonical_key") if isinstance(row, dict) else None
+        if not key:
+            continue
+        prior = box["pending"].get(key) or {}
+        box["pending"][key] = {
+            "row": row,
+            "queuedAt": prior.get("queuedAt") or stamp,
+            "attempts": int(prior.get("attempts") or 0),
+            "lastError": prior.get("lastError"),
+        }
+        keys.append(key)
+    save_outbox(path, box)
+    return keys
+
+
+def _oldest_pending(box: dict) -> tuple:
+    stamps = sorted(
+        str(entry.get("queuedAt") or "")
+        for entry in box["pending"].values()
+        if isinstance(entry, dict)
+    )
+    return (stamps[0] if stamps else None), len(box["pending"])
+
+
+def outbox_summary(path, now: Optional[datetime] = None) -> dict:
+    """Pending count, the oldest pending queue time and age, and failed count."""
+    box = load_outbox(path)
+    oldest, pending = _oldest_pending(box)
+    age_hours = None
+    stamp = _parse_dt(oldest) if oldest else None
+    if stamp is not None:
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        moment = now or datetime.now(timezone.utc)
+        age_hours = round((moment - stamp).total_seconds() / 3600, 1)
+    return {"pending": pending, "oldest": oldest, "oldestAgeHours": age_hours, "failed": len(box["failed"])}
+
+
+def _log_pending(path, now: Optional[datetime]) -> None:
+    summary = outbox_summary(path, now)
+    if summary["pending"]:
+        print(
+            f"ai_wire outbox pending={summary['pending']} oldest={summary['oldest']} "
+            f"age_h={summary['oldestAgeHours']}",
+            file=sys.stderr,
+        )
+
+
+def deliver_outbox(path, keys: Optional[list] = None, now: Optional[datetime] = None) -> dict:
+    """POST pending rows (all, or only ``keys``), oldest first. Never raises.
+
+    Stops at the first failed batch. Returns ``{"acked": n, "failed": n,
+    "pending": n}`` for this call.
+    """
+    result = {"acked": 0, "failed": 0, "pending": 0}
+    try:
+        if not enabled():
+            return result
+        box = load_outbox(path)
+        wanted = set(keys) if keys is not None else None
+        entries = sorted(
+            (
+                (key, entry) for key, entry in box["pending"].items()
+                if isinstance(entry, dict) and isinstance(entry.get("row"), dict)
+                and (wanted is None or key in wanted)
+            ),
+            key=lambda pair: str(pair[1].get("queuedAt") or ""),
+        )
+        if not entries:
+            return result
+        endpoint, token = _endpoint_and_token()
+        if not endpoint:
+            print("ai_wire push failed: unconfigured", file=sys.stderr)
+            result["pending"] = len(box["pending"])
+            _log_pending(path, now)
+            return result
+        stamp = _now_iso(now)
+        total = 0
+        failure = None
+        for chunk in _chunks(entries, MAX_BATCH):
+            ok, detail = _post_batch(endpoint, token, [entry["row"] for _key, entry in chunk], TIMEOUT_SECONDS)
+            if ok:
+                total += detail if isinstance(detail, int) else len(chunk)
+                for key, _entry in chunk:
+                    box["pending"].pop(key, None)
+                    box["acked"].append({"key": key, "ackedAt": stamp})
+                    result["acked"] += 1
+                continue
+            failure = str(detail)
+            for key, entry in chunk:
+                entry["attempts"] = int(entry.get("attempts") or 0) + 1
+                entry["lastError"] = failure
+                entry["lastAttemptAt"] = stamp
+                if failure in _PERMANENT_FAILURES or entry["attempts"] >= OUTBOX_MAX_ATTEMPTS:
+                    box["pending"].pop(key, None)
+                    box["failed"].append({
+                        "key": key,
+                        "failedAt": stamp,
+                        "error": failure,
+                        "attempts": entry["attempts"],
+                        "queuedAt": entry.get("queuedAt"),
+                    })
+                    result["failed"] += 1
+            break
+        box["acked"] = box["acked"][-OUTBOX_HISTORY:]
+        box["failed"] = box["failed"][-OUTBOX_HISTORY:]
+        save_outbox(path, box)
+        if failure:
+            print(f"ai_wire push failed: {failure}", file=sys.stderr)
+        elif total or result["acked"]:
+            print(f"ai_wire push ok n={total}", file=sys.stderr)
+        if result["failed"]:
+            print(f"ai_wire outbox dropped={result['failed']} error={failure}", file=sys.stderr)
+        result["pending"] = len(box["pending"])
+        _log_pending(path, now)
+    except Exception as exc:  # noqa: BLE001 - the publish path must survive this
+        print(f"ai_wire push failed: {type(exc).__name__}", file=sys.stderr)
+    return result
