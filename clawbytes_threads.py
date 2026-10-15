@@ -62,10 +62,14 @@ from feed_filters import (  # noqa: E402
 )
 from title_text import first_stated_date, flatten_inline_markup  # noqa: E402
 from ai_wire import (  # noqa: E402
+    OUTBOX_FILE_NAME as AI_WIRE_OUTBOX_FILE_NAME,
+    deliver_outbox as ai_wire_deliver_outbox,
     enabled as ai_wire_enabled,
+    enqueue_outbox as ai_wire_enqueue_outbox,
+    map_clawbytes_items,
+    outbox_summary as ai_wire_outbox_summary,
     payloads_for_backfill,
     push_mapped,
-    push_clawbytes_items,
     telegram_post_url,
 )
 
@@ -4300,19 +4304,46 @@ def ai_wire_backfill(days: int = 7, send: bool = False, now: Optional[datetime] 
     return {"dry_run": False, "days": days, "count": len(payloads), "pushed": True}
 
 
+def ai_wire_outbox_path() -> Path:
+    return MEMORY / AI_WIRE_OUTBOX_FILE_NAME
+
+
 def push_lane_to_ai_wire(category: str, items: List[dict], channel_post_url: Optional[str] = None) -> None:
-    """Push one successful lane. Flag-off is a no-op. Never raises."""
+    """Push one successful lane. Flag-off is a no-op. Never raises.
+
+    The rows go to the outbox first, so a failed push is retried by the next
+    autopublish run (retry_ai_wire_outbox) instead of being lost.
+    """
     try:
         if not items or not ai_wire_enabled():
             return
         lane = CATEGORY_META.get(category, {}).get("label") or category
-        push_clawbytes_items(
+        rows = map_clawbytes_items(
             _rows_for_ai_wire(items),
             lane=lane,
             channel_post_url=channel_post_url,
             posted_at=now_utc(),
         )
+        if not rows:
+            return
+        path = ai_wire_outbox_path()
+        try:
+            keys = ai_wire_enqueue_outbox(path, rows)
+        except Exception as exc:  # noqa: BLE001 - no outbox still means one direct try
+            print(f"ai_wire outbox write failed: {type(exc).__name__}", file=sys.stderr)
+            push_mapped(rows)
+            return
+        ai_wire_deliver_outbox(path, keys=keys)
     except Exception as exc:  # noqa: BLE001 - a registry failure must not fail the post
+        print(f"ai_wire push failed: {type(exc).__name__}", file=sys.stderr)
+
+
+def retry_ai_wire_outbox() -> None:
+    """Deliver AI Wire rows left pending by earlier runs. Never raises, never posts."""
+    try:
+        if ai_wire_enabled():
+            ai_wire_deliver_outbox(ai_wire_outbox_path())
+    except Exception as exc:  # noqa: BLE001 - registry retries must not block publishing
         print(f"ai_wire push failed: {type(exc).__name__}", file=sys.stderr)
 
 
@@ -4390,6 +4421,12 @@ def print_status() -> None:
         print(
             f"- {meta['label']}: {len(queued)} queued | last published: {state.get('lastPublishedAt', {}).get(category)} "
             f"| today {ready['posts_today']}/{ready['allowed_today']} | {ready['reason']}"
+        )
+    outbox = ai_wire_outbox_summary(ai_wire_outbox_path())
+    if outbox["pending"] or outbox["failed"]:
+        print(
+            f"AI Wire outbox: {outbox['pending']} pending | oldest {outbox['oldest']} "
+            f"({outbox['oldestAgeHours']}h) | {outbox['failed']} failed"
         )
 
 
@@ -4748,6 +4785,7 @@ def _publish_lane(category: str, send: bool) -> tuple:
 
 def autopublish(send: bool = False) -> List[dict]:
     collect_into_backlog()
+    retry_ai_wire_outbox()
     state = load_json(THREAD_STATE_FILE, {})
     results = []
     for category in CATEGORY_META:

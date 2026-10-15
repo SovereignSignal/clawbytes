@@ -432,10 +432,27 @@ def health_issues(memory_dir: Path, now: datetime | None = None) -> list[str]:
     return issues
 
 
+def _log_ai_wire_outbox(memory_dir: Path) -> None:
+    """Log the oldest pending AI Wire delivery. Log only: a registry backlog
+    is not channel breakage, so it never DMs the admin."""
+    try:
+        import ai_wire
+        summary = ai_wire.outbox_summary(Path(memory_dir) / ai_wire.OUTBOX_FILE_NAME)
+    except Exception:  # noqa: BLE001 - health_check must not fail on this
+        log.exception("health_check: could not read the AI Wire outbox")
+        return
+    if summary["pending"] or summary["failed"]:
+        log.info(
+            "health_check: ai_wire outbox pending=%s oldest=%s age_h=%s failed=%s",
+            summary["pending"], summary["oldest"], summary["oldestAgeHours"], summary["failed"],
+        )
+
+
 def health_check() -> None:
     """Hourly: DM the admin ONLY when something is wrong. An unchanged issue
     set re-alerts at most every ALERT_REPEAT_HOURS."""
     memory_dir = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(REPO_ROOT / "memory")))
+    _log_ai_wire_outbox(memory_dir)
     issues = health_issues(memory_dir)
     if not issues:
         log.info("health_check: healthy, no DM")
