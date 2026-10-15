@@ -377,6 +377,7 @@ def test_run_monitors_logs_one_line_per_source(monkeypatch, capsys):
         "claw-registry-monitor.py": (0, "Registries: 2 new item(s)\n", ""),
         "claw-pagewatch-monitor.py": (0, "Pagewatch: 0 new item(s)\n", ""),
         "claw-bsky-monitor.py": (0, "Bluesky: 1 new item(s)\n", ""),
+        "claw-x-monitor.py": (0, "X watch: 0 new item(s)\n", ""),
         "claw-advisory-monitor.py": (1, "", f"HTTP 500: Bearer {token} " + ("Z" * 400)),
         "claw-ecosystem-monitor.sh": (
             0,
@@ -404,10 +405,10 @@ def test_run_monitors_logs_one_line_per_source(monkeypatch, capsys):
     monkeypatch.setattr(ct.subprocess, "run", _fake_run)
     monkeypatch.setattr(ct, "_source_health_alert", lambda text: alerts.append(text) or True)
     ct.run_monitors()
-    assert len(ran) == 9
+    assert len(ran) == 10
     assert not any("claw-reddit-monitor.py" in " ".join(cmd) for cmd in ran)
     lines = _lines(capsys)
-    assert len(lines) == 9
+    assert len(lines) == 10
     by_source = {}
     for line in lines:
         name = line.split()[1].split("=", 1)[1]
@@ -415,7 +416,7 @@ def test_run_monitors_logs_one_line_per_source(monkeypatch, capsys):
         by_source[name] = line
     assert set(by_source) == {
         "rss", "hn", "moltbook", "leaderboard",
-        "registry", "pagewatch", "bsky", "advisory", "ecosystem",
+        "registry", "pagewatch", "bsky", "x", "advisory", "ecosystem",
     }
     assert "reddit" not in by_source
     assert by_source["rss"] == "source_health source=rss status=ok items=4 error=-"
@@ -582,4 +583,4 @@ def test_reddit_returns_to_health_and_collect_when_enabled(monkeypatch, tmp_path
     monkeypatch.setattr(ct.subprocess, "run", _fake_run)
     ct.run_monitors()
     assert any("claw-reddit-monitor.py" in " ".join(cmd) for cmd in ran)
-    assert len(ran) == 10
+    assert len(ran) == 11

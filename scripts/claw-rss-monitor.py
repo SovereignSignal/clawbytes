@@ -19,6 +19,7 @@ from urllib.error import URLError, HTTPError
 
 from feed_filters import (
     STATUS_FEED_NAMES,
+    codex_changelog_relevant,
     collapse_status_entries,
     element_text,
     is_reported_claim,
@@ -46,6 +47,7 @@ _FETCH_LOG_NAMES = {
     "TestingCatalog": "testingcatalog",
     "Kilo Blog": "kilo-blog",
     "Havoptic Releases": "havoptic",
+    "Codex Changelog": "codex-changelog",
 }
 _STATUS_FEEDS = set(STATUS_FEED_NAMES)
 
@@ -75,6 +77,11 @@ RSS_FEEDS = [
     {"name": "PicoClaw Releases", "url": "https://github.com/sipeed/picoclaw/releases.atom", "tags": ["releases", "ecosystem"]},
     {"name": "Moltis Releases", "url": "https://github.com/moltis-org/moltis/releases.atom", "tags": ["releases", "ecosystem"]},
     {"name": "Codex Releases", "url": "https://github.com/openai/codex/releases.atom", "tags": ["releases", "adjacent"]},
+    # Official Codex changelog (verified 2026-10-15). Self link is
+    # developers.openai.com/codex/changelog/rss.xml; the host redirects to
+    # learn.chatgpt.com. Feature titles skip the keyword gate. ChatGPT iOS
+    # rows (`#…-mobile`) are dropped in is_relevant.
+    {"name": "Codex Changelog", "url": "https://developers.openai.com/codex/changelog/rss.xml", "tags": ["coding-agent", "official"], "high_signal": True},
     {"name": "Claude Code Releases", "url": "https://github.com/anthropics/claude-code/releases.atom", "tags": ["releases", "coding-agent"], "high_signal": True},
     {"name": "Claude Code Action Releases", "url": "https://github.com/anthropics/claude-code-action/releases.atom", "tags": ["releases", "coding-agent"]},
     {"name": "LangGraph Releases", "url": "https://github.com/langchain-ai/langgraph/releases.atom", "tags": ["releases", "frameworks"], "high_signal": True},
@@ -389,6 +396,9 @@ def is_relevant(entry, feed_name, tags=None):
     # changelogs and coding-agent-tagged news/changelog feeds.
     low_name = feed_name.lower()
     tagset = {str(t).lower() for t in (tags or [])}
+    # Before the changelog bypass. That bypass would keep ChatGPT iOS rows.
+    if low_name == "codex changelog":
+        return codex_changelog_relevant(entry)
     if any(marker in low_name for marker in ("releases", "release notes")):
         return True
     if "coding-agent" in tagset and (

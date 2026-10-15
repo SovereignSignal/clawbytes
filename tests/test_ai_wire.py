@@ -216,6 +216,14 @@ def test_canonical_url_keeps_hn_youtube_and_changelog_identity():
         "https://example.com/search?q=Claude+Code&utm_source=x&id=7"
     ) == "https://example.com/search?q=Claude+Code&id=7"
     assert ai_wire.normalize_url("https://example.com/a?refid=abc&ref=twitter") == "https://example.com/a?refid=abc"
+    assert ai_wire.normalize_url(
+        "https://developers.openai.com/codex/changelog/#codex-2026-10-14-gpt-55-retirement"
+    ) == "https://developers.openai.com/codex/changelog#codex-2026-10-14-gpt-55-retirement"
+    assert ai_wire.normalize_url(
+        "https://help.openai.com/en/articles/6825453-chatgpt-release-notes#composer-predictions-in-codex"
+    ) != ai_wire.normalize_url(
+        "https://help.openai.com/en/articles/6825453-chatgpt-release-notes#faster-steering-in-codex"
+    )
     assert ai_wire.normalize_url("https://docs.claude.com/en/release-notes/overview#top") == (
         "https://docs.claude.com/en/release-notes/overview"
     )

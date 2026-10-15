@@ -10,7 +10,7 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 
 | Class | What | Defined in | Cadence |
 |---|---|---|---|
-| RSS/Atom feeds | 90 feeds: vendor blogs, changelogs that Ship (Cursor, GitHub Copilot, Amp News, Kilo Blog product posts), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, fx, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau, DeepSeek Harness), research blogs, claude.dev Blog (Read), ArXiv cs.AI/cs.CL (harness-compound gate — bare `agent` is not enough), TestingCatalog (coding-tool/model items; leaks marked reported), Havoptic releases (changelog backstop, vendor link, deduped against primary atoms), and three status-page history feeds (Claude, Cursor, GitHub) that reach Watch only for in-scope partial/major/elevated incidents. Warp, Replit, Augment, JetBrains, and Zed blogs stay in the list and route to Read. Windsurf Blog is not in the list (removed 2026-09-23, stale since 2026-05-12). Lab SDK atoms (Anthropic Python and TypeScript, Claude Agent SDK Python and TypeScript, OpenAI Python, Node, and Agents, Google GenAI Python and JS) Ship only when the release notes name a new tool, computer or browser control, or a breaking change; routine version bumps stay out. Each feed baselines silently on the first successful fetch of its URL. A failed or unparseable fetch does not count, and a reused feed name still baselines when the URL is new. | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
+| RSS/Atom feeds | 91 feeds: vendor blogs, changelogs that Ship (Cursor, GitHub Copilot, Amp News, Kilo Blog product posts, Codex Changelog), GitHub `releases.atom` for harnesses/SDKs/frameworks (incl. Agent Client Protocol, Pi, OMP/Oh My Pi, fx, Herdr, Kilo Code, Kimi Code, Mistral Vibe, Deep Agents, Open Interpreter, Codewhale, MiMo Code, AGNO, Tau, DeepSeek Harness), research blogs, claude.dev Blog (Read), ArXiv cs.AI/cs.CL (harness-compound gate — bare `agent` is not enough), TestingCatalog (coding-tool/model items; leaks marked reported), Havoptic releases (changelog backstop, vendor link, deduped against primary atoms), and three status-page history feeds (Claude, Cursor, GitHub) that reach Watch only for in-scope partial/major/elevated incidents. Warp, Replit, Augment, JetBrains, and Zed blogs stay in the list and route to Read. Windsurf Blog is not in the list (removed 2026-09-23, stale since 2026-05-12). Lab SDK atoms (Anthropic Python and TypeScript, Claude Agent SDK Python and TypeScript, OpenAI Python, Node, and Agents, Google GenAI Python and JS) Ship only when the release notes name a new tool, computer or browser control, or a breaking change; routine version bumps stay out. Each feed baselines silently on the first successful fetch of its URL. A failed or unparseable fetch does not count, and a reused feed name still baselines when the URL is new. | `scripts/claw-rss-monitor.py` (`RSS_FEEDS`) | 30 min |
 | GitHub releases (API) | Curated + auto-discovered repos, merged via `claw-ecosystem-sources.json`. First tag on a repo is a silent baseline. Later tags are classified on the release path; the tag is marked seen only after collect hands the item to the backlog. | `scripts/claw-ecosystem-monitor.sh` | 30 min |
 | HF Daily Papers | huggingface.co/papers via `api/daily_papers`, keyword-scored into lanes | `scripts/claw-hf-papers.py` | 30 min |
 | Hacker News | Algolia queries (harness/agent/MCP terms, one query per term — Algolia has no `OR`), plus one `tags=front_page` pass filtered to agent/coding/AI-tool stories at ≥150 points. Search queries use a 14-day window. | `scripts/claw-hn-monitor.py`, `claw-ecosystem-monitor.sh` | 30 min |
@@ -19,8 +19,9 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 | Leaderboards | SWE-bench (Verified, plus bash-only as the Verified mini-SWE-agent filter), Aider polyglot, LiveBench, Terminal-Bench 2.1 — emits only on top-3 movement, sha-gated fetches | `scripts/claw-leaderboard-monitor.py` (`BOARDS`) | 30 min |
 | Registries | OpenRouter model list (id diff, coding/agent family filter — same word-boundary pattern as HF trending), LiteLLM pricing registry (sha-gated key diff, URL fragment includes the new-key hash), HF trending (weekly, coding/agent filter) | `scripts/claw-registry-monitor.py` | 30 min |
 | GitHub advisories | Advisory Database, package-name allowlist (tracked repos, not `ecosystem=pip`), silent baseline, `html_url` per advisory, cap 2 Watch items per UTC day | `scripts/claw-advisory-monitor.py` | 30 min |
-| Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + HTML heading-hash (Antigravity, Kiro changelog) + sitemap slug diffs (Anthropic news/engineering, Anthropic research, DeepSeek news). Research is its own watch key so the first run baselines the existing sitemap instead of posting the backlog. | `scripts/claw-pagewatch-monitor.py` | 30 min |
+| Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + HTML heading-hash (Antigravity, Kiro changelog) + sitemap slug diffs (Anthropic news/engineering, Anthropic research, DeepSeek news, Claude product articles). Research is its own watch key so the first run baselines the existing sitemap instead of posting the backlog. The Anthropic news index (`https://www.anthropic.com/news`) diffs article links and uses the same item id as the news sitemap, so one URL is one source key. Claude article slugs emit only for launches (`introducing`, `redesigned`, `dynamic-workflow`, `claude-managed-agent`, …); `how-` / `working-` stories are remembered and skipped. Codex rows on `https://openai.com/products/release-notes/` are a separate watch: the help-center `#anchor` is the URL. | `scripts/claw-pagewatch-monitor.py` | 30 min |
 | Bluesky | Phrase search ("claude code", "codex cli", "openclaw", "mcp server", "agent harness", plus Cursor/Devin/Antigravity/ACP/Kiro/Kilo/Kimi/Grok Build/Mistral Vibe), engagement-gated | `scripts/claw-bsky-monitor.py` | 30 min |
+| X watchlist | @cursor_ai (`1695890961094909952`) and @btibor91 (`338443084`). Original posts only. Official Cursor posts Ship. Reporter posts Ship only when they name a product term, and are marked reported. Off unless `CLAWBYTES_X_WATCH` is set. See the env table in `README.md` for the bearer and the per-post cost. | `scripts/claw-x-monitor.py` | 30 min |
 
 Discovered repos and feeds land in `claw-ecosystem-sources.json` /
 `clawbytes-dynamic-feeds.json` on the volume and are merged automatically —
@@ -321,3 +322,36 @@ on the first good fetch. Already-seen tags are not replayed.
 (`agents`, `agents-core`, `agents-realtime`, …) on the same tag minute.
 That is the Mastra-style firehose. The Python agents SDK stays the feed.
 `google-gemini/gemini-cli` is already watched and is not an SDK.
+
+### 2026-10-15 lab launches the feeds missed
+
+Claude Managed Agents dynamic workflows and Claude Code Projects were posted
+on `claude.com/resources/articles`, not under `anthropic.com/news/`. Codex
+composer predictions is on the product release notes, not in the developers
+changelog RSS or the `openai/codex` atom. Gemini 4 Argon in Cursor and
+Cursor joining The X Subscription were posts on @cursor_ai.
+
+**Added** — Codex Changelog RSS
+`https://developers.openai.com/codex/changelog/rss.xml` (verified 2026-10-15;
+the host redirects to `learn.chatgpt.com` and the feed's self link is the
+developers URL). ChatGPT for iOS rows (`#…-mobile`) are dropped. Other rows
+Ship. Anthropic news index `https://www.anthropic.com/news` (article links;
+same source id as the existing `/news/` sitemap watch). Claude article
+sitemap, launch slugs only, silent baseline of the existing set. OpenAI
+product release notes, Codex sections only; the item URL keeps the
+help-center fragment (`#composer-predictions-in-codex` and
+`#faster-steering-in-codex` on the 2026-10-15 page). X watchlist for
+@cursor_ai and @btibor91, off unless `CLAWBYTES_X_WATCH` is on.
+
+**Env** — `CLAWBYTES_X_WATCH` (`1`/`true`/`yes`/`on`) and
+`CLAWBYTES_X_BEARER_TOKEN`. X API v2 `GET /2/users/:id/tweets` is $0.005 per
+post returned (Posts: Read). Owned-read pricing ($0.001) does not apply to
+these accounts. `since_id` after the silent baseline, `max_results=5` (API
+minimum), retweets and replies excluded. A quiet poll returns no posts. User
+ids are hardcoded, so there is no $0.010 user lookup. The release-notes
+reader (`r.jina.ai`) is used only when the official page yields no Codex
+entries (Cloudflare 403 from a datacenter). No key, no charge.
+
+**Passed** — replaying the October posts already on those pages. First
+sighting baselines. OpenAI's release-notes HTML 403s from this network;
+the Codex changelog RSS does not contain composer predictions.

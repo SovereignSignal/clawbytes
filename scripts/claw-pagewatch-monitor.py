@@ -10,8 +10,17 @@ Covers vendors that publish real signal but expose no feed:
   same newest entry, not the full page (bundle hashes change on deploys).
   If no heading matches, fall back to the previous whole-page or
   heading-set hash for that watch.
-- Sites with sitemaps but no RSS (anthropic.com, api-docs.deepseek.com) —
-  diff the sitemap slug set and emit one item per new news/engineering URL.
+- Sites with sitemaps but no RSS (anthropic.com, api-docs.deepseek.com,
+  claude.com product articles) — diff the sitemap slug set and emit one
+  item per new URL. Claude articles emit only launch slugs; customer
+  stories and tutorials are remembered and skipped.
+- The Anthropic news index (https://www.anthropic.com/news). Same URLs
+  the sitemap already diffs, so item ids match the sitemap watch and
+  collect keeps one.
+- OpenAI product release notes, Codex entries only. The developers
+  changelog RSS does not carry "Composer predictions". The official page
+  is Cloudflare-challenged from a datacenter; a free reader fallback is
+  used when the page yields no Codex entries. No API key.
 
 First sighting of each watch records a baseline and emits nothing.
 
@@ -27,7 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from title_text import first_stated_date, flatten_inline_markup, format_stated_date
+from title_text import MONTH_NAMES, first_stated_date, flatten_inline_markup, format_stated_date
 
 WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
@@ -110,7 +119,69 @@ SITEMAP_WATCHES = [
         "url": "https://api-docs.deepseek.com/sitemap.xml",
         "prefixes": ("https://api-docs.deepseek.com/news/",),
     },
+    # English articles only. Locale copies live under /de/, /fr/, …
+    # and do not match this prefix. Launch slugs emit; the rest are
+    # remembered so a customer-story burst cannot fill the cap.
+    {
+        "key": "claude-articles",
+        "label": "Claude",
+        "url": "https://claude.com/sitemap.xml",
+        "prefixes": ("https://claude.com/resources/articles/",),
+    },
 ]
+
+
+# HTML index. Ids use the sitemap watch key (`anthropic`) so a URL that
+# also shows up in the sitemap is one source key.
+NEWS_INDEX_WATCHES = [
+    {
+        "key": "anthropic-news",
+        "label": "Anthropic",
+        "page": "https://www.anthropic.com/news",
+        "id_key": "anthropic",
+    },
+]
+
+
+# Codex rows on the product release notes. The developers changelog RSS
+# is a different feed and did not contain "Composer predictions" on
+# 2026-10-15. The official page 403s from datacenter IPs (Cloudflare).
+# The reader is a no-key fallback used only when the official body has
+# no Codex entries.
+OPENAI_RELEASE_NOTES_URL = "https://openai.com/products/release-notes/"
+OPENAI_RELEASE_NOTES_READER = "https://r.jina.ai/https://openai.com/products/release-notes/"
+RELEASE_NOTE_WATCHES = [
+    {
+        "key": "codex-release-notes",
+        "label": "Codex",
+        "lane": "ship",
+    },
+]
+
+# Product launches on claude.com/resources/articles. "how-…" customer
+# stories mention managed agents and must not match.
+_CLAUDE_LAUNCH_TOKENS = (
+    "introducing",
+    "announcing",
+    "redesigned",
+    "dynamic-workflow",
+    "whats-new",
+    "new-in-",
+    "now-available",
+    "generally-available",
+)
+_NEWS_HREF = re.compile(
+    r'href="(?:https://www\.anthropic\.com)?(/news/[a-z0-9][a-z0-9-]*)/?[?#"]',
+    re.IGNORECASE,
+)
+_RELEASE_DATE = re.compile(
+    r"^(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|"
+    r"Dec(?:ember)?)\s+(\d{1,2}),\s+(\d{4})$",
+    re.IGNORECASE,
+)
+_MD_LINK = re.compile(r"\]\((https://[^)\s]+)\)")
+_HTML_HREF = re.compile(r'href="(https://[^"]+)"', re.IGNORECASE)
 
 FAILURES = []
 
@@ -281,6 +352,158 @@ def lane_for_slug(url):
     return "read" if "/engineering/" in (url or "") else "ship"
 
 
+def claude_article_launch(url):
+    """True for a Claude product-launch article slug.
+
+    Customer stories start with ``how-`` or ``working-`` and stay out even
+    when the slug mentions managed agents. ``projects-redesigned`` and
+    ``introducing-dynamic-workflows-in-claude-code`` match.
+    """
+    slug = (url or "").rstrip("/").rsplit("/", 1)[-1].lower()
+    if not slug or slug.startswith("how-") or slug.startswith("working-"):
+        return False
+    if any(token in slug for token in _CLAUDE_LAUNCH_TOKENS):
+        return True
+    return slug.startswith("claude-managed-agent") or slug.startswith("managed-agent")
+
+
+def news_index_urls(html, page="https://www.anthropic.com/news"):
+    """Article URLs on the Anthropic news index. The index URL itself is not one."""
+    found = []
+    seen = set()
+    for match in _NEWS_HREF.finditer(html or ""):
+        path = "/" + match.group(1).lstrip("/")
+        path = path.rstrip("/")
+        if path == "/news":
+            continue
+        url = "https://www.anthropic.com" + path
+        if url in seen:
+            continue
+        seen.add(url)
+        found.append(url)
+    return sorted(found)
+
+
+def _followed_by_date(lines, start):
+    for line in lines[start:]:
+        text = line.strip()
+        if not text:
+            continue
+        return bool(_RELEASE_DATE.match(text))
+    return False
+
+
+def _product_boundary(lines, index):
+    """A release-notes product label is a short line whose next text is a date."""
+    text = lines[index].strip()
+    if not text or len(text) > 24:
+        return False
+    if not re.fullmatch(r"[A-Z][A-Za-z0-9+.-]*", text):
+        return False
+    return _followed_by_date(lines, index + 1)
+
+
+def _expand_release_date(line):
+    """``Oct 9, 2026`` → ``October 9, 2026``, the form the stale-date gate reads."""
+    match = _RELEASE_DATE.match((line or "").strip())
+    if not match:
+        return ""
+    token = match.group(1).lower()
+    for name in MONTH_NAMES:
+        if name.lower().startswith(token[:3]):
+            return f"{name} {int(match.group(2))}, {match.group(3)}"
+    return ""
+
+
+def _entry_from_release_chunk(chunk):
+    block = "\n".join(chunk)
+    title_match = re.search(r"^##\s+(.+?)\s*$", block, re.MULTILINE)
+    if not title_match:
+        title_match = re.search(r"<h2[^>]*>\s*(.*?)\s*</h2>", block, re.IGNORECASE | re.DOTALL)
+    if not title_match:
+        return None
+    title = flatten_inline_markup(title_match.group(1))
+    if not title:
+        return None
+    links = _MD_LINK.findall(block) + _HTML_HREF.findall(block)
+    url = ""
+    for link in links:
+        if "#" in link:
+            url = link
+            break
+    if not url and links:
+        url = links[0]
+    if not url:
+        slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+        url = f"{OPENAI_RELEASE_NOTES_URL}#{slug}" if slug else OPENAI_RELEASE_NOTES_URL
+    after = block.split(title_match.group(0), 1)[-1]
+    summary = ""
+    for para in re.split(r"\n\s*\n", after):
+        text = flatten_inline_markup(para)
+        if not text or text.startswith("http") or text.lower().startswith("view source"):
+            continue
+        summary = text
+        break
+    stated = ""
+    for line in chunk:
+        stated = _expand_release_date(line)
+        if stated:
+            break
+    if stated:
+        summary = f"{stated} — {summary or title}"
+    return {"title": title, "url": url, "summary": summary or title}
+
+
+def codex_release_note_entries(text):
+    """Codex-labeled entries from the product release notes.
+
+    Accepts the official HTML when it has the same ``##`` headings, and the
+    reader markdown (a product name on its own line, then a date, then the
+    heading). API and ChatGPT sections are not entries. The fragment on the
+    help-center link is the item URL so two notes do not share a key.
+    """
+    body = text or ""
+    marker = "Markdown Content:"
+    if marker in body:
+        body = body.split(marker, 1)[1]
+    lines = body.splitlines()
+    entries = []
+    index = 0
+    while index < len(lines):
+        if lines[index].strip() == "Codex" and _product_boundary(lines, index):
+            index += 1
+            chunk = []
+            while index < len(lines) and not _product_boundary(lines, index):
+                chunk.append(lines[index])
+                index += 1
+            entry = _entry_from_release_chunk(chunk)
+            if entry:
+                entries.append(entry)
+            continue
+        index += 1
+    return entries
+
+
+def fetch_codex_release_notes():
+    """Official page first. Reader only when that body has no Codex entries.
+
+    The reader (r.jina.ai) needs no key and is not called when the official
+    page already parsed. A 403 from Cloudflare is that failure.
+    """
+    errors = []
+    for url in (OPENAI_RELEASE_NOTES_URL, OPENAI_RELEASE_NOTES_READER):
+        try:
+            text = fetch_text(url)
+        except Exception as exc:
+            errors.append(f"{url} ({exc})")
+            continue
+        entries = codex_release_note_entries(text)
+        if entries:
+            return entries
+        errors.append(f"{url} (no Codex entries)")
+    raise OSError("OpenAI Codex release notes: " + "; ".join(errors))
+
+
 def load_state():
     if STATE_FILE.exists():
         try:
@@ -383,6 +606,12 @@ def check_pages(verbose=True):
         else:
             _log_fetch(watch["key"], "baseline written")
         fresh = [u for u in slugs if u not in set(old)] if old else []
+        # Launch slugs only. Other new article URLs are remembered below so
+        # they do not occupy the cap and hide a launch that sorts later.
+        rejected = []
+        if old and watch["key"] == "claude-articles":
+            rejected = [u for u in fresh if not claude_article_launch(u)]
+            fresh = [u for u in fresh if claude_article_launch(u)]
         # The cap is a rate limit. Persist only what we emitted plus the
         # previous baseline; overflow stays unseen for the next run.
         emitted = fresh[:MAX_SITEMAP_ITEMS_PER_RUN] if old else []
@@ -408,10 +637,96 @@ def check_pages(verbose=True):
         else:
             merged = list(old)
             known = set(merged)
+            for url in list(rejected) + list(emitted):
+                if url not in known:
+                    merged.append(url)
+                    known.add(url)
+            state["slugs"][watch["key"]] = merged
+
+    for watch in NEWS_INDEX_WATCHES:
+        try:
+            html = fetch_text(watch["page"])
+        except Exception as e:
+            _fail(f"{watch['label']} news: fetch failed ({e})")
+            continue
+        slugs = news_index_urls(html, watch["page"])
+        if not slugs:
+            _fail(f"{watch['label']} news: no article links parsed")
+            continue
+        old = state["slugs"].get(watch["key"], [])
+        fresh = [u for u in slugs if u not in set(old)] if old else []
+        emitted = fresh[:MAX_SITEMAP_ITEMS_PER_RUN] if old else []
+        id_key = watch.get("id_key") or watch["key"]
+        for url in emitted:
+            new_items.append({
+                "id": f"pagewatch:{id_key}:{url}",
+                "watch": watch["label"],
+                "title": f"{watch['label']}: {slug_title(url)}",
+                "url": url,
+                "summary": "New page on vendor site",
+                "lane": "ship",
+                "found_at": now_iso,
+            })
+            if verbose:
+                print(f"  🆕 {watch['label']} news: {url}")
+        if verbose and not fresh:
+            print(f"  = {watch['label']} news: {'baseline recorded' if not old else 'no new pages'} ({len(slugs)} tracked)")
+        if not old:
+            state["slugs"][watch["key"]] = slugs
+        else:
+            merged = list(old)
+            known = set(merged)
             for url in emitted:
                 if url not in known:
                     merged.append(url)
                     known.add(url)
+            state["slugs"][watch["key"]] = merged
+
+    for watch in RELEASE_NOTE_WATCHES:
+        try:
+            entries = fetch_codex_release_notes()
+        except Exception as e:
+            _fail(f"{watch['label']} release notes: fetch failed ({e})")
+            continue
+        by_url = []
+        seen_urls = set()
+        for entry in entries:
+            url = entry.get("url") or ""
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            by_url.append(entry)
+        if not by_url:
+            _fail(f"{watch['label']} release notes: no Codex entries parsed")
+            continue
+        slugs = [entry["url"] for entry in by_url]
+        old = state["slugs"].get(watch["key"], [])
+        known_old = set(old)
+        fresh = [entry for entry in by_url if entry["url"] not in known_old] if old else []
+        emitted = fresh[:MAX_SITEMAP_ITEMS_PER_RUN] if old else []
+        for entry in emitted:
+            new_items.append({
+                "id": f"pagewatch:{watch['key']}:{entry['url']}",
+                "watch": watch["label"],
+                "title": entry["title"],
+                "url": entry["url"],
+                "summary": entry.get("summary") or "Codex release note",
+                "lane": watch.get("lane") or "ship",
+                "found_at": now_iso,
+            })
+            if verbose:
+                print(f"  🆕 {watch['label']} release notes: {entry['title']}")
+        if verbose and not fresh:
+            print(f"  = {watch['label']} release notes: {'baseline recorded' if not old else 'no new notes'} ({len(slugs)} tracked)")
+        if not old:
+            state["slugs"][watch["key"]] = slugs
+        else:
+            merged = list(old)
+            known = set(merged)
+            for entry in emitted:
+                if entry["url"] not in known:
+                    merged.append(entry["url"])
+                    known.add(entry["url"])
             state["slugs"][watch["key"]] = merged
 
     if new_items:

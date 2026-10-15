@@ -43,6 +43,7 @@ from completion_diag import empty_content_message  # noqa: E402
 from feed_filters import (  # noqa: E402
     STATUS_FEED_NAMES,
     STATUS_WATCH_FEEDS,
+    codex_changelog_relevant,
     havoptic_feed,
     incident_public_url,
     is_reported_claim,
@@ -56,6 +57,7 @@ from feed_filters import (  # noqa: E402
     testingcatalog_relevant,
     urls_same_release,
     version_key,
+    x_post_in_scope,
 )
 from title_text import first_stated_date, flatten_inline_markup  # noqa: E402
 from ai_wire import (  # noqa: E402
@@ -258,6 +260,7 @@ CHANGELOG_SHIP_FEED_NAMES = (
     "github copilot changelog",
     "amp news",
     "kilo blog",
+    "codex changelog",
 )
 
 def _load_dynamic_subreddits():
@@ -902,6 +905,9 @@ def classify_rss(item: dict) -> Optional[dict]:
     if feed_low == "kilo blog" and not kilo_product_post(item):
         return None
 
+    if feed_low == "codex changelog" and not codex_changelog_relevant(item):
+        return None
+
     if feed_low == "testingcatalog":
         if not testingcatalog_relevant(item):
             return None
@@ -1414,6 +1420,43 @@ def classify_pagewatch(item: dict) -> Optional[dict]:
     }
 
 
+def classify_x(item: dict) -> Optional[dict]:
+    """Watchlist posts. @cursor_ai is an official launch. @btibor91 is reported.
+
+    Replies never arrive here. A reporter post that names no product is
+    dropped, including consumer items from the same account.
+    """
+    url = item.get("url") or ""
+    title = item.get("title") or ""
+    if not url or not title:
+        return None
+    handle = (item.get("handle") or "").strip().lstrip("@").lower()
+    blob = f"{title} {item.get('summary') or ''}"
+    if not x_post_in_scope(handle, blob):
+        return None
+    official = handle == "cursor_ai"
+    dt = parse_dt(item.get("found_at") or "")
+    base = 64 if official else 58
+    score = base + age_score(dt, 96) / 10
+    summary = (item.get("summary") or title).strip()
+    candidate = {
+        "primaryCategory": "ship",
+        "categories": ["ship"],
+        "score": round(score, 2),
+        "summary": trim(summary, 140),
+        "expiresAt": (dt or now_utc()) + timedelta(hours=CATEGORY_META["ship"]["ttl_hours"]),
+        "publishedAt": dt,
+        "sourceType": "x",
+        "sourceName": f"@{handle}" if handle else "x",
+        "sourceId": item.get("id") or url,
+        "url": url,
+        "title": title,
+    }
+    if not official:
+        candidate["reported"] = True
+    return candidate
+
+
 def classify_bsky(item: dict) -> Optional[dict]:
     """High-engagement Bluesky posts on harness phrases → Community."""
     url = item.get("url", "")
@@ -1610,6 +1653,7 @@ _WATCHLIST_FETCH_LOGS = (
     "INFO testingcatalog:",
     "INFO kilo-blog:",
     "INFO havoptic:",
+    "INFO codex-changelog:",
 )
 
 
@@ -1667,6 +1711,8 @@ def run_monitors() -> None:
         ("registry", ["python3", "scripts/claw-registry-monitor.py", "--quiet"]),
         ("pagewatch", ["python3", "scripts/claw-pagewatch-monitor.py", "--quiet"]),
         ("bsky", ["python3", "scripts/claw-bsky-monitor.py", "--quiet"]),
+        # No-ops unless CLAWBYTES_X_WATCH is on. A failed fetch still exits 1.
+        ("x", ["python3", "scripts/claw-x-monitor.py", "--quiet"]),
         ("advisory", ["python3", "scripts/claw-advisory-monitor.py", "--quiet"]),
         ("ecosystem", ["bash", "scripts/claw-ecosystem-monitor.sh", "--mode", "check"]),
     ]
@@ -1753,6 +1799,7 @@ def collect_candidates() -> Dict[str, List[dict]]:
     registry = load_json(MEMORY / "claw-registry-state.json", {}).get("foundItems", [])
     pagewatch = load_json(MEMORY / "claw-pagewatch-state.json", {}).get("foundItems", [])
     bsky = load_json(MEMORY / "claw-bsky-state.json", {}).get("foundItems", [])
+    x_posts = load_json(MEMORY / "claw-x-state.json", {}).get("foundItems", [])
     advisory = load_json(MEMORY / "claw-advisory-state.json", {}).get("foundItems", [])
     ecosystem = load_json(MEMORY / "claw-ecosystem-new-items.json", {})
     ecosystem_releases: List[dict] = []
@@ -1775,6 +1822,7 @@ def collect_candidates() -> Dict[str, List[dict]]:
         "registry": registry,
         "pagewatch": pagewatch,
         "bsky": bsky,
+        "x": x_posts,
         "advisory": advisory,
         "ecosystem_release": ecosystem_releases,
         "ecosystem_hn": ecosystem_hn,
@@ -1800,6 +1848,8 @@ def classify_source_candidate(kind: str, item: dict) -> Optional[dict]:
         return classify_pagewatch(item)
     if kind == "bsky":
         return classify_bsky(item)
+    if kind == "x":
+        return classify_x(item)
     if kind == "advisory":
         return classify_advisory(item)
     if kind == "ecosystem_release":
@@ -1824,6 +1874,9 @@ def raw_source_label(kind: str, item: dict) -> str:
         return item.get("watch", "pagewatch")
     if kind == "bsky":
         return item.get("handle", "bluesky")
+    if kind == "x":
+        handle = (item.get("handle") or "").strip().lstrip("@")
+        return f"@{handle}" if handle else "x"
     if kind == "advisory":
         return item.get("package") or "GitHub Advisory"
     if kind == "ecosystem_release":
@@ -1918,6 +1971,7 @@ def unconsumed_state_report() -> list:
         "claw-registry-state.json",
         "claw-pagewatch-state.json",
         "claw-bsky-state.json",
+        "claw-x-state.json",
         "claw-advisory-state.json",
         "claw-ecosystem-new-items.json",
         "clawbytes-backlog.json",

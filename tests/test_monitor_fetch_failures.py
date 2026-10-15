@@ -111,6 +111,8 @@ def test_pagewatch_failed_fetch_exits_1(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(pw, "MD_WATCHES", pw.MD_WATCHES[:1])
     monkeypatch.setattr(pw, "HTML_WATCHES", [])
     monkeypatch.setattr(pw, "SITEMAP_WATCHES", pw.SITEMAP_WATCHES[:1])
+    monkeypatch.setattr(pw, "NEWS_INDEX_WATCHES", [])
+    monkeypatch.setattr(pw, "RELEASE_NOTE_WATCHES", [])
     monkeypatch.setattr(pw, "fetch_text", _boom)
     code = pw.main()
     err = capsys.readouterr().err
@@ -123,6 +125,8 @@ def test_pagewatch_empty_sitemap_exits_1(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(pw, "MD_WATCHES", [])
     monkeypatch.setattr(pw, "HTML_WATCHES", [])
     monkeypatch.setattr(pw, "SITEMAP_WATCHES", pw.SITEMAP_WATCHES[:1])
+    monkeypatch.setattr(pw, "NEWS_INDEX_WATCHES", [])
+    monkeypatch.setattr(pw, "RELEASE_NOTE_WATCHES", [])
     monkeypatch.setattr(pw, "fetch_text", lambda url, timeout=30: "<urlset></urlset>")
     _assert_reported(capsys, pw.main(), "no matching URLs parsed")
 
