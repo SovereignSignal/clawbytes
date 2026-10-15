@@ -1,0 +1,5 @@
+[
+  {"number": 12, "title": "Crash when feed is empty", "labels": [{"name": "Bug"}], "created_at": "2026-10-10T09:00:00Z"},
+  {"number": 11, "title": "Add a new source", "labels": [{"name": "enhancement"}], "created_at": "2026-10-01T09:00:00Z"},
+  {"number": 10, "title": "Bump deps", "labels": [], "created_at": "2026-09-01T09:00:00Z", "pull_request": {"url": "https://api.github.com/repos/Example/demo/pulls/10"}}
+]

@@ -1,0 +1,7 @@
+[project]
+name = "demo"
+version = "0.1.0"
+dependencies = [
+    "httpx[http2]>=0.27",
+    "requests>=2.0",
+]

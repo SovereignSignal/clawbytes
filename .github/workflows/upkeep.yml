@@ -1,0 +1,54 @@
+name: Bot upkeep check
+
+on:
+  schedule:
+    - cron: "17 15 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upkeep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Run upkeep tests
+        run: python -m pytest -q tests/test_upkeep_check.py
+
+      - name: Run upkeep check
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.UPKEEP_GITHUB_TOKEN || github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CLAWBYTES_ADMIN_CHAT_ID: ${{ secrets.CLAWBYTES_ADMIN_CHAT_ID }}
+          UPKEEP_RAILWAY_PROJECTS: ${{ secrets.UPKEEP_RAILWAY_PROJECTS }}
+          AI_WIRE_BASE_URL: ${{ vars.AI_WIRE_BASE_URL }}
+        run: |
+          set +e
+          python -m ops.upkeep.upkeep_check > upkeep-report.txt
+          code=$?
+          set -e
+          cat upkeep-report.txt
+          {
+            echo '## Bot upkeep check'
+            echo '```'
+            cat upkeep-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # 1 = something needs attention (already DMed to the admin): annotate, stay green.
+          # 2 = the check itself broke: fail the job.
+          if [ "$code" -eq 1 ]; then
+            echo "::warning title=Bot upkeep::One or more bots need attention; see the job summary."
+            exit 0
+          fi
+          exit "$code"

@@ -1,0 +1,34 @@
+{
+  "stale_pr_days": 7,
+  "bug_labels": ["bug"],
+  "flag_on_check_error": true,
+  "check_railway_logs": true,
+  "railway_log_limit": 50,
+  "ai_wire": {
+    "max_silence_hours": 26
+  },
+  "bots": [
+    {
+      "name": "clawbytes",
+      "repo": "SovereignSignal/clawbytes",
+      "requirements_files": ["requirements.txt"],
+      "telegram_channel": "clawbytes",
+      "ai_wire_source_bot": "clawbytes",
+      "max_silence_hours": 26
+    },
+    {
+      "name": "modelbytes",
+      "repo": "SovereignSignal/modelbytes",
+      "requirements_files": ["requirements.txt"],
+      "telegram_channel": "ModelBytes",
+      "max_silence_hours": 26
+    },
+    {
+      "name": "interesting-repos",
+      "repo": "SovereignSignal/interesting-repos",
+      "requirements_files": ["requirements.txt", "pyproject.toml"],
+      "telegram_channel": "interestingrepos",
+      "max_silence_hours": 26
+    }
+  ]
+}
