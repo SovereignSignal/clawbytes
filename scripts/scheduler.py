@@ -101,8 +101,25 @@ def collect() -> None:
     code = _run("collect", ["collect", "--run-monitors", "--summary"])
     if code != 0:
         log.info("forward_release_events: skipped collect_failed")
+    else:
+        _forward_after_collect()
+    # Polls npm/GitHub itself, so it does not depend on this collect's batch.
+    _release_alerts_after_collect()
+
+
+def _release_alerts_after_collect() -> None:
+    """Immediate per-release alerts. In-process, log-only: never pages ``alert:collect``."""
+    try:
+        scripts_dir = str(REPO_ROOT / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import release_alerts
+
+        outcome = release_alerts.run_release_alerts()
+    except Exception:  # noqa: BLE001 - alerts must not break collect
+        log.exception("release_alerts: error")
         return
-    _forward_after_collect()
+    log.info("release_alerts: %s", outcome)
 
 
 def _forward_after_collect() -> None:

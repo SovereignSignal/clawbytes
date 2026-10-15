@@ -6,28 +6,50 @@
       "prereleases": true,
       "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
       "forward": false,
-      "legacy_owned": true
+      "legacy_owned": true,
+      "alert": true,
+      "npm": "openclaw",
+      "tag_prefixes": [
+        "v"
+      ],
+      "docker": "ghcr.io/openclaw/openclaw:{version}"
     },
     "NousResearch/hermes-agent": {
       "name": "Hermes Agent",
       "prereleases": false,
       "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
       "forward": false,
-      "legacy_owned": true
+      "legacy_owned": true,
+      "alert": true,
+      "npm": "hermes-agent",
+      "tag_prefixes": [
+        "v"
+      ]
     },
     "openai/codex": {
       "name": "Codex",
       "prereleases": false,
       "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
       "forward": false,
-      "legacy_owned": true
+      "legacy_owned": true,
+      "alert": true,
+      "npm": "@openai/codex",
+      "tag_prefixes": [
+        "rust-v",
+        "v"
+      ]
     },
     "anthropics/claude-code": {
       "name": "Claude Code",
       "prereleases": false,
       "tag_pattern": "^(?:rust-)?v?\\d+(?:\\.\\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$",
       "forward": false,
-      "legacy_owned": true
+      "legacy_owned": true,
+      "alert": true,
+      "npm": "@anthropic-ai/claude-code",
+      "tag_prefixes": [
+        "v"
+      ]
     },
     "qwibitai/nanoclaw": {
       "name": "Nanoclaw",

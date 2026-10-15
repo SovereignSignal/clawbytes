@@ -79,6 +79,8 @@ There are **no routine status reports**. Ops DMs are exception-only: the admin h
 | `AI_WIRE_ENABLED` | `1`/`true`/`yes`/`on` to upsert posted items to the AI Wire registry after Telegram accepts the lane. Default off. A failed push is a log line and does not fail the channel post. | optional |
 | `AI_WIRE_URL` | Origin of the AI Wire site. Items are posted to `{AI_WIRE_URL}/api/ingest/items`. | with the flag |
 | `AI_WIRE_INGEST_TOKEN` | Bearer token for that ingest endpoint. | with the flag |
+| `CLAWBYTES_RELEASE_ALERTS` | `1`/`true`/`yes`/`on` to send one immediate Telegram alert per new release of the `release_targets.json` rows marked `alert` (OpenClaw, Hermes Agent, Codex, Claude Code: npm `latest` + GitHub) or `forward` (GitHub only). Runs after each collect. The first run per target is a silent baseline. At most 10 alerts per run. Not mirrored to Slack, never pages. Default off. | optional |
+| `CLAWBYTES_RELEASE_ALERTS_CHAT_ID` | Chat for those alerts (uses `TELEGRAM_BOT_TOKEN`). Required with the flag. It does not fall back to the @clawbytes channel. | with the flag |
 | `CLAWBYTES_X_WATCH` | `1`/`true`/`yes`/`on` to poll the X watchlist (@cursor_ai, @btibor91). Default off: the monitor does not call the API. | optional |
 | `CLAWBYTES_X_BEARER_TOKEN` | App-only bearer for X API v2 `GET /2/users/:id/tweets`. Required when the watch is on. A missing token exits 1. | with the flag |
 
