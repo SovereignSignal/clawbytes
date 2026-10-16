@@ -58,6 +58,7 @@ from feed_filters import (  # noqa: E402
     testingcatalog_relevant,
     urls_same_release,
     version_key,
+    X_OFFICIAL_HANDLES,
     x_post_in_scope,
 )
 from title_text import first_stated_date, flatten_inline_markup  # noqa: E402
@@ -1426,7 +1427,8 @@ def classify_pagewatch(item: dict) -> Optional[dict]:
 
 
 def classify_x(item: dict) -> Optional[dict]:
-    """Watchlist posts. @cursor_ai is an official launch. @btibor91 is reported.
+    """Watchlist posts. @cursor_ai and @ClaudeDevs are official launches.
+    @btibor91 is reported.
 
     Replies never arrive here. A reporter post that names no product is
     dropped, including consumer items from the same account.
@@ -1439,7 +1441,7 @@ def classify_x(item: dict) -> Optional[dict]:
     blob = f"{title} {item.get('summary') or ''}"
     if not x_post_in_scope(handle, blob):
         return None
-    official = handle == "cursor_ai"
+    official = handle in X_OFFICIAL_HANDLES
     dt = parse_dt(item.get("found_at") or "")
     base = 64 if official else 58
     score = base + age_score(dt, 96) / 10
@@ -3515,6 +3517,12 @@ def focus_changelog_section(text: str, title: str) -> str:
         match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
         if match:
             headings.append((index, len(match.group(1)), match.group(2).strip()))
+            continue
+        # Help-center release notes title each entry with a bold-only line
+        # under the date heading. Treat it as one level below any heading.
+        bold = re.match(r"^\*\*([^*\[][^*]*)\*\*\s*$", line.strip())
+        if bold:
+            headings.append((index, 7, bold.group(1).strip()))
     chosen = None
     for index, level, heading in headings:
         low = heading.lower()
@@ -3536,7 +3544,8 @@ def focus_changelog_section(text: str, title: str) -> str:
 
 
 def _looks_like_changelog(url: str) -> bool:
-    return ("/release-notes" in url or "/changelog" in url or "://docs." in url)
+    # "release-notes" also covers help-center slugs (…/12138966-release-notes).
+    return ("release-notes" in url or "/changelog" in url or "/whats-new/" in url or "://docs." in url)
 
 
 def fetch_article_snippet(url: str) -> str:

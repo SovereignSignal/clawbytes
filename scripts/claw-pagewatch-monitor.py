@@ -21,6 +21,9 @@ Covers vendors that publish real signal but expose no feed:
   changelog RSS does not carry "Composer predictions". The official page
   is Cloudflare-challenged from a datacenter; a free reader fallback is
   used when the page yields no Codex entries. No API key.
+- Per-entry markdown pages: Claude apps release notes (help center, one
+  entry per bold title) and the Claude Code weekly What's new digest (one
+  entry per week). Each entry has its own URL.
 
 First sighting of each watch records a baseline and emits nothing.
 
@@ -154,6 +157,28 @@ RELEASE_NOTE_WATCHES = [
     {
         "key": "codex-release-notes",
         "label": "Codex",
+        "lane": "ship",
+    },
+]
+
+# Per-entry markdown pages. One item per new entry, keyed on the entry URL.
+# The first successful fetch records every entry already on the page.
+ENTRY_WATCHES = [
+    {
+        # Help-center notes for the Claude apps (Desktop, Claude Code, Cowork).
+        "key": "claude-apps-release-notes",
+        "label": "Claude apps",
+        "md": "https://support.claude.com/en/articles/12138966-release-notes.md",
+        "page": "https://support.claude.com/en/articles/12138966-release-notes",
+        "parser": "claude_apps_entries",
+        "lane": "ship",
+    },
+    {
+        "key": "claude-code-whats-new",
+        "label": "Claude Code",
+        "md": "https://code.claude.com/docs/en/whats-new/index.md",
+        "page": "https://code.claude.com/docs/en/whats-new",
+        "parser": "whats_new_entries",
         "lane": "ship",
     },
 ]
@@ -504,6 +529,93 @@ def fetch_codex_release_notes():
     raise OSError("OpenAI Codex release notes: " + "; ".join(errors))
 
 
+def _anchor_slug(text):
+    return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+
+
+def _first_paragraph(lines):
+    for para in re.split(r"\n\s*\n", "\n".join(lines)):
+        text = flatten_inline_markup(para)
+        if text:
+            return text
+    return ""
+
+
+def claude_apps_entries(text, page):
+    """One entry per ``**Title**`` line under a ``### Month D, YYYY`` heading.
+
+    Bold lines with trailing prose (the closing "**Note:** …") are not
+    titles. The fragment is the date plus the title, so a title reused on
+    another day ("Project Sharing") is a separate entry.
+    """
+    entries = []
+    stated = ""
+    title = ""
+    body = []
+
+    def close():
+        if not title or not stated:
+            return
+        anchor = _anchor_slug(f"{stated} {title}")
+        lead = _first_paragraph(body)
+        entries.append({
+            "title": title,
+            "url": f"{page}#{anchor}",
+            "summary": f"{stated} — {lead or title}",
+        })
+
+    for line in (text or "").splitlines():
+        heading = re.match(r"^#{2,3}\s+(.+?)\s*$", line)
+        bold = re.match(r"^\*\*([^*\[][^*]*)\*\*\s*$", line.strip())
+        if heading or bold:
+            close()
+            title, body = "", []
+        if heading:
+            found = first_stated_date(heading.group(1))
+            stated = format_stated_date(found) if found else ""
+        elif bold:
+            title = flatten_inline_markup(bold.group(1))
+        elif title:
+            body.append(line)
+    close()
+    return entries
+
+
+def whats_new_entries(text, page):
+    """One entry per ``<Update label="Week NN">`` block with a week link.
+
+    The week's date range stays out of the summary: digests land weeks after
+    the week they cover, and a stated date would trip the stale-date gate.
+    """
+    entries = []
+    for match in re.finditer(r'<Update\s+label="([^"]+)"[^>]*>(.*?)</Update>', text or "", re.DOTALL):
+        label = match.group(1).strip()
+        block = match.group(2)
+        week = re.search(r"\]\((?:https://code\.claude\.com)?/docs/en/whats-new/(\d{4}-w\d+)\)", block)
+        if not week:
+            continue
+        paras = [
+            flatten_inline_markup(para)
+            for para in re.split(r"\n\s*\n", block)
+            if para.strip() and "/whats-new/" not in para
+        ]
+        paras = [para for para in paras if para]
+        lead = re.match(r"^\s*\*\*(.+?)\*\*", block.strip())
+        feature = flatten_inline_markup(lead.group(1)) if lead else ""
+        entries.append({
+            "title": f"{label}: {feature}" if feature else label,
+            "url": f"{page}/{week.group(1)}",
+            "summary": " ".join(paras) or label,
+        })
+    return entries
+
+
+ENTRY_PARSERS = {
+    "claude_apps_entries": claude_apps_entries,
+    "whats_new_entries": whats_new_entries,
+}
+
+
 def load_state():
     if STATE_FILE.exists():
         try:
@@ -534,6 +646,59 @@ def summary_with_entry_date(summary, heading, blob):
     if not found:
         return summary
     return f"{summary} — {format_stated_date(found)}"
+
+
+def _diff_entries(state, watch, entries, now_iso, verbose):
+    """New entries since the stored URL list. The first sighting is the baseline.
+
+    An empty parse is a failure, not a baseline, so a broken page cannot
+    record nothing and then post its whole backlog once it parses again.
+    """
+    by_url = []
+    seen_urls = set()
+    for entry in entries:
+        url = entry.get("url") or ""
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        by_url.append(entry)
+    if not by_url:
+        _fail(f"{watch['label']} release notes: no entries parsed")
+        return []
+    slugs = [entry["url"] for entry in by_url]
+    old = state["slugs"].get(watch["key"], [])
+    known_old = set(old)
+    fresh = [entry for entry in by_url if entry["url"] not in known_old] if old else []
+    emitted = fresh[:MAX_SITEMAP_ITEMS_PER_RUN] if old else []
+    items = []
+    for entry in emitted:
+        title = entry["title"]
+        if watch.get("parser"):
+            title = f"{watch['label']} — {title}"
+        items.append({
+            "id": f"pagewatch:{watch['key']}:{entry['url']}",
+            "watch": watch["label"],
+            "title": title,
+            "url": entry["url"],
+            "summary": entry.get("summary") or f"{watch['label']} release note",
+            "lane": watch.get("lane") or "ship",
+            "found_at": now_iso,
+        })
+        if verbose:
+            print(f"  🆕 {watch['label']} release notes: {entry['title']}")
+    if verbose and not fresh:
+        print(f"  = {watch['label']} release notes: {'baseline recorded' if not old else 'no new notes'} ({len(slugs)} tracked)")
+    if not old:
+        state["slugs"][watch["key"]] = slugs
+    else:
+        merged = list(old)
+        known = set(merged)
+        for entry in emitted:
+            if entry["url"] not in known:
+                merged.append(entry["url"])
+                known.add(entry["url"])
+        state["slugs"][watch["key"]] = merged
+    return items
 
 
 def check_pages(verbose=True):
@@ -688,46 +853,16 @@ def check_pages(verbose=True):
         except Exception as e:
             _fail(f"{watch['label']} release notes: fetch failed ({e})")
             continue
-        by_url = []
-        seen_urls = set()
-        for entry in entries:
-            url = entry.get("url") or ""
-            if not url or url in seen_urls:
-                continue
-            seen_urls.add(url)
-            by_url.append(entry)
-        if not by_url:
-            _fail(f"{watch['label']} release notes: no Codex entries parsed")
+        new_items.extend(_diff_entries(state, watch, entries, now_iso, verbose))
+
+    for watch in ENTRY_WATCHES:
+        try:
+            text = fetch_text(watch["md"])
+        except Exception as e:
+            _fail(f"{watch['label']} release notes: fetch failed ({e})")
             continue
-        slugs = [entry["url"] for entry in by_url]
-        old = state["slugs"].get(watch["key"], [])
-        known_old = set(old)
-        fresh = [entry for entry in by_url if entry["url"] not in known_old] if old else []
-        emitted = fresh[:MAX_SITEMAP_ITEMS_PER_RUN] if old else []
-        for entry in emitted:
-            new_items.append({
-                "id": f"pagewatch:{watch['key']}:{entry['url']}",
-                "watch": watch["label"],
-                "title": entry["title"],
-                "url": entry["url"],
-                "summary": entry.get("summary") or "Codex release note",
-                "lane": watch.get("lane") or "ship",
-                "found_at": now_iso,
-            })
-            if verbose:
-                print(f"  🆕 {watch['label']} release notes: {entry['title']}")
-        if verbose and not fresh:
-            print(f"  = {watch['label']} release notes: {'baseline recorded' if not old else 'no new notes'} ({len(slugs)} tracked)")
-        if not old:
-            state["slugs"][watch["key"]] = slugs
-        else:
-            merged = list(old)
-            known = set(merged)
-            for entry in emitted:
-                if entry["url"] not in known:
-                    merged.append(entry["url"])
-                    known.add(entry["url"])
-            state["slugs"][watch["key"]] = merged
+        entries = ENTRY_PARSERS[watch["parser"]](text, watch["page"])
+        new_items.extend(_diff_entries(state, watch, entries, now_iso, verbose))
 
     if new_items:
         state["foundItems"] = (state.get("foundItems", []) + new_items)[-200:]

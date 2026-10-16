@@ -1,0 +1,467 @@
+{
+ "data": [
+  {
+   "author_id": "2024518793679294464",
+   "created_at": "2026-10-15T22:51:38.000Z",
+   "edit_history_tweet_ids": [
+    "2110866214528716975"
+   ],
+   "id": "2110866214528716975",
+   "in_reply_to_user_id": "2024518793679294464",
+   "public_metrics": {
+    "bookmark_count": 7,
+    "impression_count": 10720,
+    "like_count": 37,
+    "quote_count": 1,
+    "reply_count": 3,
+    "retweet_count": 1
+   },
+   "referenced_tweets": [
+    {
+     "id": "2110866213266203118",
+     "type": "replied_to"
+    }
+   ],
+   "text": "Admins turn it on in Claude Code settings and pick repos. From there, reviews run on every new PR, with no setup for developers.\n\nhttps://t.co/QFN2it3epB",
+   "url": "https://x.com/ClaudeDevs/status/2110866214528716975"
+  },
+  {
+   "author_id": "2024518793679294464",
+   "created_at": "2026-10-15T22:51:37.000Z",
+   "edit_history_tweet_ids": [
+    "2110866213266203118"
+   ],
+   "id": "2110866213266203118",
+   "in_reply_to_user_id": "2024518793679294464",
+   "public_metrics": {
+    "bookmark_count": 31,
+    "impression_count": 14418,
+    "like_count": 58,
+    "quote_count": 1,
+    "reply_count": 1,
+    "retweet_count": 3
+   },
+   "referenced_tweets": [
+    {
+     "id": "2110866212217651527",
+     "type": "replied_to"
+    }
+   ],
+   "text": "Eligible Claude Enterprise orgs can claim at least $10,000 in Code Review credits by Jan 15. Credits expire 30 days after you claim them.\n\nTerms: https://t.co/NJKKFJsCKo",
+   "url": "https://x.com/ClaudeDevs/status/2110866213266203118"
+  },
+  {
+   "author_id": "2024518793679294464",
+   "created_at": "2026-10-15T22:51:37.000Z",
+   "edit_history_tweet_ids": [
+    "2110866212217651527"
+   ],
+   "id": "2110866212217651527",
+   "in_reply_to_user_id": "2024518793679294464",
+   "public_metrics": {
+    "bookmark_count": 5,
+    "impression_count": 9635,
+    "like_count": 64,
+    "quote_count": 0,
+    "reply_count": 1,
+    "retweet_count": 1
+   },
+   "referenced_tweets": [
+    {
+     "id": "2110866210573386065",
+     "type": "replied_to"
+    }
+   ],
+   "text": "What\u2019s new at GA\n\n- Speed: most reviews finish about 3x faster than in research preview\n- Quality: more of the bugs that matter, with concise findings that state the problem, the trigger and the fix\n- Flexibility: admins choose Quick, Standard or Deep for each repo",
+   "url": "https://x.com/ClaudeDevs/status/2110866212217651527"
+  },
+  {
+   "author_id": "2024518793679294464",
+   "created_at": "2026-10-15T22:51:37.000Z",
+   "edit_history_tweet_ids": [
+    "2110866210573386065"
+   ],
+   "id": "2110866210573386065",
+   "public_metrics": {
+    "bookmark_count": 499,
+    "impression_count": 82842,
+    "like_count": 1383,
+    "quote_count": 34,
+    "reply_count": 59,
+    "retweet_count": 67
+   },
+   "text": "Code Review is now generally available for Claude Team and Enterprise plans. \n\nReviews are now faster, catch more of the bugs that matter, and admins can pick from Quick, Standard, or Deep review levels for each repo. https://t.co/RO4tDC4U1U",
+   "url": "https://x.com/ClaudeDevs/status/2110866210573386065"
+  },
+  {
+   "author_id": "2024518793679294464",
+   "created_at": "2026-10-15T20:09:02.000Z",
+   "edit_history_tweet_ids": [
+    "2110825294655562048"
+   ],
+   "id": "2110825294655562048",
+   "public_metrics": {
+    "bookmark_count": 386,
+    "impression_count": 291152,
+    "like_count": 3770,
+    "quote_count": 85,
+    "reply_count": 196,
+    "retweet_count": 127
+   },
+   "referenced_tweets": [
+    {
+     "id": "2054266327771275435",
+     "type": "quoted"
+    }
+   ],
+   "text": "Opus 5.5 fast mode in the Claude Platform is no longer in research preview, and we\u2019ve removed the waitlist!\n\nIt\u2019s the same Opus 5.5 but up to 2.5x faster, at $8 / $40 per million tokens.\n\nIt's also available in Microsoft Foundry (Hosted on Azure), with Google Cloud coming soon. https://t.co/oB0fhEgC88",
+   "url": "https://x.com/ClaudeDevs/status/2110825294655562048"
+  },
+  {
+   "author_id": "2024518793679294464",
+   "created_at": "2026-10-15T02:50:37.000Z",
+   "edit_history_tweet_ids": [
+    "2110563968129593751"
+   ],
+   "id": "2110563968129593751",
+   "in_reply_to_user_id": "2024518793679294464",
+   "public_metrics": {
+    "bookmark_count": 33,
+    "impression_count": 29351,
+    "like_count": 42,
+    "quote_count": 0,
+    "reply_count": 3,
+    "retweet_count": 3
+   },
+   "referenced_tweets": [
+    {
+     "id": "2110563886462271601",
+     "type": "replied_to"
+    }
+   ],
+   "text": "Read more in our launch blog: \nhttps://t.co/xKXwbVFrX8",
+   "url": "https://x.com/ClaudeDevs/status/2110563968129593751"
+  },
+  {
+   "author_id": "2024518793679294464",
+   "created_at": "2026-10-15T02:50:17.000Z",
+   "edit_history_tweet_ids": [
+    "2110563886462271601"
+   ],
+   "id": "2110563886462271601",
+   "in_reply_to_user_id": "2024518793679294464",
+   "public_metrics": {
+    "bookmark_count": 35,
+    "impression_count": 34949,
+    "like_count": 51,
+    "quote_count": 1,
+    "reply_count": 2,
+    "retweet_count": 1
+   },
+   "referenced_tweets": [
+    {
+     "id": "2110421734037889395",
+     "type": "replied_to"
+    }
+   ],
+   "text": "Get started with our docs: \nhttps://t.co/7Z6sLbrM1y",
+   "url": "https://x.com/ClaudeDevs/status/2110563886462271601"
+  },
+  {
+   "author_id": "2024518793679294464",
+   "created_at": "2026-10-14T19:01:16.000Z",
+   "edit_history_tweet_ids": [
+    "2110445852905062457"
+   ],
+   "id": "2110445852905062457",
+   "in_reply_to_user_id": "2024518793679294464",
+   "public_metrics": {
+    "bookmark_count": 209,
+    "impression_count": 73625,
+    "like_count": 628,
+    "quote_count": 0,
+    "reply_count": 28,
+    "retweet_count": 8
+   },
+   "referenced_tweets": [
+    {
+     "id": "2110445851466485786",
+     "type": "replied_to"
+    }
+   ],
+   "text": "To try it, update the desktop app and start a new session.\n\nhttps://t.co/ufOz2ZrYwQ",
+   "url": "https://x.com/ClaudeDevs/status/2110445852905062457"
+  },
+  {
+   "author_id": "2024518793679294464",
+   "created_at": "2026-10-14T19:01:15.000Z",
+   "edit_history_tweet_ids": [
+    "2110445851466485786"
+   ],
+   "id": "2110445851466485786",
+   "in_reply_to_user_id": "2024518793679294464",
+   "public_metrics": {
+    "bookmark_count": 56,
+    "impression_count": 82280,
+    "like_count": 610,
+    "quote_count": 2,
+    "reply_count": 15,
+    "retweet_count": 9
+   },
+   "referenced_tweets": [
+    {
+     "id": "2110445849516101743",
+     "type": "replied_to"
+    }
+   ],
+   "text": "The sidebar makes it easy to see which sessions are working and which ones need you. Inside a session, a live to-do list follows Claude's plan as it goes, a recap card sums up the turn when Claude needs you, and the side rail shows where it runs, its context and its changes. https://t.co/uJ5zBJGbZu",
+   "url": "https://x.com/ClaudeDevs/status/2110445851466485786"
+  },
+  {
+   "author_id": "2024518793679294464",
+   "created_at": "2026-10-14T19:01:15.000Z",
+   "edit_history_tweet_ids": [
+    "2110445849516101743"
+   ],
+   "id": "2110445849516101743",
+   "in_reply_to_user_id": "2024518793679294464",
+   "public_metrics": {
+    "bookmark_count": 132,
+    "impression_count": 98265,
+    "like_count": 816,
+    "quote_count": 4,
+    "reply_count": 13,
+    "retweet_count": 14
+   },
+   "referenced_tweets": [
+    {
+     "id": "2110445847922245974",
+     "type": "replied_to"
+    }
+   ],
+   "text": "Claude also proactively suggests follow-up work as it's working, and you can run that as its own session with just one click. You can also use /btw, so side questions open in their own tab while the main session keeps going. https://t.co/ytGlqoyEi1",
+   "url": "https://x.com/ClaudeDevs/status/2110445849516101743"
+  }
+ ],
+ "includes": {
+  "tweets": [
+   {
+    "author_id": "2024518793679294464",
+    "created_at": "2026-10-15T22:51:37.000Z",
+    "edit_history_tweet_ids": [
+     "2110866213266203118"
+    ],
+    "id": "2110866213266203118",
+    "in_reply_to_user_id": "2024518793679294464",
+    "public_metrics": {
+     "bookmark_count": 31,
+     "impression_count": 14418,
+     "like_count": 58,
+     "quote_count": 1,
+     "reply_count": 1,
+     "retweet_count": 3
+    },
+    "referenced_tweets": [
+     {
+      "id": "2110866212217651527",
+      "type": "replied_to"
+     }
+    ],
+    "text": "Eligible Claude Enterprise orgs can claim at least $10,000 in Code Review credits by Jan 15. Credits expire 30 days after you claim them.\n\nTerms: https://t.co/NJKKFJsCKo"
+   },
+   {
+    "author_id": "2024518793679294464",
+    "created_at": "2026-10-15T22:51:37.000Z",
+    "edit_history_tweet_ids": [
+     "2110866212217651527"
+    ],
+    "id": "2110866212217651527",
+    "in_reply_to_user_id": "2024518793679294464",
+    "public_metrics": {
+     "bookmark_count": 5,
+     "impression_count": 9635,
+     "like_count": 64,
+     "quote_count": 0,
+     "reply_count": 1,
+     "retweet_count": 1
+    },
+    "referenced_tweets": [
+     {
+      "id": "2110866210573386065",
+      "type": "replied_to"
+     }
+    ],
+    "text": "What\u2019s new at GA\n\n- Speed: most reviews finish about 3x faster than in research preview\n- Quality: more of the bugs that matter, with concise findings that state the problem, the trigger and the fix\n- Flexibility: admins choose Quick, Standard or Deep for each repo"
+   },
+   {
+    "author_id": "2024518793679294464",
+    "created_at": "2026-10-15T22:51:37.000Z",
+    "edit_history_tweet_ids": [
+     "2110866210573386065"
+    ],
+    "id": "2110866210573386065",
+    "public_metrics": {
+     "bookmark_count": 499,
+     "impression_count": 82842,
+     "like_count": 1383,
+     "quote_count": 34,
+     "reply_count": 59,
+     "retweet_count": 67
+    },
+    "text": "Code Review is now generally available for Claude Team and Enterprise plans. \n\nReviews are now faster, catch more of the bugs that matter, and admins can pick from Quick, Standard, or Deep review levels for each repo. https://t.co/RO4tDC4U1U"
+   },
+   {
+    "author_id": "2024518793679294464",
+    "created_at": "2026-05-12T18:23:53.000Z",
+    "edit_history_tweet_ids": [
+     "2054266327771275435"
+    ],
+    "id": "2054266327771275435",
+    "public_metrics": {
+     "bookmark_count": 283,
+     "impression_count": 532752,
+     "like_count": 3450,
+     "quote_count": 81,
+     "reply_count": 218,
+     "retweet_count": 153
+    },
+    "text": "Fast mode for Claude Opus 4.7 is now available in research preview on the API and in Claude Code."
+   },
+   {
+    "author_id": "2024518793679294464",
+    "created_at": "2026-10-15T02:50:17.000Z",
+    "edit_history_tweet_ids": [
+     "2110563886462271601"
+    ],
+    "id": "2110563886462271601",
+    "in_reply_to_user_id": "2024518793679294464",
+    "public_metrics": {
+     "bookmark_count": 35,
+     "impression_count": 34949,
+     "like_count": 51,
+     "quote_count": 1,
+     "reply_count": 2,
+     "retweet_count": 1
+    },
+    "referenced_tweets": [
+     {
+      "id": "2110421734037889395",
+      "type": "replied_to"
+     }
+    ],
+    "text": "Get started with our docs: \nhttps://t.co/7Z6sLbrM1y"
+   },
+   {
+    "author_id": "2024518793679294464",
+    "created_at": "2026-10-14T17:25:25.000Z",
+    "edit_history_tweet_ids": [
+     "2110421734037889395"
+    ],
+    "id": "2110421734037889395",
+    "in_reply_to_user_id": "2024518793679294464",
+    "public_metrics": {
+     "bookmark_count": 29,
+     "impression_count": 105114,
+     "like_count": 257,
+     "quote_count": 4,
+     "reply_count": 13,
+     "retweet_count": 6
+    },
+    "referenced_tweets": [
+     {
+      "id": "2110421732029063352",
+      "type": "replied_to"
+     }
+    ],
+    "text": "Spans follow the OpenTelemetry gen_ai conventions. By default they carry metadata like duration, status, token counts, model, and tool names.\n\nSwitch a destination to \"full content\" to also export prompts, responses, tool inputs, and tool results."
+   },
+   {
+    "author_id": "2024518793679294464",
+    "created_at": "2026-10-14T19:01:15.000Z",
+    "edit_history_tweet_ids": [
+     "2110445851466485786"
+    ],
+    "id": "2110445851466485786",
+    "in_reply_to_user_id": "2024518793679294464",
+    "public_metrics": {
+     "bookmark_count": 56,
+     "impression_count": 82280,
+     "like_count": 610,
+     "quote_count": 2,
+     "reply_count": 15,
+     "retweet_count": 9
+    },
+    "referenced_tweets": [
+     {
+      "id": "2110445849516101743",
+      "type": "replied_to"
+     }
+    ],
+    "text": "The sidebar makes it easy to see which sessions are working and which ones need you. Inside a session, a live to-do list follows Claude's plan as it goes, a recap card sums up the turn when Claude needs you, and the side rail shows where it runs, its context and its changes. https://t.co/uJ5zBJGbZu"
+   },
+   {
+    "author_id": "2024518793679294464",
+    "created_at": "2026-10-14T19:01:15.000Z",
+    "edit_history_tweet_ids": [
+     "2110445849516101743"
+    ],
+    "id": "2110445849516101743",
+    "in_reply_to_user_id": "2024518793679294464",
+    "public_metrics": {
+     "bookmark_count": 132,
+     "impression_count": 98265,
+     "like_count": 816,
+     "quote_count": 4,
+     "reply_count": 13,
+     "retweet_count": 14
+    },
+    "referenced_tweets": [
+     {
+      "id": "2110445847922245974",
+      "type": "replied_to"
+     }
+    ],
+    "text": "Claude also proactively suggests follow-up work as it's working, and you can run that as its own session with just one click. You can also use /btw, so side questions open in their own tab while the main session keeps going. https://t.co/ytGlqoyEi1"
+   },
+   {
+    "author_id": "2024518793679294464",
+    "created_at": "2026-10-14T19:01:14.000Z",
+    "edit_history_tweet_ids": [
+     "2110445847922245974"
+    ],
+    "id": "2110445847922245974",
+    "in_reply_to_user_id": "2024518793679294464",
+    "public_metrics": {
+     "bookmark_count": 145,
+     "impression_count": 93241,
+     "like_count": 1154,
+     "quote_count": 12,
+     "reply_count": 23,
+     "retweet_count": 14
+    },
+    "referenced_tweets": [
+     {
+      "id": "2110445846219382954",
+      "type": "replied_to"
+     }
+    ],
+    "text": "When you ask Claude to run tasks in parallel, it starts a nested session for each one. Each reports its result back into your main session when it's done, so the main thread stays readable. https://t.co/6gxVlCT1e4"
+   }
+  ],
+  "users": [
+   {
+    "id": "2024518793679294464",
+    "name": "ClaudeDevs",
+    "profile_image_url": "https://example.com/placeholder.jpg",
+    "username": "ClaudeDevs",
+    "verified": false
+   }
+  ]
+ },
+ "meta": {
+  "newest_id": "2110866214528716975",
+  "next_token": "placeholder",
+  "oldest_id": "2110445849516101743",
+  "result_count": 10
+ }
+}

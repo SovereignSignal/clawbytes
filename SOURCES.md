@@ -19,9 +19,9 @@ the *classes* and tracks *decisions*, so it stays true even as entries shift.
 | Leaderboards | SWE-bench (Verified, plus bash-only as the Verified mini-SWE-agent filter), Aider polyglot, LiveBench, Terminal-Bench 2.1 — emits only on top-3 movement, sha-gated fetches | `scripts/claw-leaderboard-monitor.py` (`BOARDS`) | 30 min |
 | Registries | OpenRouter model list (id diff, coding/agent family filter — same word-boundary pattern as HF trending), LiteLLM pricing registry (sha-gated key diff, URL fragment includes the new-key hash), HF trending (weekly, coding/agent filter) | `scripts/claw-registry-monitor.py` | 30 min |
 | GitHub advisories | Advisory Database, package-name allowlist (tracked repos, not `ecosystem=pip`), silent baseline, `html_url` per advisory, cap 2 Watch items per UTC day | `scripts/claw-advisory-monitor.py` | 30 min |
-| Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + HTML heading-hash (Antigravity, Kiro changelog) + sitemap slug diffs (Anthropic news/engineering, Anthropic research, DeepSeek news, Claude product articles). Research is its own watch key so the first run baselines the existing sitemap instead of posting the backlog. The Anthropic news index (`https://www.anthropic.com/news`) diffs article links and uses the same item id as the news sitemap, so one URL is one source key. Claude article slugs emit only for launches (`introducing`, `redesigned`, `dynamic-workflow`, `claude-managed-agent`, …); `how-` / `working-` stories are remembered and skipped. Codex rows on `https://openai.com/products/release-notes/` are a separate watch: the help-center `#anchor` is the URL. | `scripts/claw-pagewatch-monitor.py` | 30 min |
+| Feedless pages | Mintlify `.md` hash watches (Claude platform release notes, Devin CLI, xAI) + HTML heading-hash (Antigravity, Kiro changelog) + sitemap slug diffs (Anthropic news/engineering, Anthropic research, DeepSeek news, Claude product articles). Research is its own watch key so the first run baselines the existing sitemap instead of posting the backlog. The Anthropic news index (`https://www.anthropic.com/news`) diffs article links and uses the same item id as the news sitemap, so one URL is one source key. Claude article slugs emit only for launches (`introducing`, `redesigned`, `dynamic-workflow`, `claude-managed-agent`, …); `how-` / `working-` stories are remembered and skipped. Codex rows on `https://openai.com/products/release-notes/` are a separate watch: the help-center `#anchor` is the URL. Claude apps release notes (help-center `.md`, one item per bold entry, `#<date>-<title>` fragment) and the Claude Code weekly What's new digest (one item per week, `/whats-new/YYYY-wNN` URL) diff per-entry URLs with a silent baseline and Ship. | `scripts/claw-pagewatch-monitor.py` | 30 min |
 | Bluesky | Phrase search ("claude code", "codex cli", "openclaw", "mcp server", "agent harness", plus Cursor/Devin/Antigravity/ACP/Kiro/Kilo/Kimi/Grok Build/Mistral Vibe), engagement-gated | `scripts/claw-bsky-monitor.py` | 30 min |
-| X watchlist | @cursor_ai (`1695890961094909952`) and @btibor91 (`338443084`). Original posts only. Official Cursor posts Ship. Reporter posts Ship only when they name a product term, and are marked reported. Off unless `CLAWBYTES_X_WATCH` is set. See the env table in `README.md` for the bearer and the per-post cost. | `scripts/claw-x-monitor.py` | 30 min |
+| X watchlist | @cursor_ai (`1695890961094909952`), @ClaudeDevs (`2024518793679294464`), and @btibor91 (`338443084`). Original posts only. Official Cursor and ClaudeDevs posts Ship. Reporter posts Ship only when they name a product term, and are marked reported. Off unless `CLAWBYTES_X_WATCH` is set. See the env table in `README.md` for the bearer and the per-post cost. | `scripts/claw-x-monitor.py` | 30 min |
 
 Discovered repos and feeds land in `claw-ecosystem-sources.json` /
 `clawbytes-dynamic-feeds.json` on the volume and are merged automatically —
@@ -355,3 +355,32 @@ entries (Cloudflare 403 from a datacenter). No key, no charge.
 **Passed** — replaying the October posts already on those pages. First
 sighting baselines. OpenAI's release-notes HTML 403s from this network;
 the Codex changelog RSS does not contain composer predictions.
+
+### 2026-10-15 Anthropic launches the news index missed
+
+The Claude Code desktop parallel-sessions launch (Oct 14) was announced on
+@ClaudeDevs and logged in the Claude apps help-center release notes. Neither
+the anthropic.com news index and sitemap, the platform release notes `.md`,
+nor the claude.com articles sitemap carried it. anthropic.com has no RSS
+(`rss.xml` 404s).
+
+**Added** — Claude apps release notes
+`https://support.claude.com/en/articles/12138966-release-notes.md`
+(text/markdown, verified 2026-10-15). It covers the Claude apps, Desktop,
+Claude Code, and Cowork. One item per `**Title**` entry under a
+`### Month D, YYYY` heading. The URL is the page plus a `#<date>-<title>`
+fragment, so a title reused on another day is a separate item. Claude Code
+weekly What's new `https://code.claude.com/docs/en/whats-new/index.md`
+(verified 2026-10-15). One item per `<Update label="Week NN">` block. The
+URL is the week page (`/whats-new/2026-w37`). The week's date range is not
+in the summary: digests land weeks after the week they cover, and a stated
+date would trip the stale-date gate. Both Ship and baseline silently on the
+first successful parse. The entries already on the pages never post.
+@ClaudeDevs (`2024518793679294464`, looked up 2026-10-15) on the X
+watchlist as an official account, like @cursor_ai. Original posts only,
+still off unless `CLAWBYTES_X_WATCH` is on. A third account raises the
+rough X ceiling to about $2.25 a month.
+
+**Grounding** — both URLs fetch their `.md` sibling for the writer and
+curator. A help-center entry is focused to its own bold-titled section, not
+the top of the page.
