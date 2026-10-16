@@ -1,0 +1,17 @@
+{
+  "stale_pr_days": 7,
+  "bug_labels": ["bug"],
+  "flag_on_check_error": true,
+  "check_railway_logs": true,
+  "railway_log_limit": 50,
+  "ai_wire": {"max_silence_hours": 26},
+  "bots": [
+    {
+      "name": "demo",
+      "repo": "Example/demo",
+      "requirements_files": ["requirements.txt", "pyproject.toml"],
+      "telegram_channel": "demochan",
+      "max_silence_hours": 26
+    }
+  ]
+}

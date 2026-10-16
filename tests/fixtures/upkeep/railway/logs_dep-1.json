@@ -1,0 +1,5 @@
+{"data": {"deploymentLogs": [
+  {"timestamp": "2026-10-15T09:30:00.123456789Z", "message": "collect done"},
+  {"timestamp": "2026-10-15T10:05:00.000Z", "message": "autopublish done"},
+  {"timestamp": null, "message": "untimed line"}
+]}}

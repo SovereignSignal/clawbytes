@@ -1,0 +1,8 @@
+# runtime deps
+requests==1.2.0
+feedparser>=6.0.10
+apscheduler>=3.10,<4
+psycopg2-binary==2.9.13 ; python_version >= "3.8"
+httpx
+-r extra.txt
+git+https://github.com/example/thing.git
