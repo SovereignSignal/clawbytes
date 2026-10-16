@@ -2,7 +2,8 @@
 """
 ClawBytes X watchlist.
 
-Official posts from @cursor_ai and product posts from @btibor91. Replies and
+Official posts from @cursor_ai and @ClaudeDevs, and product posts from
+@btibor91. Replies and
 reposts are dropped. The first successful fetch of an account is a silent
 baseline.
 
@@ -34,10 +35,12 @@ WORKSPACE = Path(os.environ.get("WORKSPACE", str(Path(__file__).parent.parent)))
 MEMORY_DIR = Path(os.environ.get("CLAWBYTES_MEMORY_DIR", str(WORKSPACE / "memory")))
 STATE_FILE = MEMORY_DIR / "claw-x-state.json"
 
-# cursor_ai id was given with the request. btibor91 id looked up 2026-10-15.
+# cursor_ai id was given with the request. btibor91 and ClaudeDevs ids
+# looked up 2026-10-15.
 ACCOUNTS = (
     {"handle": "btibor91", "id": "338443084"},
     {"handle": "cursor_ai", "id": "1695890961094909952"},
+    {"handle": "ClaudeDevs", "id": "2024518793679294464"},
 )
 API_HOST = "https://api.x.com"
 MAX_RESULTS = 5

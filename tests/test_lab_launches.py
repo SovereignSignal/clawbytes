@@ -120,6 +120,7 @@ def test_release_notes_keep_codex_anchors_and_baseline_silently(tmp_path, monkey
     monkeypatch.setattr(pw, "HTML_WATCHES", [])
     monkeypatch.setattr(pw, "SITEMAP_WATCHES", [])
     monkeypatch.setattr(pw, "NEWS_INDEX_WATCHES", [])
+    monkeypatch.setattr(pw, "ENTRY_WATCHES", [])
     bodies = iter([RELEASE_NOTES, RELEASE_NOTES + "\nCodex\n\nOct 15, 2026\n\nGA\n\n## Plugins in Codex\n\nInstall plugins from the composer.\n\n[View source](https://help.openai.com/en/articles/6825453-chatgpt-release-notes#plugins-in-codex)\n"])
     monkeypatch.setattr(pw, "fetch_text", lambda url, timeout=30: next(bodies))
     assert pw.check_pages(verbose=False) == []
@@ -148,6 +149,7 @@ def test_news_index_uses_the_sitemap_source_id(tmp_path, monkeypatch):
     monkeypatch.setattr(pw, "HTML_WATCHES", [])
     monkeypatch.setattr(pw, "SITEMAP_WATCHES", [])
     monkeypatch.setattr(pw, "RELEASE_NOTE_WATCHES", [])
+    monkeypatch.setattr(pw, "ENTRY_WATCHES", [])
     pages = iter([
         NEWS_HTML,
         NEWS_HTML + '<a href="/news/claude-code-projects-opening">Opening</a>',
@@ -192,6 +194,7 @@ def test_claude_article_sitemap_remembers_non_launches(tmp_path, monkeypatch):
     monkeypatch.setattr(pw, "HTML_WATCHES", [])
     monkeypatch.setattr(pw, "NEWS_INDEX_WATCHES", [])
     monkeypatch.setattr(pw, "RELEASE_NOTE_WATCHES", [])
+    monkeypatch.setattr(pw, "ENTRY_WATCHES", [])
     watch = next(item for item in pw.SITEMAP_WATCHES if item["key"] == "claude-articles")
     monkeypatch.setattr(pw, "SITEMAP_WATCHES", [watch])
     base = (

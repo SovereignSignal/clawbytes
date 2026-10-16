@@ -29,8 +29,8 @@ KILO_BLOG_FEED = "kilo blog"
 HAVOPTIC_FEED = "havoptic releases"
 CODEX_CHANGELOG_FEED = "codex changelog"
 
-# Official product account. Other watchlist handles are reporters.
-X_OFFICIAL_HANDLES = frozenset({"cursor_ai"})
+# Official product accounts, lowercased. Other watchlist handles are reporters.
+X_OFFICIAL_HANDLES = frozenset({"cursor_ai", "claudedevs"})
 
 _TAG = re.compile(r"<[^>]+>")
 _SPACE = re.compile(r"\s+")
@@ -681,7 +681,7 @@ def codex_changelog_relevant(entry: dict) -> bool:
 
 
 def x_post_in_scope(handle: str, text: str) -> bool:
-    """Official Cursor posts stay. Reporter posts need a product term.
+    """Official Cursor and Claude posts stay. Reporter posts need a product term.
 
     ``@btibor91`` also posts consumer items (Sora, film). Those are not
     lab launches. ``cursor`` and ``composer`` are word-matched so they do

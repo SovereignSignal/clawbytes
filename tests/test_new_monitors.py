@@ -151,6 +151,7 @@ def test_html_heading_fingerprint_ignores_bundle_hash(tmp_path, monkeypatch):
     monkeypatch.setattr(pw, "SITEMAP_WATCHES", [])
     monkeypatch.setattr(pw, "NEWS_INDEX_WATCHES", [])
     monkeypatch.setattr(pw, "RELEASE_NOTE_WATCHES", [])
+    monkeypatch.setattr(pw, "ENTRY_WATCHES", [])
     monkeypatch.setattr(pw, "HTML_WATCHES", [{
         "key": "ag", "label": "Google Antigravity",
         "html": "https://antigravity.google/changelog",
@@ -219,6 +220,7 @@ def test_pagewatch_md_url_unique_per_change(tmp_path, monkeypatch):
     monkeypatch.setattr(pw, "SITEMAP_WATCHES", [])
     monkeypatch.setattr(pw, "NEWS_INDEX_WATCHES", [])
     monkeypatch.setattr(pw, "RELEASE_NOTE_WATCHES", [])
+    monkeypatch.setattr(pw, "ENTRY_WATCHES", [])
     contents = iter(["## v1\nbody", "## v2\nbody2", "## v3\nbody3"])
     monkeypatch.setattr(pw, "fetch_text", lambda url, timeout=30: next(contents))
     assert pw.check_pages(verbose=False) == []          # baseline, silent
