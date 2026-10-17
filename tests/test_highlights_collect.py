@@ -267,20 +267,20 @@ def test_writer_posts_and_logs_usage_without_key():
 
     def post(url, headers, json, timeout):
         sent.update(url=url, headers=headers, body=json)
-        return FakeResp(200, {"model": "claude-sonnet-4-5-20250929", "stop_reason": "end_turn",
+        return FakeResp(200, {"model": "claude-sonnet-5-5", "stop_reason": "end_turn",
                               "content": [{"type": "text", "text": "# Hook\n- **A**: b. https://a"}],
                               "usage": {"input_tokens": 1000, "output_tokens": 200}})
 
     collected = hc.collect(ctx_for("2026-10-14"), ["telegram"])
-    out = hw.write_reel(collected, api_key="sk-test-123", model="claude-sonnet-4-5", post=post, log=logs.append)
+    out = hw.write_reel(collected, api_key="sk-test-123", model="claude-sonnet-5-5", post=post, log=logs.append)
     assert out.startswith("# Hook")
     assert sent["url"] == "https://api.anthropic.com/v1/messages"
     assert sent["headers"]["x-api-key"] == "sk-test-123"
     assert sent["headers"]["anthropic-version"] == "2023-06-01"
-    assert sent["body"]["model"] == "claude-sonnet-4-5"
+    assert sent["body"]["model"] == "claude-sonnet-5-5"
     assert "https://t.me/clawbytes/1022" in sent["body"]["messages"][0]["content"]
     (line,) = logs
-    assert "input_tokens=1000 output_tokens=200 est_cost_usd=0.0060" in line
+    assert "input_tokens=1000 output_tokens=200 est_cost_usd=0.0040" in line
     assert "sk-test" not in line
 
 

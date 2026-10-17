@@ -23,7 +23,7 @@ The registry host is not committed; it comes from the environment.
 |---|---|---|---|
 | `AI_WIRE_BASE_URL` | Yes, unless `--feed-url` or `--feed-file` is given (exits 2 otherwise) | GitHub Actions repo variable; local shell env | Registry base URL. The feed is `<base>/feed.xml`; the base is also the email's "Open the ClawBytes feed" link |
 | `ANTHROPIC_API_KEY` | Yes, unless `--dry-run` | GitHub Actions repo secret; local shell env | Claude Messages API key |
-| `DIGEST_MODEL` | Optional | GitHub Actions repo variable; local shell env | Claude model (default `claude-opus-4-1`; `--model` wins) |
+| `DIGEST_MODEL` | Optional | GitHub Actions repo variable; local shell env | Claude model (default `claude-sonnet-5-5`; `--model` wins) |
 
 No workflow runs the drafter yet; the "GitHub Actions" entries say where the
 values belong if one is added.
@@ -75,7 +75,7 @@ link falls back to the item's registry page, then the registry homepage.
 
 The drafter calls `https://api.anthropic.com/v1/messages` over plain HTTPS. It sends `ANTHROPIC_API_KEY` in
 the `x-api-key` header and never prints the key. The model is `--model`, else `$DIGEST_MODEL`, else
-`claude-opus-4-1`. Claude gets a JSON list of the selected items and returns JSON copy:
+`claude-sonnet-5-5`. Claude gets a JSON list of the selected items and returns JSON copy:
 title, opener, a headline and body per item id, and the look-ahead. Links are attached
 from the feed rather than written by the model, so every item is linked. The prompt
 tells Claude to use only facts from the items, link every item, avoid hype, and never use the

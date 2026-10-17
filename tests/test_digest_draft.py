@@ -319,7 +319,7 @@ def _run_live(monkeypatch, tmp_path, responses):
         raise AssertionError("feed must come from the fixture")
 
     md_out = tmp_path / "i.md"
-    rc = d.main(["--feed-file", str(FIXTURE), "--date", "2026-10-16", "--model", "claude-opus-4-1",
+    rc = d.main(["--feed-file", str(FIXTURE), "--date", "2026-10-16", "--model", "claude-sonnet-5-5",
                  "--md-out", str(md_out), "--html-out", str(tmp_path / "i.html")],
                 get=get, post=post)
     return rc, calls, md_out
@@ -339,7 +339,7 @@ def test_live_retries_once_on_banned_phrase(monkeypatch, tmp_path, capsys):
     assert c["url"] == "https://api.anthropic.com/v1/messages"
     assert c["headers"]["x-api-key"] == "sk-test-secret"
     assert c["headers"]["anthropic-version"] == "2023-06-01"
-    assert c["json"]["model"] == "claude-opus-4-1"
+    assert c["json"]["model"] == "claude-sonnet-5-5"
     assert "banned phrase" in calls[1]["json"]["messages"][-1]["content"]
     md = md_out.read_text()
     assert not d.contains_banned(md) and "Tools hardened this week." in md

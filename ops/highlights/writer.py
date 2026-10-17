@@ -11,7 +11,7 @@ import sys
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
-DEFAULT_MODEL = "claude-sonnet-4-5"
+DEFAULT_MODEL = "claude-sonnet-5-5"
 
 # USD per million tokens (input, output). Longest prefix wins, so a dated
 # snapshot id still prices. Unknown models log usage with cost "unknown".
