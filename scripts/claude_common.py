@@ -96,9 +96,8 @@ def call_claude(
     if allowed_tools is not None:
         cmd += ["--allowed-tools", ",".join(allowed_tools)]
 
-    chosen_model = model or os.environ.get("CLAUDE_MODEL")
-    if chosen_model:
-        cmd += ["--model", chosen_model]
+    chosen_model = model or os.environ.get("CLAUDE_MODEL") or "sonnet"
+    cmd += ["--model", chosen_model]
 
     started = time.monotonic()
     try:

@@ -152,7 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="AI Wire registry RSS (default $AI_WIRE_BASE_URL/feed.xml; registry is skipped if neither is set)")
     ap.add_argument("--write-reel", action="store_true", help="draft reel text with Claude")
     ap.add_argument("--reel-out", help="write the reel markdown here (default stdout after JSON)")
-    ap.add_argument("--model", default=None, help="Claude model (default $HIGHLIGHTS_MODEL or claude-sonnet-4-5)")
+    ap.add_argument("--model", default=None, help="Claude model (default $HIGHLIGHTS_MODEL or claude-sonnet-5-5)")
     ap.add_argument("--dry-run", action="store_true",
                     help="never call Claude; print the writer prompt (truncated) to stderr")
     return ap

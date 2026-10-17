@@ -28,7 +28,7 @@ reported as skipped and the rest still run.
 |---|---|---|---|
 | `AI_WIRE_BASE_URL` | Optional; the `registry` input is skipped without it (or pass `--feed-url`) | GitHub Actions repo variable; local shell env | AI Wire registry base URL; the feed is `<base>/feed.xml` |
 | `ANTHROPIC_API_KEY` | Only for `--write-reel` without `--dry-run` | GitHub Actions repo secret; local shell env | Claude Messages API key for the reel writer |
-| `HIGHLIGHTS_MODEL` | Optional | GitHub Actions repo variable; local shell env | Reel writer model (default `claude-sonnet-4-5`; `--model` wins) |
+| `HIGHLIGHTS_MODEL` | Optional | GitHub Actions repo variable; local shell env | Reel writer model (default `claude-sonnet-5-5`; `--model` wins) |
 | `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Optional; `gmail` input is skipped without both | Local shell env | Gmail IMAP login (app password, not the account password) |
 | `GMAIL_LABEL`, `GMAIL_QUERY` | Optional | Local shell env | Gmail label (default `INBOX`) and extra search terms |
 | `X_BEARER_TOKEN` | Optional; `x` input is skipped without it | Local shell env | X v2 recent search |
@@ -113,7 +113,7 @@ the JSON.
 
 - Key: `ANTHROPIC_API_KEY`. It is sent only in the `x-api-key` header and is
   never logged.
-- Model: `--model`, else `HIGHLIGHTS_MODEL`, else `claude-sonnet-4-5`.
+- Model: `--model`, else `HIGHLIGHTS_MODEL`, else `claude-sonnet-5-5`.
 - Every call logs input/output tokens and an estimated USD cost to stderr, for
   example `highlights writer: model=... input_tokens=4210 output_tokens=380
   est_cost_usd=0.0183`. Prices are in `writer.PRICING`. An unlisted model logs

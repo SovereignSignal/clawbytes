@@ -34,7 +34,7 @@ import requests
 AI_WIRE_BASE_ENV = "AI_WIRE_BASE_URL"
 API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
-DEFAULT_MODEL = "claude-opus-4-1"
+DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_MAX_TOKENS = 16000
 
 BANNED_PHRASE = "Where AI is heading"
